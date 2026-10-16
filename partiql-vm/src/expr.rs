@@ -1,10 +1,11 @@
 use crate::arena::{Arena, SlotId};
-use crate::error::{EngineError, Result};
+use crate::error::{count_u16, EngineError, Result};
 use crate::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -454,7 +455,8 @@ pub enum Inst {
     Halt,
 
     /// Decrement the i64 counter in `counter_reg`. If it was already 0, jump to `target`.
-    /// Used for LIMIT: initialize counter with the limit value, then DecrOrJump before EmitRow.
+    /// Used for LIMIT: initialize counter with the limit value minus one, then DecrOrJump
+    /// after each row.
     DecrOrJump {
         counter_reg: u16,
         target: u32,
@@ -1832,8 +1834,12 @@ pub trait SlotResolver {
 pub struct ProgramBuilder {
     pub(crate) insts: Vec<Inst>,
     consts: Vec<ValueOwned>,
+    /// The index of each constant that is shared rather than pushed again.
+    shared_consts: FxHashMap<ValueOwned, u16>,
     keys: Vec<String>,
     next_reg: u16,
+    /// Registers used: the high-water mark of `next_reg`.
+    reg_count: u16,
     slot_count: u16,
 }
 
@@ -1842,120 +1848,32 @@ impl ProgramBuilder {
         ProgramBuilder {
             insts: Vec::new(),
             consts: Vec::new(),
+            shared_consts: FxHashMap::default(),
             keys: Vec::new(),
             next_reg: slot_count,
+            reg_count: slot_count,
             slot_count,
         }
     }
 
-    // === Relational instruction emission helpers ===
-
-    /// Emit an OpenCursor instruction
-    pub fn emit_open_cursor(&mut self, cursor_id: u16) {
-        self.insts.push(Inst::OpenCursor { cursor_id });
-    }
-
-    /// Emit a NextRow instruction. Returns the index of this instruction
-    /// so the caller can patch the eof_target later.
-    pub fn emit_next_row(&mut self, cursor_id: u16) -> usize {
-        let idx = self.insts.len();
-        // Placeholder eof_target — must be patched by caller
-        self.insts.push(Inst::NextRow {
-            cursor_id,
-            eof_target: 0,
-        });
-        idx
-    }
-
-    /// Emit a CloseCursor instruction
-    pub fn emit_close_cursor(&mut self, cursor_id: u16) {
-        self.insts.push(Inst::CloseCursor { cursor_id });
-    }
-
-    /// Emit an unconditional Jump. Returns the index so it can be patched.
-    pub fn emit_jump(&mut self) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::Jump { target: 0 });
-        idx
-    }
-
-    /// Emit a conditional jump (JumpIfNotTrue). Returns the index so it can be patched.
-    pub fn emit_jump_if_not_true(&mut self, src: u16) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::JumpIfNotTrue { src, target: 0 });
-        idx
-    }
-
-    /// Emit an EmitRow instruction
-    pub fn emit_emit_row(&mut self) {
-        self.insts.push(Inst::EmitRow);
-    }
-
-    /// Emit a Halt instruction
-    pub fn emit_halt(&mut self) {
-        self.insts.push(Inst::Halt);
-    }
-
-    /// Emit a DecrOrJump instruction. Returns the index so it can be patched.
-    pub fn emit_decr_or_jump(&mut self, counter_reg: u16) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::DecrOrJump {
-            counter_reg,
-            target: 0,
-        });
-        idx
-    }
-
-    /// Patch a previously emitted instruction's jump target.
-    /// Works for NextRow (eof_target), Jump, JumpIfNotTrue, DecrOrJump.
-    pub fn patch_target(&mut self, inst_idx: usize, target: u32) {
-        match &mut self.insts[inst_idx] {
-            Inst::NextRow { eof_target, .. } => *eof_target = target,
-            Inst::Jump { target: t } => *t = target,
-            Inst::JumpIfNotTrue { target: t, .. } => *t = target,
-            Inst::DecrOrJump { target: t, .. } => *t = target,
-            _ => panic!("patch_target called on non-patchable instruction"),
-        }
-    }
-
-    /// Get the current instruction count (next instruction index)
-    pub fn current_offset(&self) -> u32 {
-        self.insts.len() as u32
-    }
-
-    // === Public accessors for inline_program support ===
-
-    /// Allocate a register (public for compiler use).
-    pub fn alloc_reg_pub(&mut self) -> u16 {
-        self.alloc_reg()
+    /// Emit `expr`, evaluated into register `dst`. Its temporaries start at the first
+    /// register the builder was not told about; they are free again afterwards.
+    pub fn emit_expr(&mut self, expr: &Expr, dst: SlotId) -> Result<()> {
+        let scratch = self.next_reg;
+        ExprCompiler { builder: self }.compile_to_slot(expr, dst)?;
+        self.reg_count = self.reg_count.max(self.next_reg);
+        self.next_reg = scratch;
+        Ok(())
     }
 
     /// Push a constant and return its index (public for compiler use).
-    pub fn push_const_pub(&mut self, value: ValueOwned) -> u16 {
+    pub fn push_const_pub(&mut self, value: ValueOwned) -> Result<u16> {
         self.push_const(value)
     }
 
     /// Push a key and return its index (public for compiler use).
-    pub fn push_key_pub(&mut self, key: String) -> u16 {
+    pub fn push_key_pub(&mut self, key: String) -> Result<u16> {
         self.intern_key(key)
-    }
-
-    /// Get the number of constants currently in the pool.
-    pub fn consts_len(&self) -> usize {
-        self.consts.len()
-    }
-
-    /// The first register not yet allocated; scratch registers of an inlined
-    /// sub-program must start at or above it.
-    pub fn next_reg(&self) -> u16 {
-        self.next_reg
-    }
-
-    /// Update next_reg to at least the given value (for merging sub-programs).
-    pub fn update_next_reg(&mut self, reg_count: u16) {
-        if reg_count > self.next_reg {
-            self.next_reg = reg_count;
-        }
     }
 
     pub fn build(self) -> Program {
@@ -1985,47 +1903,65 @@ impl ProgramBuilder {
             arena,
             const_refs,
             keys: self.keys,
-            reg_count: self.next_reg,
+            reg_count: self.reg_count.max(self.next_reg),
             slot_count: self.slot_count,
         }
     }
 
-    fn alloc_reg(&mut self) -> u16 {
+    fn alloc_reg(&mut self) -> Result<u16> {
         let reg = self.next_reg;
-        self.next_reg = self.next_reg.checked_add(1).expect("register overflow");
-        reg
+        self.next_reg = reg
+            .checked_add(1)
+            .ok_or(EngineError::TooLarge("registers"))?;
+        Ok(reg)
     }
 
-    fn push_const(&mut self, value: ValueOwned) -> u16 {
+    /// Push a constant, sharing one already pushed when equal. Only scalars whose equality
+    /// is identity are shared: equal decimals can differ in scale, equal floats in sign.
+    fn push_const(&mut self, value: ValueOwned) -> Result<u16> {
+        let shared = matches!(
+            value,
+            ValueOwned::Missing
+                | ValueOwned::Null
+                | ValueOwned::Bool(_)
+                | ValueOwned::I64(_)
+                | ValueOwned::String(_)
+        );
+        if shared {
+            if let Some(&idx) = self.shared_consts.get(&value) {
+                return Ok(idx);
+            }
+        }
+        let idx = count_u16(self.consts.len(), "constants")?;
+        if shared {
+            self.shared_consts.insert(value.clone(), idx);
+        }
         self.consts.push(value);
-        (self.consts.len() - 1) as u16
+        Ok(idx)
     }
 
-    fn intern_key(&mut self, key: String) -> u16 {
+    fn intern_key(&mut self, key: String) -> Result<u16> {
         if let Some((idx, _)) = self.keys.iter().enumerate().find(|(_, k)| *k == &key) {
-            return idx as u16;
+            return count_u16(idx, "keys");
         }
+        let idx = count_u16(self.keys.len(), "keys")?;
         self.keys.push(key);
-        (self.keys.len() - 1) as u16
+        Ok(idx)
     }
 }
 
-pub struct ExprCompiler {
-    builder: ProgramBuilder,
+/// Compiles an [`Expr`] into a [`ProgramBuilder`], taking temporaries from its next
+/// unallocated register.
+struct ExprCompiler<'b> {
+    builder: &'b mut ProgramBuilder,
 }
 
-impl ExprCompiler {
-    pub fn new(slot_count: u16) -> Self {
-        ExprCompiler {
-            builder: ProgramBuilder::new(slot_count),
-        }
-    }
-
-    pub fn compile_expr(&mut self, expr: &Expr) -> Result<u16> {
+impl ExprCompiler<'_> {
+    fn compile_expr(&mut self, expr: &Expr) -> Result<u16> {
         match expr {
             Expr::Literal(value) => {
-                let reg = self.builder.alloc_reg();
-                let const_idx = self.builder.push_const(value.clone());
+                let reg = self.builder.alloc_reg()?;
+                let const_idx = self.builder.push_const(value.clone())?;
                 self.builder.insts.push(Inst::LoadConst {
                     dst: reg,
                     const_idx,
@@ -2040,9 +1976,9 @@ impl ExprCompiler {
             Expr::Add(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::AddDynamic {
                     dst,
                     a: l,
@@ -2055,9 +1991,9 @@ impl ExprCompiler {
             Expr::Sub(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::SubDynamic {
                     dst,
                     a: l,
@@ -2070,9 +2006,9 @@ impl ExprCompiler {
             Expr::Mod(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::ModDynamic {
                     dst,
                     a: l,
@@ -2085,9 +2021,9 @@ impl ExprCompiler {
             Expr::Eq(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::EqDynamic {
                     dst,
                     a: l,
@@ -2100,26 +2036,26 @@ impl ExprCompiler {
             Expr::And(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::AndBool { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Or(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::OrBool { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Not(expr) => {
                 let src = self.compile_expr(expr)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::NotBool { dst, src });
                 Ok(dst)
             }
             Expr::Neg(expr) => {
                 let src = self.compile_expr(expr)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::NegNum { dst, src });
                 Ok(dst)
             }
@@ -2133,9 +2069,9 @@ impl ExprCompiler {
                 escape,
             } => {
                 let value_reg = self.compile_expr(value)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 let regex_str = like_to_re_pattern(pattern, escape);
-                let pattern_idx = self.builder.intern_key(regex_str);
+                let pattern_idx = self.builder.intern_key(regex_str)?;
                 self.builder.insts.push(Inst::LikeMatch {
                     dst,
                     value: value_reg,
@@ -2151,7 +2087,7 @@ impl ExprCompiler {
                 let value_reg = self.compile_expr(value)?;
                 let pattern_reg = self.compile_expr(pattern)?;
                 let escape_reg = self.compile_expr(escape)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::LikeDynamicMatch {
                     dst,
                     value: value_reg,
@@ -2162,8 +2098,8 @@ impl ExprCompiler {
             }
             Expr::GetField(base, key) => {
                 let base_reg = self.compile_expr(base)?;
-                let dst = self.builder.alloc_reg();
-                let key_idx = self.builder.intern_key(key.clone());
+                let dst = self.builder.alloc_reg()?;
+                let key_idx = self.builder.intern_key(key.clone())?;
                 self.builder.insts.push(Inst::GetField {
                     dst,
                     base: base_reg,
@@ -2176,8 +2112,8 @@ impl ExprCompiler {
                 for arg in args {
                     arg_regs.push(self.compile_expr(arg)?);
                 }
-                let dst = self.builder.alloc_reg();
-                let func_idx = self.builder.intern_key(name.clone());
+                let dst = self.builder.alloc_reg()?;
+                let func_idx = self.builder.intern_key(name.clone())?;
                 self.builder.insts.push(Inst::CallUdf {
                     dst,
                     func_idx,
@@ -2196,7 +2132,7 @@ impl ExprCompiler {
                 for value in values {
                     value_regs.push(self.compile_expr(value)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeTuple {
                     dst,
                     attr_regs,
@@ -2209,7 +2145,7 @@ impl ExprCompiler {
                 for element in elements {
                     elements_regs.push(self.compile_expr(element)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeList {
                     dst,
                     element_regs: elements_regs,
@@ -2219,9 +2155,9 @@ impl ExprCompiler {
             Expr::Mul(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MulDynamic {
                     dst,
                     a: l,
@@ -2234,9 +2170,9 @@ impl ExprCompiler {
             Expr::Div(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::DivDynamic {
                     dst,
                     a: l,
@@ -2249,9 +2185,9 @@ impl ExprCompiler {
             Expr::Exp(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::ExpDynamic {
                     dst,
                     a: l,
@@ -2264,9 +2200,9 @@ impl ExprCompiler {
             Expr::Gt(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::GtDynamic {
                     dst,
                     a: l,
@@ -2279,9 +2215,9 @@ impl ExprCompiler {
             Expr::Lt(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::LtDynamic {
                     dst,
                     a: l,
@@ -2294,7 +2230,7 @@ impl ExprCompiler {
             Expr::Concat(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder
                     .insts
                     .push(Inst::ConcatDynamic { dst, a: l, b: r });
@@ -2303,7 +2239,7 @@ impl ExprCompiler {
             Expr::In(left, right) => {
                 let value = self.compile_expr(left)?;
                 let collection = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::InDynamic {
                     dst,
                     value,
@@ -2316,7 +2252,7 @@ impl ExprCompiler {
                 for element in elements {
                     elements_regs.push(self.compile_expr(element)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeBag {
                     dst,
                     element_regs: elements_regs,
@@ -2326,14 +2262,10 @@ impl ExprCompiler {
         }
     }
 
-    pub fn compile_to_slot(&mut self, expr: &Expr, slot: SlotId) -> Result<()> {
+    fn compile_to_slot(&mut self, expr: &Expr, slot: SlotId) -> Result<()> {
         let reg = self.compile_expr(expr)?;
         self.builder.insts.push(Inst::StoreSlot { slot, src: reg });
         Ok(())
-    }
-
-    pub fn finish(self) -> Program {
-        self.builder.build()
     }
 }
 
@@ -2346,32 +2278,8 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
         LogicalExprCompiler { resolver }
     }
 
-    pub fn compile_to_program(
-        &self,
-        expr: &ValueExpr,
-        slot: SlotId,
-        slot_count: u16,
-    ) -> Result<Program> {
-        let expr = self.lower_expr(expr)?;
-        let mut compiler = ExprCompiler::new(slot_count);
-        compiler.compile_to_slot(&expr, slot)?;
-        Ok(compiler.finish())
-    }
-
-    pub fn compile_to_program_multi(
-        &self,
-        exprs: &[(SlotId, ValueExpr)],
-        slot_count: u16,
-    ) -> Result<Program> {
-        let mut compiler = ExprCompiler::new(slot_count);
-        for (slot, expr) in exprs {
-            let lowered = self.lower_expr(expr)?;
-            compiler.compile_to_slot(&lowered, *slot)?;
-        }
-        Ok(compiler.finish())
-    }
-
-    fn lower_expr(&self, expr: &ValueExpr) -> Result<Expr> {
+    /// Lower `expr`, resolving its names to registers.
+    pub fn lower_expr(&self, expr: &ValueExpr) -> Result<Expr> {
         match expr {
             ValueExpr::Lit(lit) => Ok(Expr::Literal(lit_to_value(lit)?)),
             ValueExpr::VarRef(name, scope) => self

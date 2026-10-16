@@ -4,10 +4,11 @@
 mod arena;
 mod builtins;
 mod catalog;
-mod compiler;
+mod compile;
 mod error;
 mod expr;
 mod field_resolver;
+mod lower_ir;
 mod plan;
 #[allow(dead_code)]
 mod sorter;
@@ -22,7 +23,7 @@ pub mod value;
 pub use catalog::{CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext};
 
 // Compilation & Execution
-pub use compiler::PlanCompiler;
+pub use compile::PlanCompiler;
 pub use plan::{CompiledPlan, EvaluationMode, ExecutionResult, PartiQLVM, QueryIterator};
 
 // Error Handling

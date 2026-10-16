@@ -5,3 +5,8 @@
 { sql: "SELECT g.k AS k, COUNT(*) AS n FROM << {'k':'x'}, {'k':'x'}, {'k':'x'} >> g GROUP BY g.k", expect: { rows: $bag::[ { k: "x", n: 3 } ] } }
 // An aggregate's argument reads the input row, not the GROUP BY key of the same name.
 { sql: "SELECT c, SUM(c) AS s FROM << {'c': 1}, {'c': 1}, {'c': 2} >> e GROUP BY c", expect: { rows: $bag::[ { c: 1, s: 2 }, { c: 2, s: 2 } ] } }
+// HAVING filters groups
+{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'}, {'k':'y'} >> g GROUP BY g.k HAVING COUNT(*) > 1", expect: { rows: $bag::[ { n: 2 } ] } }
+// LIMIT counts groups
+{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'} >> g GROUP BY g.k LIMIT 1", expect: { rows: $bag::[ { n: 1 } ] } }
+{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'} >> g GROUP BY g.k LIMIT 0", expect: { rows: $bag::[] } }
