@@ -292,15 +292,32 @@ Running a single test:
 Every test is a  `.test.ion`  file in  `partiql-tools/tests/pqlite/cases`  and can be represented as shown below:
 
 ```
-{ sql: "CREATE TABLE orders", expect: { created_table: { name: ["orders"], rows: 0 } } }
+// Setup script: `;`-separated statements that must all succeed; nothing else is asserted.
+'''
+  CREATE TABLE orders;
+  INSERT INTO orders SELECT * FROM << {'a': 1}, {'a': 2} >>;
+'''
 
-{ sql: "INSERT INTO orders SELECT * FROM << {'a': 1}, {'a': 2} >>", expect: { affected_rows: 2 } }
+{
+  sql: '''
+    SELECT *
+    FROM orders
+    WHERE a > 1
+  ''',
+  expect: $bag::[
+    { a: 2 }
+  ]
+}
 
-{ sql: "SELECT name FROM _tables", expect: { rows: $bag::[ { name: ["_tables"] }, { name: ["orders"] } ] } }
-
-{ sql: "SELECT * FROM orders", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }
+// Assert on DDL/DML outcomes only when that is what the test is about.
+{
+  sql: '''
+    INSERT INTO orders SELECT * FROM << {'a': 3} >>
+  ''',
+  expect: { affected_rows: 1 }
+}
 ```
-`expect:` can hold either `error: "<substring>"`, or one of the success keys `rows` / `affected_rows` / `created_table`. A step can be prefixed with the `skip::` annotation to load but not execute it.
+A bare string step is a setup script. In a struct step, `expect: $bag::[...]` is shorthand for `expect: { rows: $bag::[...] }`; the struct form of `expect:` holds either `error: "<substring>"` or one of the success keys `rows` / `affected_rows` / `created_table`. A step can be prefixed with the `skip::` annotation to load but not execute it.
 
 ## Common Issues
 

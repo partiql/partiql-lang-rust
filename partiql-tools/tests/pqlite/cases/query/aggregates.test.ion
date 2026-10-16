@@ -1,12 +1,71 @@
 // Aggregate functions over an inline bag: COUNT/SUM and GROUP BY.
-{ sql: "SELECT COUNT(*) AS c, SUM(t.a) AS s FROM << {'a': 1}, {'a': 2}, {'a': 3} >> t", expect: { rows: $bag::[ { c: 3, s: 6 } ] } }
+{
+  sql: '''
+    SELECT COUNT(*) AS c, SUM(t.a) AS s
+    FROM << {'a': 1}, {'a': 2}, {'a': 3} >> t
+  ''',
+  expect: $bag::[
+    { c: 3, s: 6 }
+  ]
+}
+
 // Single-group GROUP BY: one output row avoids hash-iteration-order flake
 // while still exercising the aggregate path.
-{ sql: "SELECT g.k AS k, COUNT(*) AS n FROM << {'k':'x'}, {'k':'x'}, {'k':'x'} >> g GROUP BY g.k", expect: { rows: $bag::[ { k: "x", n: 3 } ] } }
+{
+  sql: '''
+    SELECT g.k AS k, COUNT(*) AS n
+    FROM << {'k':'x'}, {'k':'x'}, {'k':'x'} >> g
+    GROUP BY g.k
+  ''',
+  expect: $bag::[
+    { k: "x", n: 3 }
+  ]
+}
+
 // An aggregate's argument reads the input row, not the GROUP BY key of the same name.
-{ sql: "SELECT c, SUM(c) AS s FROM << {'c': 1}, {'c': 1}, {'c': 2} >> e GROUP BY c", expect: { rows: $bag::[ { c: 1, s: 2 }, { c: 2, s: 2 } ] } }
+{
+  sql: '''
+    SELECT c, SUM(c) AS s
+    FROM << {'c': 1}, {'c': 1}, {'c': 2} >> e
+    GROUP BY c
+  ''',
+  expect: $bag::[
+    { c: 1, s: 2 },
+    { c: 2, s: 2 }
+  ]
+}
+
 // HAVING filters groups
-{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'}, {'k':'y'} >> g GROUP BY g.k HAVING COUNT(*) > 1", expect: { rows: $bag::[ { n: 2 } ] } }
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM << {'k':'x'}, {'k':'y'}, {'k':'y'} >> g
+    GROUP BY g.k
+    HAVING COUNT(*) > 1
+  ''',
+  expect: $bag::[
+    { n: 2 }
+  ]
+}
+
 // LIMIT counts groups
-{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'} >> g GROUP BY g.k LIMIT 1", expect: { rows: $bag::[ { n: 1 } ] } }
-{ sql: "SELECT COUNT(*) AS n FROM << {'k':'x'}, {'k':'y'} >> g GROUP BY g.k LIMIT 0", expect: { rows: $bag::[] } }
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM << {'k':'x'}, {'k':'y'} >> g
+    GROUP BY g.k
+    LIMIT 1
+  ''',
+  expect: $bag::[
+    { n: 1 }
+  ]
+}
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM << {'k':'x'}, {'k':'y'} >> g
+    GROUP BY g.k
+    LIMIT 0
+  ''',
+  expect: $bag::[]
+}

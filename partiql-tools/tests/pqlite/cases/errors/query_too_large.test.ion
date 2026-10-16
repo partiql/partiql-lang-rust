@@ -1,3 +1,24 @@
 // Nested FULL JOINs double the code at each level; past the program size limit, compiling
 // fails instead of allocating without bound.
-{ sql: "SELECT VALUE a0 FROM << 1 >> a0 FULL JOIN << 1 >> a1 ON true FULL JOIN << 1 >> a2 ON true FULL JOIN << 1 >> a3 ON true FULL JOIN << 1 >> a4 ON true FULL JOIN << 1 >> a5 ON true FULL JOIN << 1 >> a6 ON true FULL JOIN << 1 >> a7 ON true FULL JOIN << 1 >> a8 ON true FULL JOIN << 1 >> a9 ON true FULL JOIN << 1 >> a10 ON true FULL JOIN << 1 >> a11 ON true FULL JOIN << 1 >> a12 ON true FULL JOIN << 1 >> a13 ON true FULL JOIN << 1 >> a14 ON true FULL JOIN << 1 >> a15 ON true", expect: { error: "TooLarge" } }
+{
+  sql: '''
+    SELECT VALUE a0
+    FROM << 1 >> a0
+    FULL JOIN << 1 >> a1 ON true
+    FULL JOIN << 1 >> a2 ON true
+    FULL JOIN << 1 >> a3 ON true
+    FULL JOIN << 1 >> a4 ON true
+    FULL JOIN << 1 >> a5 ON true
+    FULL JOIN << 1 >> a6 ON true
+    FULL JOIN << 1 >> a7 ON true
+    FULL JOIN << 1 >> a8 ON true
+    FULL JOIN << 1 >> a9 ON true
+    FULL JOIN << 1 >> a10 ON true
+    FULL JOIN << 1 >> a11 ON true
+    FULL JOIN << 1 >> a12 ON true
+    FULL JOIN << 1 >> a13 ON true
+    FULL JOIN << 1 >> a14 ON true
+    FULL JOIN << 1 >> a15 ON true
+  ''',
+  expect: { error: "TooLarge" }
+}

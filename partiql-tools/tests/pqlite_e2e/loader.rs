@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ion_rs::element::Element;
+use ion_rs::element::{Element, Struct};
 use ion_rs::IonType;
 
 const EXPECT_ERROR_FIELDS: &[&str] = &["error"];
@@ -10,7 +10,12 @@ const EXPECT_SUCCESS_FIELDS: &[&str] = &["rows", "affected_rows", "created_table
 #[derive(Debug)]
 pub struct StepDef {
     pub sql: String,
+    /// Always a struct: the `expect: $bag::[...]` shorthand is normalized to
+    /// `{ rows: $bag::[...] }` at load time.
     pub expect: Option<Element>,
+    /// A bare top-level string is a setup script: one or more `;`-separated
+    /// statements, each of which must succeed. It carries no expectation.
+    pub script: bool,
     /// `skip::` annotation on the top-level Ion value marks a step that the
     /// runner must load but must NOT execute. Lets fixture authors keep
     /// known-broken cases in-tree while the compiler is still catching up.
@@ -27,7 +32,7 @@ pub enum LoadError {
         path: PathBuf,
         source: ion_rs::IonError,
     },
-    NotAStruct {
+    NotAStepOrScript {
         path: PathBuf,
         index: usize,
         actual: IonType,
@@ -93,13 +98,13 @@ impl std::fmt::Display for LoadError {
         match self {
             Io { path, source } => write!(f, "{}: {}", path.display(), source),
             Ion { path, source } => write!(f, "{}: ion parse error: {}", path.display(), source),
-            NotAStruct {
+            NotAStepOrScript {
                 path,
                 index,
                 actual,
             } => write!(
                 f,
-                "{}: top-level value #{} must be a struct, was {}",
+                "{}: top-level value #{} must be a struct or a string, was {}",
                 path.display(),
                 index,
                 actual
@@ -195,9 +200,10 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Load every top-level Ion value in `path`; each must be a struct with at
-/// least `sql: <string>` and optionally `expect: <struct>`. Unknown fields at
-/// either level are rejected so a typo can't silently disable a check.
+/// Load every top-level Ion value in `path`. Each is either a step struct with
+/// `sql: <string>` and an optional `expect: <struct | list>`, or a bare string
+/// setup script. Unknown fields at either level are rejected so a typo can't
+/// silently disable a check.
 pub fn load_test_case(path: &Path) -> Result<Vec<StepDef>, LoadError> {
     let bytes = fs::read(path).map_err(|e| LoadError::Io {
         path: path.to_path_buf(),
@@ -250,17 +256,14 @@ fn parse_step(path: &Path, index: usize, el: &Element) -> Result<StepDef, LoadEr
         }
     };
 
-    if skip && el.ion_type() == IonType::String {
-        // `skip::"INSERT INTO ..."` — a skipped bare SQL statement with no
-        // assertion. The runner will not execute it.
-        let sql = el
-            .as_string()
-            .expect("annotated string element must expose as_string")
-            .to_owned();
+    if let Some(sql) = el.as_string() {
+        // `"CREATE TABLE t; INSERT INTO t ..."` — a setup script with no
+        // assertion beyond every statement succeeding.
         return Ok(StepDef {
-            sql,
+            sql: sql.to_owned(),
             expect: None,
-            skip: true,
+            script: true,
+            skip,
         });
     }
 
@@ -272,7 +275,7 @@ fn parse_step(path: &Path, index: usize, el: &Element) -> Result<StepDef, LoadEr
         });
     }
 
-    let s = el.as_struct().ok_or_else(|| LoadError::NotAStruct {
+    let s = el.as_struct().ok_or_else(|| LoadError::NotAStepOrScript {
         path: path.to_path_buf(),
         index,
         actual: el.ion_type(),
@@ -333,18 +336,27 @@ fn parse_step(path: &Path, index: usize, el: &Element) -> Result<StepDef, LoadEr
             validate_expect(path, index, e)?;
             Some(e.clone())
         }
+        // `expect: $bag::[...]` is shorthand for `expect: { rows: $bag::[...] }`.
+        Some(e) if e.ion_type() == IonType::List => Some(Element::from(
+            Struct::builder().with_field("rows", e.clone()).build(),
+        )),
         Some(e) => {
             return Err(LoadError::TypeMismatch {
                 path: path.to_path_buf(),
                 index,
                 field: "expect",
-                expected: "struct",
+                expected: "struct or list",
                 actual: e.ion_type(),
             })
         }
     };
 
-    Ok(StepDef { sql, expect, skip })
+    Ok(StepDef {
+        sql,
+        expect,
+        script: false,
+        skip,
+    })
 }
 
 fn validate_expect(path: &Path, index: usize, expect: &Element) -> Result<(), LoadError> {
@@ -403,7 +415,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         const CASES: &[(&str, &str, fn(&LoadError) -> bool)] = &[
             ("bad.test.ion", r#" 42 "#, |e| {
-                matches!(e, LoadError::NotAStruct { .. })
+                matches!(e, LoadError::NotAStepOrScript { .. })
             }),
             ("bad2.test.ion", r#" { expect: { rows: [] } } "#, |e| {
                 matches!(e, LoadError::MissingSql { .. })
@@ -480,6 +492,19 @@ mod tests {
                 r#" { sql: 42, expect: { rows: $bag::[] } } "#,
                 |e| matches!(e, LoadError::TypeMismatch { .. }),
             ),
+            (
+                "expect_int.test.ion",
+                r#" { sql: "SELECT 1", expect: 1 } "#,
+                |e| {
+                    matches!(
+                        e,
+                        LoadError::TypeMismatch {
+                            field: "expect",
+                            ..
+                        }
+                    )
+                },
+            ),
             ("bad_annot.test.ion", "wrong::\"CREATE TABLE t\"\n", |e| {
                 matches!(e, LoadError::UnknownAnnotation { .. })
             }),
@@ -529,13 +554,35 @@ mod tests {
     }
 
     #[test]
-    fn bare_sql_step_supported_when_skip_annotated() {
-        // An un-annotated top-level string must be REJECTED. Only skip::"..."
-        // may be a bare SQL step; regular steps must still be structs.
+    fn parses_bare_string_as_setup_script() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bare.test.ion");
-        std::fs::write(&path, r#" "CREATE TABLE t" "#).unwrap();
-        let err = load_test_case(&path).unwrap_err();
-        assert!(matches!(err, LoadError::NotAStruct { .. }), "got: {err:?}");
+        std::fs::write(
+            &path,
+            r#" "CREATE TABLE t; INSERT INTO t SELECT * FROM << 1 >>" "#,
+        )
+        .unwrap();
+        let steps = load_test_case(&path).unwrap();
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].script && !steps[0].skip, "got {:?}", steps[0]);
+        assert!(steps[0].expect.is_none());
+    }
+
+    #[test]
+    fn expect_list_is_shorthand_for_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("short.test.ion");
+        std::fs::write(
+            &path,
+            r#" { sql: "SELECT 1", expect: $bag::[ { _1: 1 } ] } "#,
+        )
+        .unwrap();
+        let steps = load_test_case(&path).unwrap();
+        let expect = steps[0].expect.as_ref().unwrap();
+        let rows = expect.as_struct().and_then(|s| s.get("rows")).unwrap();
+        assert_eq!(
+            rows.annotations().iter().next().and_then(|a| a.text()),
+            Some("$bag")
+        );
     }
 }

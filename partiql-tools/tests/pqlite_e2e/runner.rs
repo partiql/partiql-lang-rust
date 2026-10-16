@@ -5,8 +5,8 @@ use ion_rs::element::Element;
 use ion_rs::types::IntAccess;
 use ion_rs::{IonData, IonType};
 use partiql_tools::session::{
-    render_outcome_ion, render_query_ion, Commands, DebugFlags, PqliteSession, RunOutcome,
-    StatementOutcome,
+    parse_script, render_outcome_ion, render_query_ion, Commands, DebugFlags, PqliteSession,
+    RunOutcome, StatementOutcome,
 };
 
 use crate::pqlite_e2e::loader::{load_test_case, LoadError};
@@ -52,7 +52,7 @@ impl std::fmt::Display for CaseError {
                 f,
                 "step {}: `{}` failed: {source}",
                 step_index + 1,
-                sql
+                one_line(sql)
             ),
             ExpectedErrorButSucceeded {
                 step_index,
@@ -62,7 +62,7 @@ impl std::fmt::Display for CaseError {
                 f,
                 "step {}: `{}` was expected to fail with an error containing {:?}, but it succeeded",
                 step_index + 1,
-                sql,
+                one_line(sql),
                 expected
             ),
             Mismatch {
@@ -73,7 +73,7 @@ impl std::fmt::Display for CaseError {
                 f,
                 "step {}: `{}` produced an unexpected result: {detail}",
                 step_index + 1,
-                sql
+                one_line(sql)
             ),
         }
     }
@@ -97,7 +97,11 @@ pub fn run_case(path: &Path) -> Result<(), CaseError> {
         if step.skip {
             // Preserves step numbering so a `skip::` before a real step does
             // not shift the visible index. Never touches the session.
-            eprintln!("skipped step {}: {}", i + 1, step.sql);
+            eprintln!("skipped step {}: {}", i + 1, one_line(&step.sql));
+            continue;
+        }
+        if step.script {
+            run_script(&session, i, &step.sql)?;
             continue;
         }
         let expected_err_substr: Option<&str> = step
@@ -212,6 +216,33 @@ pub fn run_case(path: &Path) -> Result<(), CaseError> {
         }
     }
     Ok(())
+}
+
+/// Run a setup script: every `;`-separated statement must succeed, in order.
+/// Results are drained (so late query errors surface) and otherwise ignored.
+fn run_script(session: &PqliteSession, step_index: usize, sql: &str) -> Result<(), CaseError> {
+    let exec_err = |source: String| CaseError::Exec {
+        step_index,
+        sql: sql.to_string(),
+        source,
+    };
+    let script = parse_script(sql, session.debug_flags()).map_err(|e| exec_err(format!("{e}")))?;
+    if script.statements().is_empty() {
+        return Err(exec_err("setup script contains no statements".to_string()));
+    }
+    for (n, stmt) in script.statements().iter().enumerate() {
+        let (result, _err_capture) = session.run_statement(stmt);
+        result
+            .and_then(drain_outcome)
+            .map_err(|e| exec_err(format!("statement {}: {e}", n + 1)))?;
+    }
+    Ok(())
+}
+
+/// Collapse a (possibly multi-line, indented) fixture SQL string onto one line
+/// for error messages.
+fn one_line(sql: &str) -> String {
+    sql.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Parse `buf` as one top-level Ion struct and compare against `expect` under
@@ -405,6 +436,49 @@ mod tests {
             "#,
         );
         run_case(&path).unwrap();
+    }
+
+    #[test]
+    fn setup_script_runs_every_statement() {
+        let (_dir, path) = write_case(
+            "script.test.ion",
+            r#"
+            '''
+              CREATE TABLE t;
+              INSERT INTO t SELECT * FROM << {'a': 1} >>;
+              INSERT INTO t SELECT * FROM << {'a': 2} >>;
+            '''
+            { sql: "SELECT * FROM t", expect: $bag::[ { a: 1 }, { a: 2 } ] }
+            "#,
+        );
+        run_case(&path).unwrap();
+    }
+
+    /// A failing statement anywhere in a setup script fails the case, and the
+    /// error names the statement.
+    #[test]
+    fn setup_script_statement_failure_fails_case() {
+        let (_dir, path) = write_case(
+            "script_fail.test.ion",
+            r#"
+            "CREATE TABLE t; INSERT INTO ghost SELECT * FROM << {'a': 1} >>"
+            "#,
+        );
+        match run_case(&path).unwrap_err() {
+            CaseError::Exec { source, .. } => {
+                assert!(source.contains("statement 2"), "got: {source}");
+            }
+            other => panic!("expected Exec, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_setup_script_fails_case() {
+        let (_dir, path) = write_case("script_empty.test.ion", r#" "-- nothing" "#);
+        assert!(matches!(
+            run_case(&path).unwrap_err(),
+            CaseError::Exec { .. }
+        ));
     }
 
     /// The old runner compared the full Ion envelope under `IonData` equality,
