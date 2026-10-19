@@ -15,14 +15,13 @@
   >>;
 '''
 
-// VM: OrderBy is not compiled ("unsupported operator: Discriminant(4)").
-skip::{
+{
   sql: '''
     SELECT e.a
     FROM example e
     ORDER BY e.a DESC
   ''',
-  expect: $bag::[
+  expect: [
     { a: 5 },
     { a: 3 },
     { a: 1 }

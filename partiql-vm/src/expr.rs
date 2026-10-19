@@ -467,7 +467,12 @@ pub enum Inst {
         target: u32,
     },
 
-    // === Sorter Instructions (GROUP BY) ===
+    // === Sorter Instructions (GROUP BY, ORDER BY) ===
+    /// Drop the sorter's records from a previous run.
+    SorterReset {
+        sorter_id: u16,
+    },
+
     /// Copy registers `src_reg..src_reg+reg_count` from the row bank into the
     /// sorter's persistent bank, appending a new record.
     SorterInsert {
@@ -476,7 +481,7 @@ pub enum Inst {
         reg_count: u16,
     },
 
-    /// Sort all records in the sorter by the first `key_count` fields.
+    /// Sort all records in the sorter by their key fields (see `SortKeys`).
     /// If the sorter is empty, jump to `eof_target`.
     SorterSort {
         sorter_id: u16,
@@ -1779,6 +1784,7 @@ impl Program {
             | Inst::MaterializeCursor { .. }
             | Inst::CreateTableFnCursor { .. }
             | Inst::AssertCollection { .. }
+            | Inst::SorterReset { .. }
             | Inst::SorterInsert { .. }
             | Inst::SorterSort { .. }
             | Inst::SorterData { .. }

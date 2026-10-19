@@ -428,7 +428,8 @@ fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
     }
 
     match &shape {
-        Shape::Bag(_) | Shape::List(_) => Value::Bag(Box::new(Bag::from(results))),
+        Shape::Bag(_) => Value::Bag(Box::new(Bag::from(results))),
+        Shape::List(_) => Value::List(Box::new(List::from(results))),
         Shape::Single(_) => results.into_iter().next().unwrap_or(Value::Missing),
     }
 }
@@ -601,6 +602,44 @@ fn group_by_missing_key_is_null() {
         "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
         &[("data", "[{k: null}, {x: 1}, {k: 2}]")],
         "$bag::[{k: null, c: 2}, {k: 2, c: 1}]",
+    );
+}
+
+/// ORDER BY compares numbers by value across types, NaN first.
+#[test]
+fn order_by_numbers() {
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[(
+            "data",
+            "[{v: 2.5e0}, {v: 1}, {v: nan}, {v: 3.0}, {v: -inf}, {v: +inf}, {v: 2}]",
+        )],
+        "[nan, -inf, 1, 2, 2.5e0, 3.0, +inf]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v DESC",
+        &[("data", "[{v: 1.5}, {v: 2e0}, {v: 1}]")],
+        "[2e0, 1.5, 1]",
+    );
+}
+
+/// NULLs nested in a collection sort with the outer ones: last for ASC, first for DESC.
+#[test]
+fn order_by_nested_nulls() {
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[("data", "[{v: [1, null]}, {v: [1, 2]}]")],
+        "[[1, 2], [1, null]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v DESC",
+        &[("data", "[{v: [1, 2]}, {v: [1, null]}]")],
+        "[[1, null], [1, 2]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[("data", "[{v: {b: 1}}, {v: {a: 2}}, {v: {a: 1, b: 0}}]")],
+        "[{a: 1, b: 0}, {a: 2}, {b: 1}]",
     );
 }
 
