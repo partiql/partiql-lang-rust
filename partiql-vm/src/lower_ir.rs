@@ -858,7 +858,7 @@ impl<'a> Lowerer<'a> {
         let payload = resolver.registers();
         // Every index into the record fits a register number once the record is allocated
         let record_len = keys.len() + payload.len();
-        let sorter = count_u16(self.sorters.len(), "sorters")?;
+        let sorter = count_u16(self.sorters.len(), "ORDER BY clauses")?;
         self.sorters.push(SorterMetadata {
             keys: SortKeys::Order(orders),
         });
