@@ -712,6 +712,11 @@ impl Evaluable for EvalGroupBy {
                     }
                 }
 
+                // Without keys the input is one group, even when empty
+                if self.group.is_empty() && grouped.is_empty() {
+                    grouped.insert(GroupKey::default(), combined);
+                }
+
                 let vals = grouped
                     .into_iter()
                     .map(|(group_key, state)| {

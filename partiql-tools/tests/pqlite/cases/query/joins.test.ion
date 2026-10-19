@@ -266,7 +266,7 @@
     GROUP BY a.k
   ''',
   expect: $bag::[
-    { k: $missing::null, c: 1 },
+    { k: null, c: 1 },
     { k: 1, c: 2 },
     { k: 2, c: 1 },
     { k: 3, c: 1 }

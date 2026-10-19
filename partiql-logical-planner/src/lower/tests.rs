@@ -911,3 +911,19 @@ fn test_aggregate_arguments_resolve_before_group_by() {
         assert_eq!(agg.expr, attr("e", "c"), "{agg:?}");
     }
 }
+
+#[test]
+fn test_aggregate_without_group_by_has_no_keys() {
+    // No keys: the whole input is one group, even when it is empty
+    let plan = lower_static("SELECT COUNT(*) AS c, SUM(e.a) AS s FROM t AS e").expect("lower");
+    let group_by = plan
+        .operators()
+        .iter()
+        .find_map(|op| match op {
+            BindingsOp::GroupBy(group_by) => Some(group_by),
+            _ => None,
+        })
+        .expect("group by");
+    assert!(group_by.exprs.is_empty(), "{:?}", group_by.exprs);
+    assert_eq!(group_by.aggregate_exprs.len(), 2);
+}

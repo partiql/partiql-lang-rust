@@ -289,16 +289,14 @@ impl<'a> Lowerer<'a> {
         };
 
         // The GROUP BY operator is built last, once every clause has added its aggregates.
-        // Aggregates without a GROUP BY group the whole input (`GROUP BY true AS $__gk`).
+        // Aggregates without a GROUP BY group the whole input into one group, keyed on
+        // nothing: it is a group even when the input is empty (`COUNT(*)` of no rows is 0).
         let aggregate_exprs = std::mem::replace(&mut self.aggs, outer_aggs);
         let group_by = match group_by {
             Some(group_by) => Some(group_by.into_op(aggregate_exprs)),
             None if !aggregate_exprs.is_empty() => Some(BindingsOp::GroupBy(logical::GroupBy {
                 strategy: logical::GroupingStrategy::GroupFull,
-                exprs: FxHashMap::from_iter([(
-                    "$__gk".to_string(),
-                    ValueExpr::Lit(Box::new(logical::Lit::Bool(true))),
-                )]),
+                exprs: FxHashMap::default(),
                 aggregate_exprs,
                 group_as_alias: None,
             })),
