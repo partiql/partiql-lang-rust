@@ -69,3 +69,57 @@
   ''',
   expect: $bag::[]
 }
+
+// Without GROUP BY, empty input is still one group: one row
+{
+  sql: '''
+    SELECT COUNT(*) AS c, COUNT(t.a) AS ca, SUM(t.a) AS s, MIN(t.a) AS mn,
+           MAX(t.a) AS mx, AVG(t.a) AS av
+    FROM <<>> t
+  ''',
+  expect: $bag::[
+    { c: 0, ca: 0, s: null, mn: null, mx: null, av: null }
+  ]
+}
+{
+  sql: '''
+    SELECT COUNT(*) AS c
+    FROM << {'a': 1} >> t
+    WHERE t.a > 1
+  ''',
+  expect: $bag::[
+    { c: 0 }
+  ]
+}
+// With GROUP BY, empty input has no groups
+{
+  sql: '''
+    SELECT t.k AS k, COUNT(*) AS c
+    FROM <<>> t
+    GROUP BY t.k
+  ''',
+  expect: $bag::[]
+}
+
+// NULL and MISSING keys are one group, keyed NULL
+{
+  sql: '''
+    SELECT k, COUNT(*) AS c
+    FROM << {'k': 1}, {'k': null}, {'x': 2}, {'k': null} >> t
+    GROUP BY t.k AS k
+  ''',
+  expect: $bag::[
+    { k: null, c: 3 },
+    { k: 1, c: 1 }
+  ]
+}
+{
+  sql: '''
+    SELECT k, COUNT(*) AS c
+    FROM << {'x': 1}, {'x': 2} >> t
+    GROUP BY t.k AS k
+  ''',
+  expect: $bag::[
+    { k: null, c: 2 }
+  ]
+}

@@ -570,6 +570,40 @@ fn path_into_group_key_named_like_its_field() {
     );
 }
 
+/// Without GROUP BY the input is one group even when empty.
+#[test]
+fn aggregate_over_empty_input_is_one_row() {
+    assert_vm_eval(
+        "SELECT COUNT(*) AS c, SUM(d.a) AS s FROM data AS d",
+        &[("data", "[]")],
+        "$bag::[{c: 0, s: null}]",
+    );
+    assert_vm_eval(
+        "SELECT COUNT(*) AS c FROM data AS d WHERE d.a > 1",
+        &[("data", "[{a: 1}]")],
+        "$bag::[{c: 0}]",
+    );
+}
+
+#[test]
+fn group_by_over_empty_input_has_no_groups() {
+    assert_vm_eval(
+        "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
+        &[("data", "[]")],
+        "$bag::[]",
+    );
+}
+
+/// NULL and MISSING group keys are one group, keyed NULL.
+#[test]
+fn group_by_missing_key_is_null() {
+    assert_vm_eval(
+        "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
+        &[("data", "[{k: null}, {x: 1}, {k: 2}]")],
+        "$bag::[{k: null, c: 2}, {k: 2, c: 1}]",
+    );
+}
+
 #[test]
 fn filter_false_returns_empty() {
     assert_vm_eval(

@@ -599,15 +599,17 @@ impl<'q> Emitter<'q> {
     /// records back sorted, calling `row` (as subroutine OUTPUT) once per group:
     /// ```text
     ///         has_data = false; reset the accumulators
-    ///         for each input row: evaluate its record; SorterInsert
+    ///         for each input row: evaluate its record (MISSING keys as NULL); SorterInsert
     ///         SorterSort, empty→done
     ///   read: SorterData
     ///         if the keys differ from the group's: Gosub OUTPUT; AggReset
     ///         copy the keys; AggStep each aggregate; has_data = true
     ///         SorterNext → read
-    ///         Gosub OUTPUT             // the last group
+    ///   last: Gosub OUTPUT             // the last group
     ///   done:
     /// ```
+    /// Without keys the input is one group even when empty (`SELECT COUNT(*) FROM <<>>` is
+    /// one row), so an empty sorter jumps to `last` rather than `done`.
     fn emit_aggregate(&mut self, agg: &'q Aggregate, row: Row<'_, 'q>) -> Result<()> {
         let sorter_id = agg.sorter;
         let reset_accums = Inst::AggReset {
@@ -619,6 +621,9 @@ impl<'q> Emitter<'q> {
         self.emit_op(&agg.input, &mut |e| {
             for (dst, expr) in (agg.insert..).zip(&agg.record_exprs) {
                 e.asm.b.emit_expr(expr, dst)?;
+                if dst < agg.insert + agg.key_count {
+                    e.asm.push(Inst::MissingToNull { dst, src: dst });
+                }
             }
             e.asm.push(Inst::SorterInsert {
                 sorter_id,
@@ -629,13 +634,14 @@ impl<'q> Emitter<'q> {
         })?;
         let output = self.emit_group_output(agg, row)?;
 
-        let (read, accumulate, done) = (self.asm.label(), self.asm.label(), self.asm.label());
+        let (read, accumulate) = (self.asm.label(), self.asm.label());
+        let (last, done) = (self.asm.label(), self.asm.label());
         self.asm.push_to(
             Inst::SorterSort {
                 sorter_id,
                 eof_target: 0,
             },
-            done,
+            if agg.key_count > 0 { done } else { last },
         );
         self.asm.bind(read);
         self.asm.push(Inst::SorterData {
@@ -689,18 +695,21 @@ impl<'q> Emitter<'q> {
             },
             read,
         );
+        self.asm.bind(last);
         self.asm.gosub(agg.ret, output);
         self.asm.bind(done);
         Ok(())
     }
 
-    /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group, finalize the
-    /// aggregates, then `row`.
+    /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group (unless there are
+    /// no keys), finalize the aggregates, then `row`.
     fn emit_group_output(&mut self, agg: &'q Aggregate, row: Row<'_, 'q>) -> Result<Label> {
         let output = self.asm.label();
         let caller = self.asm.begin_routine(output);
         let ret = self.asm.label();
-        self.asm.jump_if_not_true(agg.has_data, ret);
+        if agg.key_count > 0 {
+            self.asm.jump_if_not_true(agg.has_data, ret);
+        }
         for group_agg in &agg.aggs {
             self.asm.push(Inst::AggFinal {
                 func: group_agg.finalize,

@@ -321,6 +321,11 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+    /// Copy `src` into `dst`, MISSING becoming NULL.
+    MissingToNull {
+        dst: u16,
+        src: u16,
+    },
     NegNum {
         dst: u16,
         src: u16,
@@ -1585,6 +1590,12 @@ impl Program {
                     ValueRef::Bool(v) => ValueRef::Bool(!v),
                     ValueRef::Null | ValueRef::Missing => ValueRef::Null,
                     _ => ValueRef::Missing,
+                };
+            }
+            Inst::MissingToNull { dst, src } => {
+                regs[*dst as usize] = match regs[*src as usize] {
+                    ValueRef::Missing => ValueRef::Null,
+                    other => other,
                 };
             }
             Inst::NegNum { dst, src } => {

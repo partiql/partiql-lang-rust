@@ -53,8 +53,8 @@ skip::{
   ]
 }
 
-// VM: COUNT(*) over empty input yields no row instead of { c: 0 }.
-skip::{
+// COUNT(*) over empty input is one row.
+{
   sql: '''
     SELECT COUNT(*) AS c
     FROM example e
