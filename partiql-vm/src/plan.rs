@@ -793,7 +793,10 @@ impl<'vm> QueryIterator<'vm> {
 
                 Inst::SorterReset { sorter_id } => {
                     match self.vm.sorters.get_mut(*sorter_id as usize) {
-                        Some(Some(s)) => s.reset(),
+                        Some(Some(s)) => {
+                            s.reset();
+                            self.vm.banks[s.bank_id].reset();
+                        }
                         _ => {
                             return Some(Err(EngineError::IllegalState(format!(
                                 "sorter {} not bound",

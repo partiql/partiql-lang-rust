@@ -599,7 +599,7 @@ impl<'q> Emitter<'q> {
     /// A sort-based GROUP BY. It reads all of its input into the sorter, then reads the
     /// records back sorted, calling `row` (as subroutine OUTPUT) once per group:
     /// ```text
-    ///         SorterReset; has_data = false; reset the accumulators
+    ///         SorterReset; keys = MISSING; has_data = false; reset the accumulators
     ///         for each input row: evaluate its record (MISSING keys as NULL); SorterInsert
     ///         SorterSort, empty→done
     ///   read: SorterData
@@ -618,6 +618,10 @@ impl<'q> Emitter<'q> {
             count: agg.accums.len() as u16,
         };
         self.asm.push(Inst::SorterReset { sorter_id });
+        // The keys of a previous run point into the reset bank; the first record compares them
+        for k in 0..agg.key_count {
+            self.asm.load_const(agg.keys + k, ValueOwned::Missing)?;
+        }
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         self.asm.push(reset_accums.clone());
         self.emit_op(&agg.input, &mut |e| {

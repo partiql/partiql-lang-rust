@@ -205,6 +205,34 @@
   ]
 }
 
+// LEFT JOIN: the NULL-padded side sorts with NULLs
+{
+  sql: '''
+    SELECT a.x AS x, b.y AS y
+    FROM << {'x': 1}, {'x': 2} >> a LEFT JOIN << {'x': 2, 'y': 'b'} >> b ON a.x = b.x
+    ORDER BY b.y NULLS FIRST
+  ''',
+  expect: [
+    { x: 1, y: $missing::null },
+    { x: 2, y: "b" }
+  ]
+}
+
+// Fields read only below the sort (WHERE) or only by it
+{
+  sql: '''
+    SELECT p.price AS price
+    FROM products p
+    WHERE p.supplier > 0
+    ORDER BY p.id DESC
+  ''',
+  expect: [
+    { price: 20 },
+    { price: 20 },
+    { price: 30 }
+  ]
+}
+
 {
   sql: '''
     SELECT t.a AS a

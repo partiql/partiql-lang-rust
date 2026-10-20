@@ -468,7 +468,9 @@ pub enum Inst {
     },
 
     // === Sorter Instructions (GROUP BY, ORDER BY) ===
-    /// Drop the sorter's records from a previous run.
+    /// Drop the sorter's records from a previous run and free its bank. Values read out
+    /// of the sorter (by `SorterData`) are invalid afterwards: the operator must write a
+    /// register before reading it again.
     SorterReset {
         sorter_id: u16,
     },

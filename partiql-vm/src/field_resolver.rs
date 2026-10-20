@@ -27,7 +27,7 @@ pub(crate) struct FieldRequest {
 }
 
 /// Context passed DOWN the DFS tree, accumulating field requests.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct CompileContext {
     /// Field requests from ancestor nodes
     pub requests: Vec<FieldRequest>,

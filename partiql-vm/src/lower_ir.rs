@@ -487,6 +487,8 @@ impl<'a> Lowerer<'a> {
             return Ok(Lowered::new(op, resolver, None));
         }
 
+        // What the operators above read, before this operator adds its own reads
+        let read_above = matches!(op, BindingsOp::OrderBy(_)).then(|| ctx.clone());
         extract_fields(op, ctx);
         let Lowered {
             op: input,
@@ -545,7 +547,8 @@ impl<'a> Lowerer<'a> {
                 Lowered::new(Op::Aggregate(Box::new(aggregate)), grouped, shape)
             }
             BindingsOp::OrderBy(order_by) => {
-                let sort = self.lower_order_by(order_by, input, &resolver)?;
+                let read_above = read_above.unwrap_or_default();
+                let sort = self.lower_order_by(order_by, input, &resolver, &read_above)?;
                 let mut sorted = Lowered::new(Op::Sort(Box::new(sort)), resolver, shape);
                 sorted.ordered = true;
                 sorted
@@ -835,12 +838,13 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lower ORDER BY over `input`. Its rows keep `input`'s bindings: the payload is every
-    /// register they resolve to.
+    /// register of them that the operators above read (`read_above`).
     fn lower_order_by(
         &mut self,
         order_by: &OrderBy,
         input: Op,
         resolver: &ResolverKind,
+        read_above: &CompileContext,
     ) -> Result<Sort> {
         let keys = order_by
             .specs
@@ -855,7 +859,7 @@ impl<'a> Lowerer<'a> {
                 nulls_first: matches!(spec.null_order, SortSpecNullOrder::First),
             })
             .collect();
-        let payload = resolver.registers();
+        let payload = resolver.registers_read(read_above);
         // Every index into the record fits a register number once the record is allocated
         let record_len = keys.len() + payload.len();
         let sorter = count_u16(self.sorters.len(), "ORDER BY clauses")?;
@@ -1249,11 +1253,11 @@ impl SlotResolver for ResolverKind {
 }
 
 impl ResolverKind {
-    /// Every register a name resolves to, in order.
-    fn registers(&self) -> Vec<SlotId> {
+    /// The registers that names read in `reads` resolve to, in order.
+    fn registers_read(&self, reads: &CompileContext) -> Vec<SlotId> {
         let mut regs: Vec<SlotId> = match self {
-            ResolverKind::Pipeline(r) => r.registers().collect(),
-            ResolverKind::Multi(rs) => rs.iter().flat_map(|r| r.registers()).collect(),
+            ResolverKind::Pipeline(r) => r.registers_read(reads),
+            ResolverKind::Multi(rs) => rs.iter().flat_map(|r| r.registers_read(reads)).collect(),
             ResolverKind::Global(r) => r.slots.values().copied().collect(),
             ResolverKind::Empty => vec![],
         };
@@ -1352,11 +1356,28 @@ impl PipelineSlotResolver {
         false
     }
 
-    /// The binding's whole-row register and field registers.
-    fn registers(&self) -> impl Iterator<Item = SlotId> + '_ {
-        self.base_row_slot
-            .into_iter()
-            .chain(self.column_slots.values().copied())
+    /// The binding's registers that names read in `reads` resolve to: the requested
+    /// fields, and the whole row when it is read (or a field is read through it).
+    fn registers_read(&self, reads: &CompileContext) -> Vec<SlotId> {
+        // GROUP BY's keys and aggregates: the field requests are only for FROM bindings
+        if self.scan_alias.is_empty() {
+            return self.column_slots.values().copied().collect();
+        }
+        let table = self.table_name.as_deref();
+        let mut whole_row = reads.needs_whole_value(&self.scan_alias, table);
+        let mut regs = vec![];
+        for request in reads.requests_for_alias(&self.scan_alias, table) {
+            match self.resolve_field(&BindingsName::CaseInsensitive(
+                request.field_name.as_str().into(),
+            )) {
+                Some(slot) => regs.push(slot),
+                None => whole_row = true,
+            }
+        }
+        if whole_row {
+            regs.extend(self.base_row_slot);
+        }
+        regs
     }
 
     /// The same binding with its registers moved up by `offset`.
