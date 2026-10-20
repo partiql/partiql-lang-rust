@@ -118,11 +118,12 @@ fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {
         (ValueRef::Bool(a), ValueRef::Bool(b)) => a.cmp(b),
         (ValueRef::Str(a), ValueRef::Str(b)) => a.cmp(b),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a.cmp(b),
-        (ValueRef::List(a), ValueRef::List(b)) => cmp_seq(a, b, nulls_low),
-        (ValueRef::Tuple(a), ValueRef::Tuple(b)) => cmp_tuples(a, b, nulls_low),
-        (ValueRef::Bag(a), ValueRef::Bag(b)) => {
-            // Bags compare as lists of their sorted elements
-            cmp_seq(&sorted_bag(a), &sorted_bag(b), nulls_low)
+        (ValueRef::List(_) | ValueRef::Tuple(_) | ValueRef::Bag(_), _) if same_type(a, b) => {
+            // Nested values sort with the same NULL order; bags and tuples are put in a
+            // canonical order first, which puts NULLs low
+            cmp_collections(a, b, &|x, y| order_cmp(x, y, nulls_low), &|x, y| {
+                order_cmp(x, y, true)
+            })
         }
         _ => match (Number::of(a), Number::of(b)) {
             (Some(a), Some(b)) => a.cmp(b),
@@ -131,34 +132,53 @@ fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {
     }
 }
 
-/// Element by element; a prefix sorts first.
-fn cmp_seq(a: &[ValueRef<'_>], b: &[ValueRef<'_>], nulls_low: bool) -> Ordering {
+/// Compares two values.
+type Cmp<'c> = &'c dyn Fn(&ValueRef<'_>, &ValueRef<'_>) -> Ordering;
+
+fn same_type(a: &ValueRef<'_>, b: &ValueRef<'_>) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
+}
+
+/// Two lists, tuples or bags of the same type, their elements compared with `cmp`:
+/// - lists element by element, a prefix first;
+/// - bags as lists of their elements sorted by `canon`;
+/// - tuples field by field, each tuple's fields sorted by name then value (by `canon`):
+///   names first, then values.
+fn cmp_collections(a: &ValueRef<'_>, b: &ValueRef<'_>, cmp: Cmp<'_>, canon: Cmp<'_>) -> Ordering {
+    match (a, b) {
+        (ValueRef::List(a), ValueRef::List(b)) => cmp_seq(a, b, cmp),
+        (ValueRef::Bag(a), ValueRef::Bag(b)) => {
+            cmp_seq(&sorted_bag(a, canon), &sorted_bag(b, canon), cmp)
+        }
+        (ValueRef::Tuple(a), ValueRef::Tuple(b)) => {
+            let (a, b) = (sorted_fields(a, canon), sorted_fields(b, canon));
+            a.iter()
+                .zip(&b)
+                .map(|((xn, xv), (yn, yv))| xn.cmp(yn).then_with(|| cmp(xv, yv)))
+                .find(|ord| ord.is_ne())
+                .unwrap_or_else(|| a.len().cmp(&b.len()))
+        }
+        _ => type_rank(a).cmp(&type_rank(b)),
+    }
+}
+
+fn cmp_seq(a: &[ValueRef<'_>], b: &[ValueRef<'_>], cmp: Cmp<'_>) -> Ordering {
     a.iter()
         .zip(b)
-        .map(|(x, y)| order_cmp(x, y, nulls_low))
-        .find(|cmp| cmp.is_ne())
+        .map(|(x, y)| cmp(x, y))
+        .find(|ord| ord.is_ne())
         .unwrap_or_else(|| a.len().cmp(&b.len()))
 }
 
-/// Field by field, each tuple's fields sorted by name then value: names first, then values.
-fn cmp_tuples(a: &TupleRef<'_>, b: &TupleRef<'_>, nulls_low: bool) -> Ordering {
-    let (a, b) = (sorted_fields(a), sorted_fields(b));
-    a.iter()
-        .zip(&b)
-        .map(|((xn, xv), (yn, yv))| xn.cmp(yn).then_with(|| order_cmp(xv, yv, nulls_low)))
-        .find(|cmp| cmp.is_ne())
-        .unwrap_or_else(|| a.len().cmp(&b.len()))
-}
-
-fn sorted_bag<'a>(bag: &[ValueRef<'a>]) -> Vec<ValueRef<'a>> {
+fn sorted_bag<'a>(bag: &[ValueRef<'a>], canon: Cmp<'_>) -> Vec<ValueRef<'a>> {
     let mut elems = bag.to_vec();
-    elems.sort_by(|x, y| order_cmp(x, y, true));
+    elems.sort_by(|x, y| canon(x, y));
     elems
 }
 
-fn sorted_fields<'a>(tuple: &TupleRef<'a>) -> Vec<(&'a str, ValueRef<'a>)> {
+fn sorted_fields<'a>(tuple: &TupleRef<'a>, canon: Cmp<'_>) -> Vec<(&'a str, ValueRef<'a>)> {
     let mut fields: Vec<_> = tuple.fields.iter().map(|f| (f.name, f.value)).collect();
-    fields.sort_by(|(xn, xv), (yn, yv)| xn.cmp(yn).then_with(|| order_cmp(xv, yv, true)));
+    fields.sort_by(|(xn, xv), (yn, yv)| xn.cmp(yn).then_with(|| canon(xv, yv)));
     fields
 }
 
@@ -318,6 +338,9 @@ fn compare_value_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> std::cmp::Ordering {
         (ValueRef::Decimal(a), ValueRef::Decimal(b)) => a.cmp(b),
         (ValueRef::Str(a), ValueRef::Str(b)) => a.cmp(b),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a.cmp(b),
+        (ValueRef::List(_) | ValueRef::Tuple(_) | ValueRef::Bag(_), _) if same_type(a, b) => {
+            cmp_collections(a, b, &compare_value_ref, &compare_value_ref)
+        }
 
         // Cross-type: order by type discriminant
         _ => type_ordinal(a).cmp(&type_ordinal(b)),

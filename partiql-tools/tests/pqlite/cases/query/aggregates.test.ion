@@ -123,3 +123,19 @@
     { k: null, c: 2 }
   ]
 }
+
+// Collection keys group by value
+{
+  sql: '''
+    SELECT t.l AS l, COUNT(*) AS c
+    FROM << {'l': [1]}, {'l': [2]}, {'l': [1]}, {'l': {'a': 2}}, {'l': {'a': 1}}, {'l': {'a': 2}} >> t
+    GROUP BY t.l
+    ORDER BY t.l
+  ''',
+  expect: [
+    { l: [1], c: 2 },
+    { l: [2], c: 1 },
+    { l: { a: 1 }, c: 1 },
+    { l: { a: 2 }, c: 2 }
+  ]
+}

@@ -816,6 +816,7 @@ impl<'a> Lowerer<'a> {
             scan_alias: String::new(),
             table_name: None,
             column_slots,
+            group_output: true,
         });
 
         let aggregate = Aggregate {
@@ -1083,6 +1084,7 @@ fn pushdown(
         scan_alias: scan.as_key.clone(),
         table_name,
         column_slots: FxHashMap::default(),
+        group_output: false,
     };
     if !whole_value {
         let mut projections = Vec::with_capacity(requests.len());
@@ -1112,6 +1114,7 @@ fn whole_row_binding(scan: &Scan) -> PipelineSlotResolver {
         scan_alias: scan.as_key.clone(),
         table_name: None,
         column_slots: FxHashMap::default(),
+        group_output: false,
     }
 }
 
@@ -1341,6 +1344,8 @@ struct PipelineSlotResolver {
     scan_alias: String,
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
+    /// GROUP BY's output instead: its keys and aggregates by name, with no alias.
+    group_output: bool,
 }
 
 impl PipelineSlotResolver {
@@ -1359,8 +1364,8 @@ impl PipelineSlotResolver {
     /// The binding's registers that names read in `reads` resolve to: the requested
     /// fields, and the whole row when it is read (or a field is read through it).
     fn registers_read(&self, reads: &CompileContext) -> Vec<SlotId> {
-        // GROUP BY's keys and aggregates: the field requests are only for FROM bindings
-        if self.scan_alias.is_empty() {
+        // Field requests name FROM bindings, never GROUP BY's keys and aggregates
+        if self.group_output {
             return self.column_slots.values().copied().collect();
         }
         let table = self.table_name.as_deref();
