@@ -124,6 +124,21 @@
   ]
 }
 
+// A MISSING key is NULL, but a nested MISSING is not a nested NULL (spec 11.1, 7.1.1).
+// Table data can't hold a nested MISSING, so the input is a literal.
+{
+  sql: '''
+    SELECT t.l AS l, COUNT(*) AS c
+    FROM << {'l': [NULL]}, {'l': [MISSING]}, {'l': [NULL]}, {'l': MISSING}, {'l': NULL} >> AS t
+    GROUP BY t.l
+  ''',
+  expect: $bag::[
+    { l: null, c: 2 },
+    { l: [$missing::null], c: 1 },
+    { l: [null], c: 2 }
+  ]
+}
+
 // Collection keys group by value
 {
   sql: '''

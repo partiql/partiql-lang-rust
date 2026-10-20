@@ -687,16 +687,6 @@ fn group_by_collection_keys() {
     );
 }
 
-/// A MISSING key is NULL, but a nested MISSING is not a nested NULL (spec 11.1, 7.1.1).
-#[test]
-fn group_by_nested_missing_is_not_null() {
-    assert_vm_eval(
-        "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
-        &[("data", "[{k: [null]}, {x: 1}, {k: null}, {k: [null]}]")],
-        "$bag::[{k: null, c: 2}, {k: [null], c: 2}]",
-    );
-}
-
 #[test]
 fn filter_false_returns_empty() {
     assert_vm_eval(

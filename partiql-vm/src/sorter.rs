@@ -335,7 +335,8 @@ fn compare_nested_key(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
 }
 
 /// Compare two ValueRefs for ordering. Used by the sorter for sort-based grouping.
-/// MISSING and NULL are treated as equal for grouping purposes (SQL semantics).
+/// MISSING and NULL are equal, as a GROUP BY key coerces MISSING to NULL (spec section
+/// 11.1); values nested in a key compare with `compare_nested_key`.
 fn compare_value_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> std::cmp::Ordering {
     match (a, b) {
         // MISSING and NULL are equivalent for GROUP BY
