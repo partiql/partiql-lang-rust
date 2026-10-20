@@ -322,6 +322,18 @@ fn shl_wide(m: u128, k: u32) -> (u128, u128) {
     }
 }
 
+/// A value nested in a GROUP BY key. Only the key itself coerces MISSING to NULL (spec
+/// section 11.1); nested values compare with `eqg` (section 7.1.1), under which NULL equals
+/// NULL and MISSING equals MISSING, but not each other.
+fn compare_nested_key(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
+    match (a, b) {
+        (ValueRef::Missing, ValueRef::Missing) => Ordering::Equal,
+        (ValueRef::Missing, _) => Ordering::Less,
+        (_, ValueRef::Missing) => Ordering::Greater,
+        _ => compare_value_ref(a, b),
+    }
+}
+
 /// Compare two ValueRefs for ordering. Used by the sorter for sort-based grouping.
 /// MISSING and NULL are treated as equal for grouping purposes (SQL semantics).
 fn compare_value_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> std::cmp::Ordering {
@@ -339,7 +351,7 @@ fn compare_value_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> std::cmp::Ordering {
         (ValueRef::Str(a), ValueRef::Str(b)) => a.cmp(b),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a.cmp(b),
         (ValueRef::List(_) | ValueRef::Tuple(_) | ValueRef::Bag(_), _) if same_type(a, b) => {
-            cmp_collections(a, b, &compare_value_ref, &compare_value_ref)
+            cmp_collections(a, b, &compare_nested_key, &compare_nested_key)
         }
 
         // Cross-type: order by type discriminant
