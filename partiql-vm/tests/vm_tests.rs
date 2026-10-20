@@ -365,6 +365,12 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
 // --- Main test harness ---
 
 fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
+    eval_vm_runs(query, tables, &[None]).pop().expect("one run")
+}
+
+/// Execute `query` once per entry of `runs` on the same VM, each run reading at most that
+/// many rows (all when `None`).
+fn eval_vm_runs(query: &str, tables: &[(&str, &str)], runs: &[Option<usize>]) -> Vec<Value> {
     // PartiqlCatalog for name resolution during lowering
     let mut catalog = PartiqlCatalog::default();
     for (name, _) in tables.iter() {
@@ -417,20 +423,25 @@ fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
     let mut vm = PartiQLVM::new(compiled, &exec_context).expect("VM creation failed");
     let shape = vm.shape().clone();
 
-    let iter = match vm.execute().expect("execute failed") {
-        ExecutionResult::Query(iter) => iter,
-    };
+    let mut values = vec![];
+    for take in runs {
+        let iter = match vm.execute().expect("execute failed") {
+            ExecutionResult::Query(iter) => iter,
+        };
 
-    let mut results: Vec<Value> = Vec::new();
-    for row_result in iter {
-        let row = row_result.expect("row evaluation failed");
-        results.push(row_to_value(&row, &shape));
-    }
+        let mut results: Vec<Value> = Vec::new();
+        for row_result in iter.take(take.unwrap_or(usize::MAX)) {
+            let row = row_result.expect("row evaluation failed");
+            results.push(row_to_value(&row, &shape));
+        }
 
-    match &shape {
-        Shape::Bag(_) | Shape::List(_) => Value::Bag(Box::new(Bag::from(results))),
-        Shape::Single(_) => results.into_iter().next().unwrap_or(Value::Missing),
+        values.push(match &shape {
+            Shape::Bag(_) => Value::Bag(Box::new(Bag::from(results))),
+            Shape::List(_) => Value::List(Box::new(List::from(results))),
+            Shape::Single(_) => results.into_iter().next().unwrap_or(Value::Missing),
+        });
     }
+    values
 }
 
 #[track_caller]
@@ -601,6 +612,78 @@ fn group_by_missing_key_is_null() {
         "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
         &[("data", "[{k: null}, {x: 1}, {k: 2}]")],
         "$bag::[{k: null, c: 2}, {k: 2, c: 1}]",
+    );
+}
+
+/// ORDER BY compares numbers by value across types, NaN first.
+#[test]
+fn order_by_numbers() {
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[(
+            "data",
+            "[{v: 2.5e0}, {v: 1}, {v: nan}, {v: 3.0}, {v: -inf}, {v: +inf}, {v: 2}]",
+        )],
+        "[nan, -inf, 1, 2, 2.5e0, 3.0, +inf]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v DESC",
+        &[("data", "[{v: 1.5}, {v: 2e0}, {v: 1}]")],
+        "[2e0, 1.5, 1]",
+    );
+}
+
+/// NULLs nested in a collection sort with the outer ones: last for ASC, first for DESC.
+#[test]
+fn order_by_nested_nulls() {
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[("data", "[{v: [1, null]}, {v: [1, 2]}]")],
+        "[[1, 2], [1, null]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v DESC",
+        &[("data", "[{v: [1, 2]}, {v: [1, null]}]")],
+        "[[1, null], [1, 2]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[("data", "[{v: {b: 1}}, {v: {a: 2}}, {v: {a: 1, b: 0}}]")],
+        "[{a: 1, b: 0}, {a: 2}, {b: 1}]",
+    );
+}
+
+/// Ints and floats compare exactly: near 2^53, `as f64` would make the order intransitive
+/// and `sort_by` panic.
+#[test]
+fn order_by_int_float_near_2_pow_53() {
+    assert_vm_eval(
+        "SELECT VALUE d.v FROM data AS d ORDER BY d.v",
+        &[("data", "[{v: 9007199254740992e0}, {v: 9007199254740993}, {v: 9007199254740992e0}, {v: 9007199254740992e0}, {v: 9007199254740992e0}, {v: 9007199254740992e0}, {v: 9007199254740993}, {v: 9007199254740992}, {v: 9007199254740992}, {v: 9007199254740992}, {v: 9007199254740992e0}, {v: 9007199254740993}, {v: 9007199254740993}, {v: 9007199254740992}, {v: 9007199254740992e0}, {v: 9007199254740993}, {v: 9007199254740992e0}, {v: 9007199254740992}, {v: 9007199254740992}, {v: 9007199254740992}, {v: 9007199254740992e0}, {v: 9007199254740992e0}, {v: 9007199254740992}, {v: 9007199254740993}, {v: 9007199254740992}, {v: 9007199254740993}, {v: 9007199254740993}, {v: 9007199254740993}, {v: 9007199254740992e0}, {v: 9007199254740993}, {v: 9007199254740992}, {v: 9007199254740992}, {v: 9007199254740993}]")],
+        "[9007199254740992e0, 9007199254740992e0, 9007199254740992e0, 9007199254740992e0, 9007199254740992e0, 9007199254740992, 9007199254740992, 9007199254740992, 9007199254740992e0, 9007199254740992, 9007199254740992e0, 9007199254740992e0, 9007199254740992, 9007199254740992, 9007199254740992, 9007199254740992e0, 9007199254740992e0, 9007199254740992, 9007199254740992, 9007199254740992e0, 9007199254740992, 9007199254740992, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993]",
+    );
+}
+
+/// Each run of a VM starts its sorters empty, even after a run that stopped early.
+#[test]
+fn rerun_starts_sorters_empty() {
+    let query = "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k ORDER BY k";
+    let data = [("data", "[{k: \"b\"}, {k: \"a\"}, {k: \"b\"}]")];
+    let expected = parse_ion("[{k: \"a\", c: 1}, {k: \"b\", c: 2}]");
+    let runs = eval_vm_runs(query, &data, &[Some(1), None, None]);
+    assert_eq!(runs[1..], [expected.clone(), expected]);
+}
+
+/// GROUP BY tells collection keys apart.
+#[test]
+fn group_by_collection_keys() {
+    assert_vm_eval(
+        "SELECT k, COUNT(*) AS c FROM data AS d GROUP BY d.k AS k",
+        &[(
+            "data",
+            "[{k: [1]}, {k: [2]}, {k: [1]}, {k: {a: 1}}, {k: {a: 2}}, {k: {a: 1}}]",
+        )],
+        "$bag::[{k: [1], c: 2}, {k: [2], c: 1}, {k: {a: 1}, c: 2}, {k: {a: 2}, c: 1}]",
     );
 }
 

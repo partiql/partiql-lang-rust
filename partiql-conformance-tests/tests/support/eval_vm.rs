@@ -487,7 +487,8 @@ pub(crate) fn eval_via_vm<'a>(
     }
 
     let result = match &shape {
-        Shape::Bag(_) | Shape::List(_) => Value::Bag(Box::new(Bag::from(results))),
+        Shape::Bag(_) => Value::Bag(Box::new(Bag::from(results))),
+        Shape::List(_) => Value::List(Box::new(List::from(results))),
         Shape::Single(_) => results.into_iter().next().unwrap_or(Value::Missing),
     };
 

@@ -111,15 +111,31 @@ pub struct CompiledPlan {
     /// Table function scans keyed by ScanId. These are bound at runtime by
     /// the `CreateTableFnCursor` instruction.
     pub(crate) table_fn_scans: HashMap<ScanId, TableFnScanMetadata>,
-    /// Sorter metadata for GROUP BY. Index = sorter_id. Each entry describes
-    /// the number of key fields used for sorting.
+    /// Sorter metadata for GROUP BY and ORDER BY. Index = sorter_id. Each entry describes
+    /// how the key fields order the records.
     pub(crate) sorter_metadata: Vec<SorterMetadata>,
 }
 
-/// Compile-time metadata for a sorter used by GROUP BY.
+/// Compile-time metadata for a sorter used by GROUP BY or ORDER BY.
 #[derive(Debug, Clone)]
 pub struct SorterMetadata {
-    pub key_count: usize,
+    pub keys: SortKeys,
+}
+
+/// How a sorter orders its records by their leading fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortKeys {
+    /// GROUP BY: the first `n` fields, in any order that brings equal keys together.
+    Group(usize),
+    /// ORDER BY: one field per sort key, in order.
+    Order(Vec<SortOrder>),
+}
+
+/// One ORDER BY sort key's direction and placement of NULL and MISSING.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SortOrder {
+    pub desc: bool,
+    pub nulls_first: bool,
 }
 
 // Safety: Program is Send+Sync (verified by its own unsafe impl).
@@ -393,7 +409,7 @@ impl PartiQLVM {
         for meta in compiled.sorter_metadata.iter() {
             let bank_id = banks.len();
             banks.push(Arena::new(16384));
-            sorters.push(Some(crate::sorter::Sorter::new(bank_id, meta.key_count)));
+            sorters.push(Some(crate::sorter::Sorter::new(bank_id, meta.keys.clone())));
         }
 
         let mut vm = PartiQLVM {
@@ -773,6 +789,21 @@ impl<'vm> QueryIterator<'vm> {
                         fields.push(copied);
                     }
                     sorter.insert(crate::sorter::SorterRecord { fields });
+                }
+
+                Inst::SorterReset { sorter_id } => {
+                    match self.vm.sorters.get_mut(*sorter_id as usize) {
+                        Some(Some(s)) => {
+                            s.reset();
+                            self.vm.banks[s.bank_id].reset();
+                        }
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    }
                 }
 
                 Inst::SorterSort {

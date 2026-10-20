@@ -13,15 +13,16 @@ use crate::error::{count_u16, EngineError, Result};
 use crate::expr::{lit_to_value, AggFunc, Expr, LogicalExprCompiler, SlotResolver};
 use crate::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::plan::{
-    CursorInfo, EvaluationMode, ObjectId, ScanId, ScanMetadata, SorterMetadata, TableFnScanMetadata,
+    CursorInfo, EvaluationMode, ObjectId, ScanId, ScanMetadata, SortKeys, SortOrder,
+    SorterMetadata, TableFnScanMetadata,
 };
 use crate::source::{
     DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TableFunctionHandle,
 };
 use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId,
-    Project as LogicalProject, Scan, ValueExpr, VarRefType,
+    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, OrderBy,
+    Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -73,6 +74,8 @@ pub(crate) enum Op {
     /// GROUP BY: one row per group of `input`'s rows. Blocking: it reads all of `input`
     /// before its first row.
     Aggregate(Box<Aggregate>),
+    /// ORDER BY: the rows of `input`, sorted. Blocking.
+    Sort(Box<Sort>),
     /// The first rows of `input`.
     Limit(Box<Limit>),
 }
@@ -188,6 +191,21 @@ pub(crate) struct Aggregate {
     /// A group's row is produced from two places (a change of keys, and the last group),
     /// so what follows is a subroutine returning through this register.
     pub(crate) ret: SlotId,
+}
+
+/// ORDER BY. Each row of `input` is evaluated into a record (its sort keys, then its
+/// payload: every register the operators above can read) and inserted into `sorter`. The
+/// sorted records are then read back, each copying its payload back into those registers.
+pub(crate) struct Sort {
+    pub(crate) input: Op,
+    pub(crate) sorter: u16,
+    /// The sort keys, evaluated into consecutive registers from `insert`.
+    pub(crate) keys: Vec<Expr>,
+    /// The registers carried through the sort, copied into the record after the keys.
+    pub(crate) payload: Vec<SlotId>,
+    pub(crate) insert: SlotId,
+    /// Where each sorted record is read back into.
+    pub(crate) record: SlotId,
 }
 
 pub(crate) struct GroupAgg {
@@ -350,6 +368,8 @@ struct Lowered {
     resolver: ResolverKind,
     /// The shape of a result row, once a projection has set it.
     shape: Option<Shape>,
+    /// The rows are in ORDER BY order, so the result is a list.
+    ordered: bool,
 }
 
 impl Lowered {
@@ -358,6 +378,7 @@ impl Lowered {
             op,
             resolver,
             shape,
+            ordered: false,
         }
     }
 
@@ -466,13 +487,16 @@ impl<'a> Lowerer<'a> {
             return Ok(Lowered::new(op, resolver, None));
         }
 
+        // What the operators above read, before this operator adds its own reads
+        let read_above = matches!(op, BindingsOp::OrderBy(_)).then(|| ctx.clone());
         extract_fields(op, ctx);
         let Lowered {
             op: input,
             resolver,
             shape,
+            ordered,
         } = self.lower_op(graph, graph.single_input(id)?, ctx)?;
-        Ok(match op {
+        let mut lowered = match op {
             BindingsOp::Filter(filter) => {
                 let cond = self.lower_cond(&filter.expr, &resolver)?;
                 Lowered::new(
@@ -522,13 +546,29 @@ impl<'a> Lowerer<'a> {
                 let (aggregate, grouped) = self.lower_group_by(group_by, input, &resolver)?;
                 Lowered::new(Op::Aggregate(Box::new(aggregate)), grouped, shape)
             }
+            BindingsOp::OrderBy(order_by) => {
+                let read_above = read_above.unwrap_or_default();
+                let sort = self.lower_order_by(order_by, input, &resolver, &read_above)?;
+                let mut sorted = Lowered::new(Op::Sort(Box::new(sort)), resolver, shape);
+                sorted.ordered = true;
+                sorted
+            }
             other => {
                 return Err(EngineError::InvalidPlan(format!(
                     "unsupported operator in pipeline: {:?}",
                     std::mem::discriminant(other)
                 )))
             }
-        })
+        };
+        // The operators above a sort keep its order
+        if ordered {
+            lowered.ordered = true;
+            lowered.shape = lowered.shape.map(|shape| match shape {
+                Shape::Bag(row) => Shape::List(row),
+                shape => shape,
+            });
+        }
+        Ok(lowered)
     }
 
     /// Lay out a FROM subtree: compile its scans, give each a cursor and a window of
@@ -732,7 +772,7 @@ impl<'a> Lowerer<'a> {
         }
         let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
         self.sorters.push(SorterMetadata {
-            key_count: key_count as usize,
+            keys: SortKeys::Group(key_count as usize),
         });
         let insert = self.alloc(record_len)?.start;
 
@@ -776,6 +816,7 @@ impl<'a> Lowerer<'a> {
             scan_alias: String::new(),
             table_name: None,
             column_slots,
+            group_output: true,
         });
 
         let aggregate = Aggregate {
@@ -795,6 +836,45 @@ impl<'a> Lowerer<'a> {
             ret: self.alloc_reg()?,
         };
         Ok((aggregate, grouped))
+    }
+
+    /// Lower ORDER BY over `input`. Its rows keep `input`'s bindings: the payload is every
+    /// register of them that the operators above read (`read_above`).
+    fn lower_order_by(
+        &mut self,
+        order_by: &OrderBy,
+        input: Op,
+        resolver: &ResolverKind,
+        read_above: &CompileContext,
+    ) -> Result<Sort> {
+        let keys = order_by
+            .specs
+            .iter()
+            .map(|spec| lower_expr(&spec.expr, resolver))
+            .collect::<Result<Vec<_>>>()?;
+        let orders = order_by
+            .specs
+            .iter()
+            .map(|spec| SortOrder {
+                desc: matches!(spec.order, SortSpecOrder::Desc),
+                nulls_first: matches!(spec.null_order, SortSpecNullOrder::First),
+            })
+            .collect();
+        let payload = resolver.registers_read(read_above);
+        // Every index into the record fits a register number once the record is allocated
+        let record_len = keys.len() + payload.len();
+        let sorter = count_u16(self.sorters.len(), "ORDER BY clauses")?;
+        self.sorters.push(SorterMetadata {
+            keys: SortKeys::Order(orders),
+        });
+        Ok(Sort {
+            input,
+            sorter,
+            keys,
+            payload,
+            insert: self.alloc(record_len)?.start,
+            record: self.alloc(record_len)?.start,
+        })
     }
 
     /// Lower a query without FROM. Catalog objects the expression names are read through
@@ -1004,6 +1084,7 @@ fn pushdown(
         scan_alias: scan.as_key.clone(),
         table_name,
         column_slots: FxHashMap::default(),
+        group_output: false,
     };
     if !whole_value {
         let mut projections = Vec::with_capacity(requests.len());
@@ -1033,6 +1114,7 @@ fn whole_row_binding(scan: &Scan) -> PipelineSlotResolver {
         scan_alias: scan.as_key.clone(),
         table_name: None,
         column_slots: FxHashMap::default(),
+        group_output: false,
     }
 }
 
@@ -1076,6 +1158,11 @@ fn extract_fields(op: &BindingsOp, ctx: &mut CompileContext) {
             }
             for agg in &group_by.aggregate_exprs {
                 extractor.extract(&agg.expr);
+            }
+        }
+        BindingsOp::OrderBy(order_by) => {
+            for spec in &order_by.specs {
+                extractor.extract(&spec.expr);
             }
         }
         _ => {}
@@ -1169,6 +1256,19 @@ impl SlotResolver for ResolverKind {
 }
 
 impl ResolverKind {
+    /// The registers that names read in `reads` resolve to, in order.
+    fn registers_read(&self, reads: &CompileContext) -> Vec<SlotId> {
+        let mut regs: Vec<SlotId> = match self {
+            ResolverKind::Pipeline(r) => r.registers_read(reads),
+            ResolverKind::Multi(rs) => rs.iter().flat_map(|r| r.registers_read(reads)).collect(),
+            ResolverKind::Global(r) => r.slots.values().copied().collect(),
+            ResolverKind::Empty => vec![],
+        };
+        regs.sort_unstable();
+        regs.dedup();
+        regs
+    }
+
     /// The per-binding resolvers of a FROM subtree.
     fn into_bindings(self) -> Result<Vec<PipelineSlotResolver>> {
         match self {
@@ -1244,6 +1344,8 @@ struct PipelineSlotResolver {
     scan_alias: String,
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
+    /// GROUP BY's output instead: its keys and aggregates by name, with no alias.
+    group_output: bool,
 }
 
 impl PipelineSlotResolver {
@@ -1257,6 +1359,30 @@ impl PipelineSlotResolver {
             }
         }
         false
+    }
+
+    /// The binding's registers that names read in `reads` resolve to: the requested
+    /// fields, and the whole row when it is read (or a field is read through it).
+    fn registers_read(&self, reads: &CompileContext) -> Vec<SlotId> {
+        // Field requests name FROM bindings, never GROUP BY's keys and aggregates
+        if self.group_output {
+            return self.column_slots.values().copied().collect();
+        }
+        let table = self.table_name.as_deref();
+        let mut whole_row = reads.needs_whole_value(&self.scan_alias, table);
+        let mut regs = vec![];
+        for request in reads.requests_for_alias(&self.scan_alias, table) {
+            match self.resolve_field(&BindingsName::CaseInsensitive(
+                request.field_name.as_str().into(),
+            )) {
+                Some(slot) => regs.push(slot),
+                None => whole_row = true,
+            }
+        }
+        if whole_row {
+            regs.extend(self.base_row_slot);
+        }
+        regs
     }
 
     /// The same binding with its registers moved up by `offset`.

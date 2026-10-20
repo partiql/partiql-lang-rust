@@ -27,7 +27,7 @@ use crate::error::{EngineError, Result};
 use crate::expr::{Inst, Program, ProgramBuilder};
 use crate::lower_ir::{
     self, Aggregate, Cond, Filter, Join, JoinType, Limit, Op, Open, Output, Project, Query, Root,
-    ScanLoop,
+    ScanLoop, Sort,
 };
 use crate::plan::{CompiledPlan, EvaluationMode};
 use crate::value::ValueOwned;
@@ -283,6 +283,7 @@ impl<'q> Emitter<'q> {
             Op::Filter(filter) => self.emit_filter(filter, row),
             Op::Project(project) => self.emit_project(project, row),
             Op::Aggregate(aggregate) => self.emit_aggregate(aggregate, row),
+            Op::Sort(sort) => self.emit_sort(sort, row),
             Op::Limit(limit) => self.emit_limit(limit, row),
         }
     }
@@ -553,7 +554,7 @@ impl<'q> Emitter<'q> {
                 self.emit_null(&join.left)?;
                 self.emit_null(&join.right)?;
             }
-            Op::Filter(_) | Op::Project(_) | Op::Aggregate(_) | Op::Limit(_) => {
+            Op::Filter(_) | Op::Project(_) | Op::Aggregate(_) | Op::Sort(_) | Op::Limit(_) => {
                 return Err(EngineError::InvalidPlan(
                     "an outer join side that is not a FROM source".to_string(),
                 ))
@@ -598,7 +599,7 @@ impl<'q> Emitter<'q> {
     /// A sort-based GROUP BY. It reads all of its input into the sorter, then reads the
     /// records back sorted, calling `row` (as subroutine OUTPUT) once per group:
     /// ```text
-    ///         has_data = false; reset the accumulators
+    ///         SorterReset; keys = MISSING; has_data = false; reset the accumulators
     ///         for each input row: evaluate its record (MISSING keys as NULL); SorterInsert
     ///         SorterSort, empty→done
     ///   read: SorterData
@@ -616,6 +617,11 @@ impl<'q> Emitter<'q> {
             accum_start: agg.accums.start,
             count: agg.accums.len() as u16,
         };
+        self.asm.push(Inst::SorterReset { sorter_id });
+        // The keys of a previous run point into the reset bank; the first record compares them
+        for k in 0..agg.key_count {
+            self.asm.load_const(agg.keys + k, ValueOwned::Missing)?;
+        }
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         self.asm.push(reset_accums.clone());
         self.emit_op(&agg.input, &mut |e| {
@@ -701,6 +707,72 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
+    /// ORDER BY. It reads all of its input into the sorter, then replays the records
+    /// sorted:
+    /// ```text
+    ///         SorterReset
+    ///         for each input row: evaluate the keys; copy the payload; SorterInsert
+    ///         SorterSort, empty→done
+    ///   read: SorterData
+    ///         copy the payload back into its registers
+    ///         <row>
+    ///         SorterNext → read
+    ///   done:
+    /// ```
+    fn emit_sort(&mut self, sort: &'q Sort, row: Row<'_, 'q>) -> Result<()> {
+        let sorter_id = sort.sorter;
+        let key_count = sort.keys.len() as u16;
+        let payload = || (key_count..).zip(&sort.payload);
+        self.asm.push(Inst::SorterReset { sorter_id });
+        self.emit_op(&sort.input, &mut |e| {
+            for (dst, key) in (sort.insert..).zip(&sort.keys) {
+                e.asm.b.emit_expr(key, dst)?;
+            }
+            for (i, &src) in payload() {
+                e.asm.push(Inst::Copy {
+                    dst: sort.insert + i,
+                    src,
+                });
+            }
+            e.asm.push(Inst::SorterInsert {
+                sorter_id,
+                src_reg: sort.insert,
+                reg_count: key_count + sort.payload.len() as u16,
+            });
+            Ok(())
+        })?;
+
+        let (read, done) = (self.asm.label(), self.asm.label());
+        self.asm.push_to(
+            Inst::SorterSort {
+                sorter_id,
+                eof_target: 0,
+            },
+            done,
+        );
+        self.asm.bind(read);
+        self.asm.push(Inst::SorterData {
+            sorter_id,
+            dst_reg: sort.record,
+        });
+        for (i, &dst) in payload() {
+            self.asm.push(Inst::Copy {
+                dst,
+                src: sort.record + i,
+            });
+        }
+        row(self)?;
+        self.asm.push_to(
+            Inst::SorterNext {
+                sorter_id,
+                target: 0,
+            },
+            read,
+        );
+        self.asm.bind(done);
+        Ok(())
+    }
+
     /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group (unless there are
     /// no keys), finalize the aggregates, then `row`.
     fn emit_group_output(&mut self, agg: &'q Aggregate, row: Row<'_, 'q>) -> Result<Label> {
@@ -737,6 +809,7 @@ fn cursors(op: &Op) -> Vec<u16> {
         Op::Filter(filter) => cursors(&filter.input),
         Op::Project(project) => cursors(&project.input),
         Op::Aggregate(aggregate) => cursors(&aggregate.input),
+        Op::Sort(sort) => cursors(&sort.input),
         Op::Limit(limit) => cursors(&limit.input),
     }
 }
