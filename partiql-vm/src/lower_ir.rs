@@ -10,7 +10,9 @@
 use crate::arena::SlotId;
 use crate::catalog::CompilationContext;
 use crate::error::{count_u16, EngineError, Result};
-use crate::expr::{lit_to_value, AggFunc, Expr, LogicalExprCompiler, SlotResolver};
+use crate::expr::{
+    lit_to_value, AggFunc, Expr, LogicalExprCompiler, LoweredSubqueries, SlotResolver,
+};
 use crate::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::plan::{
     CursorInfo, EvaluationMode, ObjectId, ScanId, ScanMetadata, SortKeys, SortOrder,
@@ -22,10 +24,12 @@ use crate::source::{
 use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
     BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, OrderBy,
-    Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder, ValueExpr, VarRefType,
+    PathComponent, Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder,
+    SubQueryExpr, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -45,6 +49,8 @@ pub(crate) struct Query {
     pub(crate) expr_scan_ids: Vec<ScanId>,
     pub(crate) table_fn_scans: HashMap<ScanId, TableFnScanMetadata>,
     pub(crate) sorters: Vec<SorterMetadata>,
+    /// Index = the `id` of `Expr::Subquery`.
+    pub(crate) subqueries: Vec<Subquery>,
 }
 
 pub(crate) enum Root {
@@ -208,6 +214,24 @@ pub(crate) struct Sort {
     pub(crate) record: SlotId,
 }
 
+/// A subquery, evaluated to the collection of its rows: each row of `input` (its registers
+/// `row`, copied into consecutive registers from `record`) is inserted into `sorter`, then the
+/// records are collected into `dst`.
+pub(crate) struct Subquery {
+    pub(crate) input: Op,
+    pub(crate) sorter: u16,
+    pub(crate) row: Vec<SlotId>,
+    pub(crate) record: SlotId,
+    /// A struct row's attribute names, one per row register; none for a row of one value.
+    pub(crate) fields: Option<Vec<String>>,
+    /// The rows are in ORDER BY order, so the collection is a list.
+    pub(crate) ordered: bool,
+    pub(crate) dst: SlotId,
+    /// An uncorrelated subquery (one that reads nothing of the queries around it) runs at most
+    /// once: this register is set once it has.
+    pub(crate) once: Option<SlotId>,
+}
+
 pub(crate) struct GroupAgg {
     /// The record register holding the aggregate's input.
     pub(crate) input: SlotId,
@@ -234,6 +258,8 @@ pub(crate) fn lower(
         scan_metadata: HashMap::new(),
         inline_scans: HashMap::new(),
         sorters: Vec::new(),
+        subqueries: Vec::new(),
+        scopes: Vec::new(),
     };
     let graph = PlanGraph::new(plan);
     let top = graph.single_input(graph.find_sink()?)?;
@@ -269,6 +295,7 @@ pub(crate) fn lower(
         expr_scan_ids,
         table_fn_scans,
         sorters: lowerer.sorters,
+        subqueries: lowerer.subqueries,
     })
 }
 
@@ -340,6 +367,22 @@ impl<'p> PlanGraph<'p> {
         }
         sink.ok_or_else(|| EngineError::InvalidPlan("no sink node found".to_string()))
     }
+
+    /// The operator whose rows are a subquery's: the one that flows into no other. A
+    /// subquery's plan has no sink.
+    fn subquery_top(&self) -> Result<OpId> {
+        let mut tops = self
+            .plan
+            .operators_by_id()
+            .map(|(id, _)| id)
+            .filter(|&id| self.plan.flows().iter().all(|&(src, _, _)| src != id));
+        match (tops.next(), tops.next()) {
+            (Some(top), None) => Ok(top),
+            _ => Err(EngineError::InvalidPlan(
+                "subquery plan without a single top operator".to_string(),
+            )),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +402,17 @@ struct Lowerer<'a> {
     inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
     /// Index = sorter_id.
     sorters: Vec<SorterMetadata>,
+    subqueries: Vec<Subquery>,
+    /// While lowering a subquery: the scopes of the queries around it, outermost first.
+    scopes: Vec<OuterScope>,
+}
+
+/// The names of a query around the subquery being lowered.
+struct OuterScope {
+    resolver: ResolverKind,
+    /// Set when the subquery lowered with this scope pushed (or one inside it) reads a name of
+    /// this scope or one further out.
+    correlated: Cell<bool>,
 }
 
 /// A lowered operator, with what the operators above it see of its rows.
@@ -521,7 +575,7 @@ impl<'a> Lowerer<'a> {
                 let dst = self.alloc_reg()?;
                 let outputs = vec![Output::Eval {
                     dst,
-                    expr: lower_expr(&pv.expr, &resolver)?,
+                    expr: self.lower_expr(&pv.expr, &resolver)?,
                 }];
                 let shape = Shape::Bag(RowShape::Register(dst as usize, PhysicalType::Dynamic));
                 Lowered::projected(input, outputs, shape)
@@ -658,31 +712,128 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn lower_open(&self, scan_id: ScanId, resolver: &ResolverKind) -> Result<Open> {
+    fn lower_open(&mut self, scan_id: ScanId, resolver: &ResolverKind) -> Result<Open> {
         Ok(match &self.scans[&scan_id] {
             ScanKind::Bound => Open::Bound,
-            ScanKind::TableFn(tf) => Open::TableFn {
-                func_name: tf.func_name.clone(),
-                args: tf
-                    .arg_slots
-                    .iter()
-                    .zip(&tf.arguments)
-                    .map(|(&slot, arg)| Ok((slot, lower_expr(arg, resolver)?)))
-                    .collect::<Result<_>>()?,
-            },
-            ScanKind::Expr { expr, src } => Open::Expr {
-                src: *src,
-                expr: lower_expr(expr, resolver)?,
-                assert_collection: self.mode == EvaluationMode::Strict,
-            },
+            ScanKind::TableFn(tf) => {
+                let func_name = tf.func_name.clone();
+                let (arg_slots, arguments) = (tf.arg_slots.clone(), tf.arguments.clone());
+                let mut args = Vec::with_capacity(arguments.len());
+                for (slot, arg) in arg_slots.into_iter().zip(&arguments) {
+                    args.push((slot, self.lower_expr(arg, resolver)?));
+                }
+                Open::TableFn { func_name, args }
+            }
+            ScanKind::Expr { expr, src } => {
+                let (expr, src) = (expr.clone(), *src);
+                Open::Expr {
+                    src,
+                    expr: self.lower_expr(&expr, resolver)?,
+                    assert_collection: self.mode == EvaluationMode::Strict,
+                }
+            }
         })
     }
 
-    fn lower_cond(&mut self, expr: &ValueExpr, resolver: &impl SlotResolver) -> Result<Cond> {
+    fn lower_cond(&mut self, expr: &ValueExpr, resolver: &ResolverKind) -> Result<Cond> {
         Ok(Cond {
             pred: self.alloc_reg()?,
-            expr: lower_expr(expr, resolver)?,
+            expr: self.lower_expr(expr, resolver)?,
         })
+    }
+
+    /// Lower `expr`, resolving names with `resolver`, then with those of the queries around
+    /// this one. Its subqueries are lowered first.
+    fn lower_expr(&mut self, expr: &ValueExpr, resolver: &ResolverKind) -> Result<Expr> {
+        let mut found = vec![];
+        subquery_exprs(expr, &mut found);
+        let mut subqueries = LoweredSubqueries::default();
+        for subquery in found {
+            let lowered = self.lower_subquery(subquery, resolver)?;
+            subqueries.insert(std::ptr::from_ref(subquery), lowered);
+        }
+        let scoped = ScopedResolver {
+            inner: resolver,
+            outer: &self.scopes,
+        };
+        LogicalExprCompiler::new(&scoped)
+            .with_subqueries(&subqueries)
+            .lower_expr(expr)
+    }
+
+    /// Lower a subquery of an expression that names things with `resolver`.
+    fn lower_subquery(&mut self, subquery: &SubQueryExpr, resolver: &ResolverKind) -> Result<Expr> {
+        let graph = PlanGraph::new(&subquery.plan);
+        let top = match graph.find_sink() {
+            Ok(sink) => graph.single_input(sink)?,
+            Err(_) => graph.subquery_top()?,
+        };
+        if let BindingsOp::ExprQuery(_) = graph.operator(top)? {
+            return Err(EngineError::UnsupportedExpr(
+                "subquery without FROM".to_string(),
+            ));
+        }
+        self.scopes.push(OuterScope {
+            resolver: resolver.clone(),
+            correlated: Cell::new(false),
+        });
+        let lowered = self.lower_op(&graph, top, &mut CompileContext::new());
+        let scope = self.scopes.pop().expect("pushed above");
+        let lowered = lowered?;
+
+        let (row, fields) = match lowered.shape {
+            Some(
+                Shape::Bag(RowShape::Register(reg, _)) | Shape::List(RowShape::Register(reg, _)),
+            ) => (vec![reg as SlotId], None),
+            Some(Shape::Bag(RowShape::Struct(shapes)) | Shape::List(RowShape::Struct(shapes))) => {
+                let mut row = Vec::with_capacity(shapes.len());
+                let mut fields = Vec::with_capacity(shapes.len());
+                for shape in shapes {
+                    let (FieldName::Static(name), RowShape::Register(reg, _)) =
+                        (shape.name, shape.value)
+                    else {
+                        return Err(EngineError::InvalidPlan(
+                            "subquery row with computed attributes".to_string(),
+                        ));
+                    };
+                    fields.push(name.to_string());
+                    row.push(reg as SlotId);
+                }
+                (row, Some(fields))
+            }
+            _ => {
+                return Err(EngineError::InvalidPlan(
+                    "subquery without a projection".to_string(),
+                ))
+            }
+        };
+        // Insert the row's registers in place when they are consecutive
+        let record = match row.first() {
+            Some(&first) if row.windows(2).all(|w| w[1] == w[0] + 1) => first,
+            _ => self.alloc(row.len())?.start,
+        };
+        let sorter = count_u16(self.sorters.len(), "subqueries")?;
+        self.sorters.push(SorterMetadata {
+            keys: SortKeys::Group(0),
+        });
+        let dst = self.alloc_reg()?;
+        let once = match scope.correlated.get() {
+            true => None,
+            false => Some(self.alloc_reg()?),
+        };
+        let id = u32::try_from(self.subqueries.len())
+            .map_err(|_| EngineError::TooLarge("subqueries"))?;
+        self.subqueries.push(Subquery {
+            input: lowered.op,
+            sorter,
+            row,
+            record,
+            fields,
+            ordered: lowered.ordered,
+            dst,
+            once,
+        });
+        Ok(Expr::Subquery { id, dst })
     }
 
     /// Lower a SELECT list: its outputs and the shape of its rows.
@@ -697,7 +848,7 @@ impl<'a> Lowerer<'a> {
         for (dst, (name, expr)) in dsts.zip(&project.exprs) {
             outputs.push(Output::Eval {
                 dst,
-                expr: lower_expr(expr, resolver)?,
+                expr: self.lower_expr(expr, resolver)?,
             });
             fields.push(FieldShape {
                 name: FieldName::Static(name.clone()),
@@ -719,7 +870,7 @@ impl<'a> Lowerer<'a> {
                 );
                 outputs.push(Output::Eval {
                     dst,
-                    expr: lower_expr(&row, resolver)?,
+                    expr: self.lower_expr(&row, resolver)?,
                 });
                 outputs.push(match self.mode {
                     EvaluationMode::Permissive => Output::CoerceToTuple(dst),
@@ -765,10 +916,10 @@ impl<'a> Lowerer<'a> {
 
         let mut record_exprs = Vec::with_capacity(record_len);
         for (_, expr) in &keys {
-            record_exprs.push(lower_expr(expr, resolver)?);
+            record_exprs.push(self.lower_expr(expr, resolver)?);
         }
         for agg in &group_by.aggregate_exprs {
-            record_exprs.push(lower_expr(&agg.expr, resolver)?);
+            record_exprs.push(self.lower_expr(&agg.expr, resolver)?);
         }
         let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
         self.sorters.push(SorterMetadata {
@@ -847,11 +998,10 @@ impl<'a> Lowerer<'a> {
         resolver: &ResolverKind,
         read_above: &CompileContext,
     ) -> Result<Sort> {
-        let keys = order_by
-            .specs
-            .iter()
-            .map(|spec| lower_expr(&spec.expr, resolver))
-            .collect::<Result<Vec<_>>>()?;
+        let mut keys = Vec::with_capacity(order_by.specs.len());
+        for spec in &order_by.specs {
+            keys.push(self.lower_expr(&spec.expr, resolver)?);
+        }
         let orders = order_by
             .specs
             .iter()
@@ -917,7 +1067,7 @@ impl<'a> Lowerer<'a> {
         } else {
             ResolverKind::Global(GlobalSlotResolver { slots })
         };
-        let expr = lower_expr(&expr_query.expr, &resolver)?;
+        let expr = self.lower_expr(&expr_query.expr, &resolver)?;
         let dst = self.alloc_reg()?;
         let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
         Ok((Root::Expr { cursors, expr, dst }, shape))
@@ -1169,8 +1319,53 @@ fn extract_fields(op: &BindingsOp, ctx: &mut CompileContext) {
     }
 }
 
-fn lower_expr(expr: &ValueExpr, resolver: &impl SlotResolver) -> Result<Expr> {
-    LogicalExprCompiler::new(resolver).lower_expr(expr)
+/// The subqueries of `expr`, outermost first; not those inside them.
+fn subquery_exprs<'e>(expr: &'e ValueExpr, out: &mut Vec<&'e SubQueryExpr>) {
+    let mut walk_all = |exprs: &mut dyn Iterator<Item = &'e ValueExpr>| {
+        exprs.for_each(|e| subquery_exprs(e, out));
+    };
+    match expr {
+        ValueExpr::SubQueryExpr(subquery) => out.push(subquery),
+        ValueExpr::Lit(_) | ValueExpr::VarRef(..) | ValueExpr::DBRef(_) => {}
+        ValueExpr::Path(base, steps) => {
+            let step_exprs = steps.iter().filter_map(|step| match step {
+                PathComponent::KeyExpr(e) | PathComponent::IndexExpr(e) => Some(&**e),
+                _ => None,
+            });
+            walk_all(&mut std::iter::once(&**base).chain(step_exprs));
+        }
+        ValueExpr::UnExpr(_, e) => walk_all(&mut std::iter::once(&**e)),
+        ValueExpr::BinaryExpr(_, lhs, rhs) => walk_all(&mut [&**lhs, &**rhs].into_iter()),
+        ValueExpr::DynamicLookup(lookups) => walk_all(&mut lookups.iter()),
+        ValueExpr::TupleExpr(t) => walk_all(&mut t.attrs.iter().chain(&t.values)),
+        ValueExpr::ListExpr(l) => walk_all(&mut l.elements.iter()),
+        ValueExpr::BagExpr(b) => walk_all(&mut b.elements.iter()),
+        ValueExpr::BetweenExpr(b) => walk_all(&mut [&*b.value, &*b.from, &*b.to].into_iter()),
+        ValueExpr::PatternMatchExpr(m) => {
+            walk_all(&mut std::iter::once(&*m.value));
+            if let Pattern::LikeNonStringNonLiteral(p) = &m.pattern {
+                walk_all(&mut [&*p.pattern, &*p.escape].into_iter());
+            }
+        }
+        ValueExpr::SimpleCase(c) => {
+            let cases = c.cases.iter().flat_map(|(w, t)| [&**w, &**t]);
+            walk_all(
+                &mut std::iter::once(&*c.expr)
+                    .chain(cases)
+                    .chain(c.default.as_deref()),
+            );
+        }
+        ValueExpr::SearchedCase(c) => {
+            let cases = c.cases.iter().flat_map(|(w, t)| [&**w, &**t]);
+            walk_all(&mut cases.chain(c.default.as_deref()));
+        }
+        ValueExpr::IsTypeExpr(t) => walk_all(&mut std::iter::once(&*t.expr)),
+        ValueExpr::NullIfExpr(n) => walk_all(&mut [&*n.lhs, &*n.rhs].into_iter()),
+        ValueExpr::CoalesceExpr(c) => walk_all(&mut c.elements.iter()),
+        ValueExpr::Call(c) => walk_all(&mut c.arguments.iter()),
+        // Expression lowering rejects the rest
+        _ => {}
+    }
 }
 
 fn agg_func(func: &partiql_logical::AggFunc) -> Result<AggFunc> {
@@ -1195,6 +1390,7 @@ fn agg_func(func: &partiql_logical::AggFunc) -> Result<AggFunc> {
 // ---------------------------------------------------------------------------
 
 /// How a scope's names resolve to registers.
+#[derive(Clone)]
 enum ResolverKind {
     /// Single-scan resolver (maps alias and column names to slots)
     Pipeline(PipelineSlotResolver),
@@ -1301,7 +1497,61 @@ fn binding_for<'r>(
     }
 }
 
+/// The names of a query: its own (`inner`), then those of the queries around it, innermost
+/// first. Resolving a name of an outer query marks the subqueries in between as correlated.
+/// Unqualified fields, and bindings whose pushed-down fields a path may read, are the query's
+/// own only: an outer binding is read whole, so an inner field `a` never answers `e.a`.
+struct ScopedResolver<'r> {
+    inner: &'r ResolverKind,
+    outer: &'r [OuterScope],
+}
+
+impl ScopedResolver<'_> {
+    fn outward(&self, resolve: impl Fn(&ResolverKind) -> Option<SlotId>) -> Option<SlotId> {
+        self.outer
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(depth, scope)| {
+                let slot = resolve(&scope.resolver)?;
+                for scope in &self.outer[depth..] {
+                    scope.correlated.set(true);
+                }
+                Some(slot)
+            })
+    }
+}
+
+impl SlotResolver for ScopedResolver<'_> {
+    fn resolve_var(&self, name: &BindingsName<'_>, scope: VarRefType) -> Option<SlotId> {
+        self.inner
+            .resolve_var(name, scope.clone())
+            .or_else(|| self.outward(|r| r.resolve_var(name, scope.clone())))
+    }
+    fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
+        self.inner
+            .resolve_alias(name)
+            .or_else(|| self.outward(|r| r.resolve_alias(name)))
+    }
+    fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
+        self.inner.resolve_field(name)
+    }
+    fn is_alias(&self, name: &BindingsName<'_>) -> bool {
+        self.inner.is_alias(name)
+    }
+    fn resolve_qualified(
+        &self,
+        alias: &BindingsName<'_>,
+        field: &BindingsName<'_>,
+    ) -> Option<SlotId> {
+        self.inner
+            .resolve_qualified(alias, field)
+            .or_else(|| self.outward(|r| r.resolve_qualified(alias, field)))
+    }
+}
+
 /// Resolver for global DB object references in expression queries.
+#[derive(Clone)]
 struct GlobalSlotResolver {
     slots: FxHashMap<String, SlotId>,
 }
@@ -1339,6 +1589,7 @@ impl SlotResolver for GlobalSlotResolver {
 
 /// Resolves the names of one FROM binding: its alias (or table name) to the register
 /// holding its whole row, and its pushed-down fields to theirs.
+#[derive(Clone)]
 struct PipelineSlotResolver {
     base_row_slot: Option<SlotId>,
     scan_alias: String,

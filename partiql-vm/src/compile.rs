@@ -24,10 +24,10 @@
 use crate::arena::SlotId;
 use crate::catalog::CompilationContext;
 use crate::error::{EngineError, Result};
-use crate::expr::{Inst, Program, ProgramBuilder};
+use crate::expr::{Expr, Inst, Program, ProgramBuilder};
 use crate::lower_ir::{
     self, Aggregate, Cond, Filter, Join, JoinType, Limit, Op, Open, Output, Project, Query, Root,
-    ScanLoop, Sort,
+    ScanLoop, Sort, Subquery,
 };
 use crate::plan::{CompiledPlan, EvaluationMode};
 use crate::value::ValueOwned;
@@ -257,7 +257,7 @@ impl<'q> Emitter<'q> {
                         halt,
                     );
                 }
-                self.asm.b.emit_expr(expr, *dst)?;
+                self.emit_expr(expr, *dst)?;
                 self.asm.push(Inst::EmitRow);
                 self.asm.bind(halt);
                 self.asm.push(Inst::Halt);
@@ -328,6 +328,10 @@ impl<'q> Emitter<'q> {
     /// ```
     fn emit_project(&mut self, project: &'q Project, row: Row<'_, 'q>) -> Result<()> {
         self.emit_op(&project.input, &mut |e| {
+            e.emit_subqueries(project.outputs.iter().filter_map(|output| match output {
+                Output::Eval { expr, .. } => Some(expr),
+                _ => None,
+            }))?;
             for output in &project.outputs {
                 e.emit_output(output)?;
             }
@@ -516,10 +520,10 @@ impl<'q> Emitter<'q> {
     }
 
     /// `row`, unless `cond` is given and fails.
-    fn emit_if(&mut self, cond: Option<&Cond>, row: Row<'_, 'q>) -> Result<()> {
+    fn emit_if(&mut self, cond: Option<&'q Cond>, row: Row<'_, 'q>) -> Result<()> {
         let skip = self.asm.label();
         if let Some(cond) = cond {
-            self.asm.b.emit_expr(&cond.expr, cond.pred)?;
+            self.emit_expr(&cond.expr, cond.pred)?;
             self.asm.jump_if_not_true(cond.pred, skip);
         }
         row(self)?;
@@ -564,10 +568,11 @@ impl<'q> Emitter<'q> {
     }
 
     /// Bind a scan's cursor to its data, then open it.
-    fn emit_open(&mut self, open: &Open, cursor_id: u16) -> Result<()> {
+    fn emit_open(&mut self, open: &'q Open, cursor_id: u16) -> Result<()> {
         match open {
             Open::Bound => {}
             Open::TableFn { func_name, args } => {
+                self.emit_subqueries(args.iter().map(|(_, arg)| arg))?;
                 for (dst, arg) in args {
                     self.asm.b.emit_expr(arg, *dst)?;
                 }
@@ -582,7 +587,7 @@ impl<'q> Emitter<'q> {
                 expr,
                 assert_collection,
             } => {
-                self.asm.b.emit_expr(expr, *src)?;
+                self.emit_expr(expr, *src)?;
                 if *assert_collection {
                     self.asm.push(Inst::AssertCollection { src: *src });
                 }
@@ -625,6 +630,7 @@ impl<'q> Emitter<'q> {
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         self.asm.push(reset_accums.clone());
         self.emit_op(&agg.input, &mut |e| {
+            e.emit_subqueries(&agg.record_exprs)?;
             for (dst, expr) in (agg.insert..).zip(&agg.record_exprs) {
                 e.asm.b.emit_expr(expr, dst)?;
                 if dst < agg.insert + agg.key_count {
@@ -725,6 +731,7 @@ impl<'q> Emitter<'q> {
         let payload = || (key_count..).zip(&sort.payload);
         self.asm.push(Inst::SorterReset { sorter_id });
         self.emit_op(&sort.input, &mut |e| {
+            e.emit_subqueries(&sort.keys)?;
             for (dst, key) in (sort.insert..).zip(&sort.keys) {
                 e.asm.b.emit_expr(key, dst)?;
             }
@@ -769,6 +776,86 @@ impl<'q> Emitter<'q> {
             },
             read,
         );
+        self.asm.bind(done);
+        Ok(())
+    }
+
+    /// Emit `expr`, evaluated into `dst`, after the subqueries it reads.
+    fn emit_expr(&mut self, expr: &'q Expr, dst: SlotId) -> Result<()> {
+        self.emit_subqueries([expr])?;
+        self.asm.b.emit_expr(expr, dst)
+    }
+
+    /// Evaluate the subqueries that `exprs` read. A step's subqueries run before any of its
+    /// expressions: a subquery's scans reset the scratch bank that holds their temporaries.
+    /// Each runs once, though lowering may copy an operand (`a >= b` reads `b` twice).
+    fn emit_subqueries(&mut self, exprs: impl IntoIterator<Item = &'q Expr>) -> Result<()> {
+        let mut ids = vec![];
+        for expr in exprs {
+            expr.for_each_subquery(&mut |id| {
+                if !ids.contains(&id) {
+                    ids.push(id)
+                }
+            });
+        }
+        let subqueries = &self.query.subqueries;
+        for id in ids {
+            self.emit_subquery(&subqueries[id as usize])?;
+        }
+        Ok(())
+    }
+
+    /// A subquery: its rows collected in its sorter, then made into a collection. An
+    /// uncorrelated subquery runs only the first time (registers start each run MISSING):
+    /// ```text
+    ///         [if once: goto done]
+    ///         SorterReset
+    ///         for each row of the subquery: copy the row into the record; SorterInsert
+    ///         SorterCollect → dst
+    ///         [once = true]
+    ///   done:
+    /// ```
+    fn emit_subquery(&mut self, subquery: &'q Subquery) -> Result<()> {
+        let sorter_id = subquery.sorter;
+        let done = self.asm.label();
+        if let Some(once) = subquery.once {
+            let run = self.asm.label();
+            self.asm.jump_if_not_true(once, run);
+            self.asm.jump(done);
+            self.asm.bind(run);
+        }
+        self.asm.push(Inst::SorterReset { sorter_id });
+        self.emit_op(&subquery.input, &mut |e| {
+            for (dst, &src) in (subquery.record..).zip(&subquery.row) {
+                if dst != src {
+                    e.asm.push(Inst::Copy { dst, src });
+                }
+            }
+            e.asm.push(Inst::SorterInsert {
+                sorter_id,
+                src_reg: subquery.record,
+                reg_count: subquery.row.len() as u16,
+            });
+            Ok(())
+        })?;
+        let fields = match &subquery.fields {
+            Some(names) => Some(
+                names
+                    .iter()
+                    .map(|name| self.asm.b.push_key_pub(name.clone()))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            None => None,
+        };
+        self.asm.push(Inst::SorterCollect {
+            sorter_id,
+            dst: subquery.dst,
+            fields,
+            list: subquery.ordered,
+        });
+        if let Some(once) = subquery.once {
+            self.asm.load_const(once, ValueOwned::Bool(true))?;
+        }
         self.asm.bind(done);
         Ok(())
     }

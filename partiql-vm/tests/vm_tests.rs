@@ -674,6 +674,37 @@ fn rerun_starts_sorters_empty() {
     assert_eq!(runs[1..], [expected.clone(), expected]);
 }
 
+/// An uncorrelated subquery runs once per run of the VM, including after a run that stopped
+/// early: each run evaluates it again rather than reading the previous run's freed rows.
+#[test]
+fn uncorrelated_subquery_reruns() {
+    let query = "SELECT VALUE d.a || '!' FROM data AS d \
+                 WHERE d.a IN (SELECT VALUE k.a || '' FROM keys AS k)";
+    let data = [
+        ("data", "[{a: \"x\"}, {a: \"y\"}, {a: \"z\"}]"),
+        ("keys", "[{a: \"z\"}, {a: \"x\"}]"),
+    ];
+    let expected = parse_ion("$bag::[\"x!\", \"z!\"]");
+    let runs = eval_vm_runs(query, &data, &[Some(1), None, None]);
+    assert_eq!(runs[1..], [expected.clone(), expected]);
+}
+
+/// A correlated subquery runs for each row, reading the row's bindings.
+#[test]
+fn correlated_subquery() {
+    assert_vm_eval(
+        "SELECT d.a AS a, (SELECT VALUE k.b FROM keys AS k WHERE k.a = d.a) AS bs FROM data AS d",
+        &[
+            ("data", "[{a: 1}, {a: 2}]"),
+            (
+                "keys",
+                "[{a: 1, b: \"p\"}, {a: 2, b: \"q\"}, {a: 1, b: \"r\"}]",
+            ),
+        ],
+        "$bag::[{a: 1, bs: $bag::[\"p\", \"r\"]}, {a: 2, bs: $bag::[\"q\"]}]",
+    );
+}
+
 /// GROUP BY tells collection keys apart.
 #[test]
 fn group_by_collection_keys() {

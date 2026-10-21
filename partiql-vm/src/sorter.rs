@@ -74,6 +74,11 @@ impl Sorter {
         true
     }
 
+    /// Every record's fields, in insertion order unless sorted since.
+    pub fn records(&self) -> impl Iterator<Item = &[ValueRef<'static>]> {
+        self.records.iter().map(|r| r.fields.as_slice())
+    }
+
     /// Get the current record's fields. Returns None if positioned past end.
     pub fn current(&self) -> Option<&[ValueRef<'static>]> {
         if self.position < self.records.len() {

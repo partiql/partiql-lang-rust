@@ -863,6 +863,58 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
+                Inst::SorterCollect {
+                    sorter_id,
+                    dst,
+                    fields,
+                    list,
+                } => {
+                    let sorter = match self.vm.sorters.get(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    let bank = &self.vm.banks[sorter.bank_id];
+                    let elements: Vec<ValueRef<'_>> = match fields {
+                        None => sorter.records().map(|record| record[0]).collect(),
+                        Some(fields) => sorter
+                            .records()
+                            .map(|record| {
+                                use crate::value::{TupleField, TupleRef};
+                                let fields: Vec<TupleField<'_>> = fields
+                                    .iter()
+                                    .zip(record)
+                                    .filter(|(_, value)| !matches!(value, ValueRef::Missing))
+                                    .map(|(&key, &value)| TupleField {
+                                        name: {
+                                            let name = &program.keys[key as usize];
+                                            let bytes = bank.alloc_slice(name.as_bytes());
+                                            unsafe { std::str::from_utf8_unchecked(bytes) }
+                                        },
+                                        value,
+                                    })
+                                    .collect();
+                                let fields = bank.alloc_slice(&fields);
+                                ValueRef::Tuple(bank.alloc_tuple_ref(TupleRef { fields }))
+                            })
+                            .collect(),
+                    };
+                    let elements = bank.alloc_slice(&elements);
+                    let collection = match list {
+                        true => ValueRef::List(elements),
+                        false => ValueRef::Bag(elements),
+                    };
+                    // Safety: the sorter bank outlives the value until the sorter's next
+                    // reset, the same contract as `SorterData`.
+                    regs[*dst as usize] = unsafe {
+                        std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(collection)
+                    };
+                }
+
                 // === Aggregation Instructions ===
                 Inst::AggStep {
                     func,

@@ -1,7 +1,9 @@
 use crate::arena::{Arena, SlotId};
 use crate::error::{count_u16, EngineError, Result};
 use crate::value::{value_get_field_ref, ValueOwned, ValueRef};
-use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
+use partiql_logical::{
+    CallExpr, CallName, Lit, PathComponent, SubQueryExpr, ValueExpr, VarRefType,
+};
 use partiql_value::BindingsName;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -52,6 +54,66 @@ pub enum Expr {
     Bag {
         elements: Vec<Expr>,
     },
+    /// The value of subquery `id` (an index into the query's subqueries), which the emitter
+    /// evaluates into register `dst` before the expression that reads it.
+    Subquery {
+        id: u32,
+        dst: SlotId,
+    },
+    /// COLL_TO_SCALAR: the one attribute of the one tuple in a collection, else MISSING.
+    CollToScalar(Box<Expr>),
+}
+
+impl Expr {
+    /// Call `f` with the id of each subquery in the expression, in evaluation order.
+    pub(crate) fn for_each_subquery(&self, f: &mut dyn FnMut(u32)) {
+        match self {
+            Expr::Subquery { id, .. } => f(*id),
+            Expr::Literal(_) | Expr::SlotRef(_) => {}
+            Expr::Like { value, .. } => value.for_each_subquery(f),
+            Expr::Add(a, b)
+            | Expr::Sub(a, b)
+            | Expr::Mul(a, b)
+            | Expr::Div(a, b)
+            | Expr::Mod(a, b)
+            | Expr::Exp(a, b)
+            | Expr::Eq(a, b)
+            | Expr::Gt(a, b)
+            | Expr::Lt(a, b)
+            | Expr::And(a, b)
+            | Expr::Or(a, b)
+            | Expr::Concat(a, b)
+            | Expr::In(a, b) => {
+                a.for_each_subquery(f);
+                b.for_each_subquery(f);
+            }
+            Expr::Not(e)
+            | Expr::Neg(e)
+            | Expr::Pos(e)
+            | Expr::GetField(e, _)
+            | Expr::CollToScalar(e) => e.for_each_subquery(f),
+            Expr::LikeDynamic {
+                value,
+                pattern,
+                escape,
+            } => {
+                for e in [value, pattern, escape] {
+                    e.for_each_subquery(f);
+                }
+            }
+            Expr::UdfCall { args: exprs, .. }
+            | Expr::List { elements: exprs }
+            | Expr::Bag { elements: exprs } => {
+                exprs.iter().for_each(|e| e.for_each_subquery(f));
+            }
+            Expr::Tuple { attrs, values } => {
+                attrs
+                    .iter()
+                    .chain(values)
+                    .for_each(|e| e.for_each_subquery(f));
+            }
+        }
+    }
 }
 
 // TODO: Implement fully
@@ -326,6 +388,12 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+    /// COLL_TO_SCALAR (spec 9.1): a collection of one tuple with one attribute becomes that
+    /// attribute's value; anything else becomes MISSING.
+    CollToScalar {
+        dst: u16,
+        src: u16,
+    },
     NegNum {
         dst: u16,
         src: u16,
@@ -501,6 +569,17 @@ pub enum Inst {
     SorterNext {
         sorter_id: u16,
         target: u32,
+    },
+
+    /// Make the sorter's records, in insertion order, into a collection in `dst` (a list
+    /// when `list`, else a bag) that lives in the sorter's bank. With `fields`, each record
+    /// becomes a tuple whose attributes are named by those keys (MISSING values are left
+    /// out); without, each record is its one value.
+    SorterCollect {
+        sorter_id: u16,
+        dst: u16,
+        fields: Option<Vec<u16>>,
+        list: bool,
     },
 
     // === Aggregation Instructions ===
@@ -1605,6 +1684,17 @@ impl Program {
                     other => other,
                 };
             }
+            Inst::CollToScalar { dst, src } => {
+                regs[*dst as usize] = match regs[*src as usize] {
+                    ValueRef::Bag([ValueRef::Tuple(t)]) | ValueRef::List([ValueRef::Tuple(t)]) => {
+                        match t.fields {
+                            [field] => field.value,
+                            _ => ValueRef::Missing,
+                        }
+                    }
+                    _ => ValueRef::Missing,
+                };
+            }
             Inst::NegNum { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
                     ValueRef::I64(n) => ValueRef::I64(-n),
@@ -1791,6 +1881,7 @@ impl Program {
             | Inst::SorterSort { .. }
             | Inst::SorterData { .. }
             | Inst::SorterNext { .. }
+            | Inst::SorterCollect { .. }
             | Inst::AggStep { .. }
             | Inst::AggFinal { .. }
             | Inst::AggReset { .. }
@@ -2278,6 +2369,14 @@ impl ExprCompiler<'_> {
                 });
                 Ok(dst)
             }
+            // The emitter has already evaluated the subquery into its register
+            Expr::Subquery { dst, .. } => Ok(*dst),
+            Expr::CollToScalar(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::CollToScalar { dst, src });
+                Ok(dst)
+            }
         }
     }
 
@@ -2288,13 +2387,26 @@ impl ExprCompiler<'_> {
     }
 }
 
+/// Subqueries already lowered, by the address of their node in the expression being lowered.
+pub(crate) type LoweredSubqueries = FxHashMap<*const SubQueryExpr, Expr>;
+
 pub struct LogicalExprCompiler<'a, R: SlotResolver> {
     resolver: &'a R,
+    subqueries: Option<&'a LoweredSubqueries>,
 }
 
 impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
     pub fn new(resolver: &'a R) -> Self {
-        LogicalExprCompiler { resolver }
+        LogicalExprCompiler {
+            resolver,
+            subqueries: None,
+        }
+    }
+
+    /// Lower each subquery of the expression to its entry in `subqueries`.
+    pub(crate) fn with_subqueries(mut self, subqueries: &'a LoweredSubqueries) -> Self {
+        self.subqueries = Some(subqueries);
+        self
     }
 
     /// Lower `expr`, resolving its names to registers.
@@ -2438,6 +2550,13 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     other => Err(EngineError::UnsupportedExpr(format!("{other:?}"))),
                 }
             }
+            ValueExpr::Call(CallExpr {
+                name: CallName::CollToScalar,
+                arguments,
+            }) => match arguments.as_slice() {
+                [arg] => Ok(Expr::CollToScalar(self.lower_expr(arg)?.into())),
+                _ => Err(EngineError::UnsupportedExpr(format!("{:?}", *expr))),
+            },
             ValueExpr::Call(call) => Ok(Expr::UdfCall {
                 name: call_name(call),
                 args: call
@@ -2498,9 +2617,11 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     other => Err(EngineError::UnsupportedExpr(format!("{other:?}"))),
                 }
             }
-            ValueExpr::SubQueryExpr(_sub_query_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
-            }
+            ValueExpr::SubQueryExpr(sub_query_expr) => self
+                .subqueries
+                .and_then(|lowered| lowered.get(&std::ptr::from_ref(sub_query_expr)))
+                .cloned()
+                .ok_or_else(|| EngineError::UnsupportedExpr(format!("{:?}", *expr))),
             ValueExpr::SimpleCase(_simple_case) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
             }

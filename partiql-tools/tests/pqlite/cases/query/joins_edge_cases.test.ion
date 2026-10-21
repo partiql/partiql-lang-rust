@@ -306,12 +306,17 @@
   ]
 }
 
-// Not yet: subqueries in FROM, joined or not, are not compiled by the VM
+// A subquery in FROM joins like a table
 {
   sql: '''
     SELECT VALUE [s.v, r.w]
     FROM (SELECT l.v, l.k FROM l) s
     JOIN r ON s.k = r.k
   ''',
-  expect: { error: "SubQueryExpr" }
+  expect: $bag::[
+    ["l1", "r1"],
+    ["l1", "r1b"],
+    ["l1b", "r1"],
+    ["l1b", "r1b"]
+  ]
 }
