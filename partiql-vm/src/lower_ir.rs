@@ -722,8 +722,20 @@ impl<'a> Lowerer<'a> {
                 }))
             }
             Layout::Join(join) => {
+                let before = left.len();
                 let left_op = self.lower_from(&join.left, left)?;
-                let right_op = self.lower_from(&join.right, left)?;
+                let right_op = match join.kind {
+                    // Only a right side nested in the left one may read it. RIGHT and FULL JOIN
+                    // also run the right side on its own (before the left, or after the left's
+                    // cursor is done), where the left's registers hold no row.
+                    JoinType::Right | JoinType::Full => {
+                        let mut outer = left[..before].to_vec();
+                        let right_op = self.lower_from(&join.right, &mut outer)?;
+                        left.extend(outer.drain(before..));
+                        right_op
+                    }
+                    JoinType::Inner | JoinType::Left => self.lower_from(&join.right, left)?,
+                };
                 let resolver = scope_of(left.clone());
                 Ok(Op::Join(Box::new(Join {
                     kind: join.kind,

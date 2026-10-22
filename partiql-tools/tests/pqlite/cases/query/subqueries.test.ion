@@ -348,3 +348,37 @@
   ''',
   expect: { error: "subquery nesting" }
 }
+
+// A lateral subquery on the right of a LEFT JOIN reads the left row
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    LEFT JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON s <> 'B'
+  ''',
+  expect: $bag::[
+    { title: "eng", s: "A" },
+    { title: "ops", s: "C" },
+    { title: "hr", s: null }
+  ]
+}
+
+// RIGHT and FULL JOIN also run their right side without a left row, so it cannot read the
+// left side: it is not in scope there
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    RIGHT JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON true
+  ''',
+  expect: { error: "unresolved var" }
+}
+
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    FULL JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON s = 'Z'
+  ''',
+  expect: { error: "unresolved var" }
+}
