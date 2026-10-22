@@ -1575,11 +1575,16 @@ impl ScopedResolver<'_> {
             .rev()
             .find_map(|(depth, scope)| {
                 let slot = resolve(&scope.resolver)?;
-                for scope in &self.outer[depth..] {
-                    scope.correlated.set(true);
-                }
+                self.read_outer(depth);
                 Some(slot)
             })
+    }
+
+    /// A name of the query at `depth` was read: the subqueries inside it are correlated.
+    fn read_outer(&self, depth: usize) {
+        for scope in &self.outer[depth..] {
+            scope.correlated.set(true);
+        }
     }
 }
 
@@ -1605,9 +1610,18 @@ impl SlotResolver for ScopedResolver<'_> {
         alias: &BindingsName<'_>,
         field: &BindingsName<'_>,
     ) -> Option<SlotId> {
-        self.inner
-            .resolve_qualified(alias, field)
-            .or_else(|| self.outward(|r| r.resolve_qualified(alias, field)))
+        // The innermost query binding `alias` answers, whether or not it pushed `field` down:
+        // an inner whole-row `t` hides an outer `t`'s pushed-down `a` from `t.a`
+        if self.inner.is_alias(alias) {
+            return self.inner.resolve_qualified(alias, field);
+        }
+        let depth = self
+            .outer
+            .iter()
+            .rposition(|s| s.resolver.is_alias(alias))?;
+        let slot = self.outer[depth].resolver.resolve_qualified(alias, field)?;
+        self.read_outer(depth);
+        Some(slot)
     }
 }
 

@@ -331,10 +331,6 @@ impl<'q> Emitter<'q> {
     /// ```
     fn emit_project(&mut self, project: &'q Project, row: Row<'_, 'q>) -> Result<()> {
         self.emit_op(&project.input, &mut |e| {
-            e.emit_subqueries(project.outputs.iter().filter_map(|output| match output {
-                Output::Eval { expr, .. } => Some(expr),
-                _ => None,
-            }))?;
             for output in &project.outputs {
                 e.emit_output(output)?;
             }
@@ -342,9 +338,9 @@ impl<'q> Emitter<'q> {
         })
     }
 
-    fn emit_output(&mut self, output: &Output) -> Result<()> {
+    fn emit_output(&mut self, output: &'q Output) -> Result<()> {
         match output {
-            Output::Eval { dst, expr } => self.asm.b.emit_expr(expr, *dst)?,
+            Output::Eval { dst, expr } => self.emit_expr(expr, *dst)?,
             Output::CoerceToTuple(reg) => {
                 let const_idx = self.asm.b.push_const_pub(ValueOwned::String("_1".into()))?;
                 self.asm.push(Inst::CoerceToTuple {
@@ -575,9 +571,8 @@ impl<'q> Emitter<'q> {
         match open {
             Open::Bound => {}
             Open::TableFn { func_name, args } => {
-                self.emit_subqueries(args.iter().map(|(_, arg)| arg))?;
                 for (dst, arg) in args {
-                    self.asm.b.emit_expr(arg, *dst)?;
+                    self.emit_expr(arg, *dst)?;
                 }
                 let func_name_idx = self.asm.b.push_key_pub(func_name.clone())?;
                 self.asm.push(Inst::CreateTableFnCursor {
@@ -633,9 +628,8 @@ impl<'q> Emitter<'q> {
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         self.asm.push(reset_accums.clone());
         self.emit_op(&agg.input, &mut |e| {
-            e.emit_subqueries(&agg.record_exprs)?;
             for (dst, expr) in (agg.insert..).zip(&agg.record_exprs) {
-                e.asm.b.emit_expr(expr, dst)?;
+                e.emit_expr(expr, dst)?;
                 if dst < agg.insert + agg.key_count {
                     e.asm.push(Inst::MissingToNull { dst, src: dst });
                 }
@@ -734,9 +728,8 @@ impl<'q> Emitter<'q> {
         let payload = || (key_count..).zip(&sort.payload);
         self.asm.push(Inst::SorterReset { sorter_id });
         self.emit_op(&sort.input, &mut |e| {
-            e.emit_subqueries(&sort.keys)?;
             for (dst, key) in (sort.insert..).zip(&sort.keys) {
-                e.asm.b.emit_expr(key, dst)?;
+                e.emit_expr(key, dst)?;
             }
             for (i, &src) in payload() {
                 e.asm.push(Inst::Copy {
@@ -783,24 +776,16 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// Emit `expr`, evaluated into `dst`, after the subqueries it reads.
+    /// Emit `expr`, evaluated into `dst`, after the subqueries it reads. Every expression is
+    /// emitted here: compiling one that reads a subquery anywhere else fails. Each subquery
+    /// runs once, though lowering may copy an operand (`a >= b` reads `b` twice).
     fn emit_expr(&mut self, expr: &'q Expr, dst: SlotId) -> Result<()> {
-        self.emit_subqueries([expr])?;
-        self.asm.b.emit_expr(expr, dst)
-    }
-
-    /// Evaluate the subqueries that `exprs` read. A step's subqueries run before any of its
-    /// expressions: a subquery's scans reset the scratch bank that holds their temporaries.
-    /// Each runs once, though lowering may copy an operand (`a >= b` reads `b` twice).
-    fn emit_subqueries(&mut self, exprs: impl IntoIterator<Item = &'q Expr>) -> Result<()> {
         let mut ids = vec![];
-        for expr in exprs {
-            expr.for_each_subquery(&mut |id| {
-                if !ids.contains(&id) {
-                    ids.push(id)
-                }
-            });
-        }
+        expr.for_each_subquery(&mut |id| {
+            if !ids.contains(&id) {
+                ids.push(id)
+            }
+        });
         for id in ids {
             let id = id as usize;
             let entry = match self.subqueries[id] {
@@ -813,19 +798,26 @@ impl<'q> Emitter<'q> {
             };
             self.asm.gosub(self.query.subqueries[id].ret, entry);
         }
-        Ok(())
+        self.asm.b.subqueries_run = true;
+        let emitted = self.asm.b.emit_expr(expr, dst);
+        self.asm.b.subqueries_run = false;
+        emitted
     }
 
     /// A subquery, as a subroutine of its own: emitted once however many places read it
     /// (a FULL JOIN emits its sides twice), so code does not multiply with nesting. Its rows
     /// are collected in its sorter, then made into a collection. An uncorrelated subquery runs
     /// only the first time (registers start each run MISSING). A subquery never calls
-    /// itself, so its return register is free whenever it is called:
+    /// itself, so its return register is free whenever it is called. Its scans would reset
+    /// the scratch bank, which holds the temporaries of the expression reading it (and of the
+    /// others of the same step), so it raises the bank's floor while it runs:
     /// ```text
     ///   SUB:  [if once: goto done]
+    ///         ScratchEnter
     ///         SorterReset
     ///         for each row of the subquery: copy the row into the record; SorterInsert
     ///         SorterCollect → dst
+    ///         ScratchLeave
     ///         [once = true]
     ///   done: Return
     /// ```
@@ -840,6 +832,7 @@ impl<'q> Emitter<'q> {
             self.asm.jump(done);
             self.asm.bind(run);
         }
+        self.asm.push(Inst::ScratchEnter);
         self.asm.push(Inst::SorterReset { sorter_id });
         self.emit_op(&subquery.input, &mut |e| {
             for (dst, &src) in (subquery.record..).zip(&subquery.row) {
@@ -869,6 +862,7 @@ impl<'q> Emitter<'q> {
             fields,
             list: subquery.ordered,
         });
+        self.asm.push(Inst::ScratchLeave);
         if let Some(once) = subquery.once {
             self.asm.load_const(once, ValueOwned::Bool(true))?;
         }

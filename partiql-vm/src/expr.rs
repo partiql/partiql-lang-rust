@@ -571,6 +571,13 @@ pub enum Inst {
         target: u32,
     },
 
+    /// Start a subquery: until the matching `ScratchLeave`, `NextRow` rewinds the scratch
+    /// bank only to where it is now, so the temporaries of the expressions around the
+    /// subquery survive its scans.
+    ScratchEnter,
+    /// End a subquery: free its temporaries and restore the previous floor.
+    ScratchLeave,
+
     /// Make the sorter's records, in insertion order, into a collection in `dst` (a list
     /// when `list`, else a bag) that lives in the sorter's bank. With `fields`, each record
     /// becomes a tuple whose attributes are named by those keys (MISSING values are left
@@ -1882,6 +1889,8 @@ impl Program {
             | Inst::SorterData { .. }
             | Inst::SorterNext { .. }
             | Inst::SorterCollect { .. }
+            | Inst::ScratchEnter
+            | Inst::ScratchLeave
             | Inst::AggStep { .. }
             | Inst::AggFinal { .. }
             | Inst::AggReset { .. }
@@ -1951,6 +1960,9 @@ pub struct ProgramBuilder {
     /// Registers used: the high-water mark of `next_reg`.
     reg_count: u16,
     slot_count: u16,
+    /// Set while the emitter compiles an expression whose subqueries it has just run, so
+    /// that reading a subquery's register before it ran fails to compile.
+    pub(crate) subqueries_run: bool,
 }
 
 impl ProgramBuilder {
@@ -1963,6 +1975,7 @@ impl ProgramBuilder {
             next_reg: slot_count,
             reg_count: slot_count,
             slot_count,
+            subqueries_run: false,
         }
     }
 
@@ -2370,7 +2383,10 @@ impl ExprCompiler<'_> {
                 Ok(dst)
             }
             // The emitter has already evaluated the subquery into its register
-            Expr::Subquery { dst, .. } => Ok(*dst),
+            Expr::Subquery { dst, .. } if self.builder.subqueries_run => Ok(*dst),
+            Expr::Subquery { id, .. } => Err(EngineError::IllegalState(format!(
+                "subquery {id} read without running it"
+            ))),
             Expr::CollToScalar(expr) => {
                 let src = self.compile_expr(expr)?;
                 let dst = self.builder.alloc_reg()?;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::arena::Arena;
+use crate::arena::{Arena, ArenaMark};
 use crate::builtins::BuiltinFunctions;
 use crate::catalog::ExecutionContext;
 use crate::error::{EngineError, Result};
@@ -357,7 +357,8 @@ pub struct PartiQLVM {
     /// Data source cursors. Index = cursor_id.
     cursors: Vec<Option<DataSourceImpl>>,
     /// Memory banks. Bank 0 = query-level (persistent across rows).
-    /// Bank 1 = scratch bank for expression temporaries, reset at each NextRow.
+    /// Bank 1 = scratch bank for expression temporaries, reset at each NextRow (inside a
+    /// subquery, only down to where it stood when the subquery started).
     /// Banks 2..2+cursors = one row bank per cursor, reset at that cursor's NextRow, so an
     /// outer join row stays valid while the inner cursor advances.
     /// Banks after those = sorter banks (persistent until sorter closes).
@@ -378,6 +379,9 @@ pub struct PartiQLVM {
     sorters: Vec<Option<crate::sorter::Sorter>>,
     /// Whether each cursor's data source is open, so closing is idempotent.
     source_open: Vec<bool>,
+    /// The scratch bank's floor in each running subquery, innermost last: `NextRow` rewinds
+    /// the bank to the innermost, not past it.
+    scratch_floors: Vec<ArenaMark>,
 }
 
 impl PartiQLVM {
@@ -424,6 +428,7 @@ impl PartiQLVM {
             table_functions: exec_context.table_functions().clone(),
             sorters,
             source_open: Vec::new(),
+            scratch_floors: Vec::new(),
         };
         vm.reset_cursor_state();
 
@@ -478,6 +483,7 @@ impl PartiQLVM {
     /// Forget which sources are open.
     fn reset_cursor_state(&mut self) {
         self.source_open = vec![false; self.compiled.cursors.len()];
+        self.scratch_floors.clear();
     }
 
     /// Get the result shape for this VM's query.
@@ -619,10 +625,12 @@ impl<'vm> QueryIterator<'vm> {
                     cursor_id,
                     eof_target,
                 } => {
-                    // Reset the scratch bank and this cursor's row bank for the new row
+                    // Reset the scratch bank (down to the running subquery's floor) and this
+                    // cursor's row bank for the new row
                     let c = *cursor_id as usize;
                     let bank_id = CURSOR_BANK_BASE + c;
-                    self.vm.banks[1].reset();
+                    let floor = self.vm.scratch_floors.last().copied().unwrap_or_default();
+                    self.vm.banks[1].rewind(floor);
                     self.vm.banks[bank_id].reset();
                     let slot_base = self.vm.compiled.cursors[c].slot_base as usize;
 
@@ -914,6 +922,20 @@ impl<'vm> QueryIterator<'vm> {
                         std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(collection)
                     };
                 }
+
+                Inst::ScratchEnter => {
+                    let floor = self.vm.banks[1].mark();
+                    self.vm.scratch_floors.push(floor);
+                }
+
+                Inst::ScratchLeave => match self.vm.scratch_floors.pop() {
+                    Some(floor) => self.vm.banks[1].rewind(floor),
+                    None => {
+                        return Some(Err(EngineError::IllegalState(
+                            "ScratchLeave without ScratchEnter".to_string(),
+                        )))
+                    }
+                },
 
                 // === Aggregation Instructions ===
                 Inst::AggStep {
