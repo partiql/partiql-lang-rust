@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792539399514,
+  "lastUpdate": 1792707002309,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -50537,6 +50537,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 11989,
             "range": "± 484",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4ab24c68fe88267681409ce219f54c2d1d0580d3",
+          "message": "feat(partiql-vm): support subqueries in FROM and in expressions (#721)\n\n* feat(partiql-vm): support subqueries in FROM and in expressions\n\nA subquery lowers to its inner operator tree (sharing the query's registers,\ncursors and sorters) plus a sorter that collects its rows. In expressions it is\na leaf, Expr::Subquery, read from a register; the emitter evaluates a step's\nsubqueries inline before the step's expressions, since the inner scans reset\nthe scratch bank. A new SorterCollect makes the records a bag (a list under\nORDER BY), struct rows becoming tuples without their MISSING attributes.\n\n- Correlation: inner names resolve inner-first, then outward through the\n  enclosing queries' scopes. Resolving an outer name marks the subqueries in\n  between as correlated. Unqualified fields stay inner-only, so an inner\n  pushed-down field never answers an outer e.a.\n- Uncorrelated subqueries run at most once per execution (a flag register).\n- FROM subqueries reuse the runtime-collection scan, so lateral and joined\n  subqueries work through the nested-loop reopen.\n- CollToScalar (scalar subqueries) is a new expression and instruction.\n\nUn-skips two aliased_known_gaps fixtures and adds subqueries.test.ion.\n\n* fix(partiql-vm): subquery scoping, one routine per subquery, nesting limit\n\nReview fixes for subqueries:\n\n- A FROM source sees only the bindings to its left, then the queries around\n  it. It used to see the whole FROM clause, so in (SELECT ... FROM e.items e)\n  the source read the inner e (MISSING) instead of the outer one.\n- In a subquery, a FROM source naming a variable of an enclosing query scans\n  the variable, even when a table has that name. A binding of the same FROM\n  clause still does not hide a table (FROM l, l l2 scans l twice), matching\n  the legacy evaluator. A global name that is no table scans MISSING\n  explicitly, instead of through the scan's own binding.\n- Each subquery is emitted once, as a subroutine that every reader calls.\n  Inline bodies multiplied wherever emission duplicates code (a FULL JOIN\n  emits its sides twice), doubling the program at each nesting level.\n- Runtime-computed scans keep a reference to their expression rather than a\n  copy, which cloned every nested plan once per level.\n- Subqueries nest at most 32 deep; past that, compiling fails with TooLarge\n  rather than overflowing the stack.\n\n* fix(partiql-vm): subqueries keep the scratch temporaries around them\n\nA subquery's scans reset the scratch bank at each NextRow, so its callers had\nto run every subquery of a step before any of the step's expressions. Only the\nemitter enforced that rule, and it was easy to break: a step keeping a scratch\nvalue across a subquery would read freed memory.\n\nMake it safe by construction instead. A subquery now raises the scratch\nbank's floor while it runs (new ScratchEnter / ScratchLeave instructions, and\nArena::mark / rewind), so its NextRow rewinds the bank only to where it stood\nwhen the subquery started. Leaving frees the subquery's own temporaries.\nSubqueries now run just before the expression that reads them. Compiling an\nexpression that reads a subquery outside Emitter::emit_expr, which runs it,\nfails instead of reading a register that was never set.\n\nAlso, in a subquery, a qualified name t.a resolves in the innermost query\nthat binds t, even when that query loaded t whole and an outer t pushed down\nfield a.\n\n* fix(partiql-vm): the right side of a RIGHT or FULL JOIN cannot read the left\n\nThe right side of every join was lowered with the left side's bindings in\nscope, which only INNER and LEFT JOIN allow: there the right side runs once\nper left row. RIGHT and FULL JOIN also run it on its own (the right side of a\nRIGHT JOIN is the outer loop; FULL JOIN's second pass runs after the left\ncursor is done). A lateral source there read the left registers, which in a\nFULL JOIN point into the left cursor's bank after its last NextRow freed it.\n\nLower their right side with only the bindings to the left of the join. The\nplanner already treats the left side as out of scope there, so such a query\nnow fails to compile, with an unresolved name, rather than reading freed\nmemory. This also covers path sources (FULL JOIN t.items x), which had the\nsame problem before subqueries.\n\n* test(partiql-vm): cover every subquery review finding\n\npqlite e2e (subqueries.test.ion):\n- a FULL JOIN path over the left side is an error, not a read of freed memory\n- a FROM subquery on the right of a LEFT JOIN\n- correlated subqueries in HAVING, as a GROUP BY key, and as an aggregate's\n  argument\n- an uncorrelated subquery inside a correlated one\n- skip:: NOT IN over a subquery holding NULL keeps no row (#719)\n\nvm_tests:\n- nested FROM subqueries under FULL JOINs compile; inlined, they outgrew the\n  program size limit\n- a correlated subquery reruns after a run that stopped early\n\nlower_ir unit test: an inner whole-row t hides an outer t's pushed-down field\nfrom t.a. No query reaches this yet.",
+          "timestamp": "2026-10-22T14:55:33-07:00",
+          "tree_id": "cbf02cfe1535abf6bfd32d74a26e082394f563e5",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/4ab24c68fe88267681409ce219f54c2d1d0580d3"
+        },
+        "date": 1792707000736,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 383178,
+            "range": "± 25292",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 638569,
+            "range": "± 44565",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 616065,
+            "range": "± 13545",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 640377,
+            "range": "± 20336",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 615514,
+            "range": "± 14775",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 657977,
+            "range": "± 25199",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 615085,
+            "range": "± 17808",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 636726,
+            "range": "± 13567",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 601561,
+            "range": "± 12491",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 616083,
+            "range": "± 13614",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 779951,
+            "range": "± 67256",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1065681,
+            "range": "± 18131",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1440544,
+            "range": "± 28440",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 912828,
+            "range": "± 32377",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1158595,
+            "range": "± 46257",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 1580884,
+            "range": "± 162988",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 2608,
+            "range": "± 175",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 24956,
+            "range": "± 279",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 47990,
+            "range": "± 1727",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 785,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 10264,
+            "range": "± 731",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 20580,
+            "range": "± 699",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 33550,
+            "range": "± 366",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 534801,
+            "range": "± 23352",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1062942,
+            "range": "± 13794",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 9791081,
+            "range": "± 385021",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 64508537,
+            "range": "± 1949244",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 122106305,
+            "range": "± 3558116",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 273618724,
+            "range": "± 10643204",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 292462510,
+            "range": "± 7626774",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 5686,
+            "range": "± 312",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 1682,
+            "range": "± 142",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 200,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 53,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 415,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1102,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 3556,
+            "range": "± 283",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 9016,
+            "range": "± 341",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 12336,
+            "range": "± 242",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 10843,
+            "range": "± 192",
             "unit": "ns/iter"
           }
         ]
