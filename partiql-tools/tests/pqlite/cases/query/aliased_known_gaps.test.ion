@@ -28,8 +28,8 @@
   ]
 }
 
-// VM: SubQueryExpr in FROM / WHERE is not compiled.
-skip::{
+// Subqueries in FROM and WHERE.
+{
   sql: '''
     SELECT s.a
     FROM (SELECT e.a FROM example e) s
@@ -41,7 +41,7 @@ skip::{
   ]
 }
 
-skip::{
+{
   sql: '''
     SELECT e.a
     FROM example e

@@ -1,0 +1,475 @@
+// Subqueries: in FROM, as IN / EXISTS operands, and as scalar values; uncorrelated and
+// correlated with the query around them.
+'''
+  CREATE TABLE emp;
+  INSERT INTO emp SELECT * FROM <<
+    {'id':1,'name':'ann','dept':10,'pay':100},
+    {'id':2,'name':'bob','dept':10,'pay':200},
+    {'id':3,'name':'cal','dept':20,'pay':300},
+    {'id':4,'name':'dee','dept':30,'pay':50}
+  >>;
+  CREATE TABLE dept;
+  INSERT INTO dept SELECT * FROM <<
+    {'id':10,'title':'eng','tags':['a','b']},
+    {'id':20,'title':'ops','tags':['c']},
+    {'id':40,'title':'hr','tags':[]}
+  >>;
+  CREATE TABLE empty;
+'''
+
+// FROM subquery
+{
+  sql: '''
+    SELECT s.name
+    FROM (SELECT e.name, e.pay FROM emp e WHERE e.pay > 100) s
+  ''',
+  expect: $bag::[
+    { name: "bob" },
+    { name: "cal" }
+  ]
+}
+
+// Nested FROM subqueries, filtered at each level
+{
+  sql: '''
+    SELECT VALUE t.n
+    FROM (
+      SELECT s.name AS n, s.pay AS p
+      FROM (SELECT e.name, e.pay FROM emp e WHERE e.dept < 30) s
+      WHERE s.pay < 300
+    ) t
+  ''',
+  expect: $bag::["ann", "bob"]
+}
+
+// SELECT * of a FROM subquery
+{
+  sql: '''
+    SELECT *
+    FROM (SELECT e.id, e.dept FROM emp e WHERE e.id > 2) s
+  ''',
+  expect: $bag::[
+    { id: 3, dept: 20 },
+    { id: 4, dept: 30 }
+  ]
+}
+
+// A FROM subquery with GROUP BY, joined with a table
+{
+  sql: '''
+    SELECT d.title, g.total
+    FROM (SELECT e.dept AS dept, SUM(e.pay) AS total FROM emp e GROUP BY e.dept) g
+    JOIN dept d ON d.id = g.dept
+  ''',
+  expect: $bag::[
+    { title: "eng", total: 300 },
+    { title: "ops", total: 300 }
+  ]
+}
+
+// A lateral FROM subquery reads the binding to its left
+{
+  sql: '''
+    SELECT d.title, s.name
+    FROM dept d, (SELECT e.name FROM emp e WHERE e.dept = d.id) s
+  ''',
+  expect: $bag::[
+    { title: "eng", name: "ann" },
+    { title: "eng", name: "bob" },
+    { title: "ops", name: "cal" }
+  ]
+}
+
+// A FROM subquery over an empty table
+{
+  sql: '''
+    SELECT s.x
+    FROM (SELECT e.x FROM empty e) s
+  ''',
+  expect: $bag::[]
+}
+
+// IN an uncorrelated subquery
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE e.dept IN (SELECT VALUE d.id FROM dept d)
+  ''',
+  expect: $bag::["ann", "bob", "cal"]
+}
+
+// NOT IN
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE NOT (e.dept IN (SELECT VALUE d.id FROM dept d))
+  ''',
+  expect: $bag::["dee"]
+}
+
+// IN a subquery with LIMIT
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE e.dept IN (SELECT VALUE d.id FROM dept d WHERE d.id > 10 LIMIT 1)
+  ''',
+  expect: $bag::["cal"]
+}
+
+// IN a correlated subquery
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE e.pay IN (SELECT VALUE x.pay FROM emp x WHERE x.dept = e.dept AND x.pay > 100)
+  ''',
+  expect: $bag::["bob", "cal"]
+}
+
+// A subquery correlated with the query two levels out
+{
+  sql: '''
+    SELECT VALUE d.title
+    FROM dept d
+    WHERE d.id IN (
+      SELECT VALUE e.dept
+      FROM emp e
+      WHERE e.pay IN (SELECT VALUE x.pay FROM emp x WHERE x.dept = d.id AND x.pay >= 200)
+    )
+  ''',
+  expect: $bag::["eng", "ops"]
+}
+
+// EXISTS
+{
+  sql: '''
+    SELECT VALUE d.title
+    FROM dept d
+    WHERE EXISTS (SELECT e.id FROM emp e WHERE e.dept = d.id)
+  ''',
+  expect: $bag::["eng", "ops"]
+}
+
+// A scalar subquery (one row, one attribute) is its value
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE e.pay = (SELECT MAX(x.pay) AS m FROM emp x)
+  ''',
+  expect: $bag::["cal"]
+}
+
+// A correlated scalar subquery in the SELECT list
+{
+  sql: '''
+    SELECT e.name, (SELECT d.title FROM dept d WHERE d.id = e.dept) AS title
+    FROM emp e
+    WHERE e.dept < 30
+  ''',
+  expect: $bag::[
+    { name: "ann", title: "eng" },
+    { name: "bob", title: "eng" },
+    { name: "cal", title: "ops" }
+  ]
+}
+
+// A scalar subquery with no row, or more than one, is MISSING
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE (SELECT d.title FROM dept d WHERE d.id = e.dept) = 'eng'
+  ''',
+  expect: $bag::["ann", "bob"]
+}
+
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE (SELECT x.id FROM emp x WHERE x.dept = e.dept) = e.id
+  ''',
+  expect: $bag::["cal", "dee"]
+}
+
+// SELECT VALUE subqueries are collections
+{
+  sql: '''
+    SELECT d.title, (SELECT VALUE e.name FROM emp e WHERE e.dept = d.id) AS names
+    FROM dept d
+  ''',
+  expect: $bag::[
+    { title: "eng", names: $bag::["ann", "bob"] },
+    { title: "ops", names: $bag::["cal"] },
+    { title: "hr", names: $bag::[] }
+  ]
+}
+
+// A subquery with ORDER BY is a list
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE e.pay FROM emp e WHERE e.dept = d.id ORDER BY e.pay DESC)
+    FROM dept d
+    WHERE d.id = 10
+  ''',
+  expect: $bag::[
+    [200, 100]
+  ]
+}
+
+// A subquery over a path of the outer binding
+{
+  sql: '''
+    SELECT d.title, (SELECT VALUE t || '!' FROM d.tags t) AS tags
+    FROM dept d
+  ''',
+  expect: $bag::[
+    { title: "eng", tags: $bag::["a!", "b!"] },
+    { title: "ops", tags: $bag::["c!"] },
+    { title: "hr", tags: $bag::[] }
+  ]
+}
+
+// Temporaries computed beside a correlated subquery survive its scans
+{
+  sql: '''
+    SELECT e.name || '?' AS q, (SELECT VALUE d.title || '!' FROM dept d WHERE d.id = e.dept) AS t
+    FROM emp e
+    WHERE e.id < 3
+  ''',
+  expect: $bag::[
+    { q: "ann?", t: $bag::["eng!"] },
+    { q: "bob?", t: $bag::["eng!"] }
+  ]
+}
+
+// Subqueries under GROUP BY and ORDER BY
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM emp e
+    WHERE e.dept IN (SELECT VALUE d.id FROM dept d)
+    GROUP BY e.dept AS k
+    ORDER BY (SELECT d.title FROM dept d WHERE d.id = k) DESC
+  ''',
+  expect: [
+    { k: 20, n: 1 },
+    { k: 10, n: 2 }
+  ]
+}
+
+// A comparison that reads its operand twice (`>=` is `>` or `=`)
+{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE e.pay >= (SELECT AVG(x.pay) AS a FROM emp x WHERE x.dept = e.dept)
+  ''',
+  expect: $bag::["bob", "cal", "dee"]
+}
+
+// A FROM source sees only the bindings to its left: `e.items` is the outer `e`, which the
+// binding `e` it defines shadows only after it
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE e.v FROM e.items e)
+    FROM << {'items': [{'v': 1}, {'v': 2}]} >> e
+  ''',
+  expect: $bag::[
+    $bag::[1, 2]
+  ]
+}
+
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x FROM e.items x, x.sub e)
+    FROM << {'items': [{'sub': [1]}]} >> e
+  ''',
+  expect: $bag::[
+    $bag::[{ sub: [1] }]
+  ]
+}
+
+// A subquery ranges over a variable of the query around it
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x FROM e x)
+    FROM << [1, 2], [3] >> e
+  ''',
+  expect: $bag::[
+    $bag::[1, 2],
+    $bag::[3]
+  ]
+}
+
+// ... even when a table has the variable's name: the row `dept` is one tuple, not the table
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x.name FROM dept x)
+    FROM emp dept
+    WHERE dept.id = 1
+  ''',
+  expect: $bag::[
+    $bag::["ann"]
+  ]
+}
+
+// A subquery in a FULL JOIN's ON, which the join evaluates from two places
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM dept a
+    FULL JOIN dept b
+      ON a.id = b.id AND EXISTS (SELECT e.id FROM emp e WHERE e.dept = a.id)
+  ''',
+  expect: $bag::[
+    { n: 4 }
+  ]
+}
+
+// Too deep a nesting of subqueries is an error, not a stack overflow
+{
+  sql: '''
+    SELECT VALUE t33 FROM (SELECT VALUE t32 FROM (SELECT VALUE t31 FROM (SELECT VALUE t30
+    FROM (SELECT VALUE t29 FROM (SELECT VALUE t28 FROM (SELECT VALUE t27 FROM (SELECT VALUE
+    t26 FROM (SELECT VALUE t25 FROM (SELECT VALUE t24 FROM (SELECT VALUE t23 FROM (SELECT
+    VALUE t22 FROM (SELECT VALUE t21 FROM (SELECT VALUE t20 FROM (SELECT VALUE t19 FROM
+    (SELECT VALUE t18 FROM (SELECT VALUE t17 FROM (SELECT VALUE t16 FROM (SELECT VALUE t15
+    FROM (SELECT VALUE t14 FROM (SELECT VALUE t13 FROM (SELECT VALUE t12 FROM (SELECT VALUE
+    t11 FROM (SELECT VALUE t10 FROM (SELECT VALUE t9 FROM (SELECT VALUE t8 FROM (SELECT
+    VALUE t7 FROM (SELECT VALUE t6 FROM (SELECT VALUE t5 FROM (SELECT VALUE t4 FROM (SELECT
+    VALUE t3 FROM (SELECT VALUE t2 FROM (SELECT VALUE t1 FROM (SELECT VALUE t0 FROM << 1 >>
+    t0) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) t13) t14) t15) t16) t17) t18)
+    t19) t20) t21) t22) t23) t24) t25) t26) t27) t28) t29) t30) t31) t32) t33
+  ''',
+  expect: { error: "subquery nesting" }
+}
+
+// A lateral subquery on the right of a LEFT JOIN reads the left row
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    LEFT JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON s <> 'B'
+  ''',
+  expect: $bag::[
+    { title: "eng", s: "A" },
+    { title: "ops", s: "C" },
+    { title: "hr", s: null }
+  ]
+}
+
+// RIGHT and FULL JOIN also run their right side without a left row, so it cannot read the
+// left side: it is not in scope there
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    RIGHT JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON true
+  ''',
+  expect: { error: "unresolved var" }
+}
+
+{
+  sql: '''
+    SELECT d.title, s
+    FROM dept d
+    FULL JOIN (SELECT VALUE UPPER(t) FROM d.tags t) s ON s = 'Z'
+  ''',
+  expect: { error: "unresolved var" }
+}
+
+// ... and so cannot a path over the left side (this used to read the left row after its
+// cursor was done)
+{
+  sql: '''
+    SELECT d.title, t
+    FROM dept d
+    FULL JOIN d.tags t ON t = 'z'
+  ''',
+  expect: { error: "unresolved var" }
+}
+
+// A FROM subquery on the right of a LEFT JOIN
+{
+  sql: '''
+    SELECT VALUE [d.title, s.name]
+    FROM dept d
+    LEFT JOIN (SELECT e.name, e.dept FROM emp e) s ON s.dept = d.id
+  ''',
+  expect: $bag::[
+    ["eng", "ann"],
+    ["eng", "bob"],
+    ["ops", "cal"],
+    ["hr", $missing::null]
+  ]
+}
+
+// A correlated subquery in HAVING reads the group key
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM emp e
+    GROUP BY e.dept AS k
+    HAVING COUNT(*) > (SELECT COUNT(*) AS c FROM dept d WHERE d.id = k)
+  ''',
+  expect: $bag::[
+    { k: 10, n: 2 },
+    { k: 30, n: 1 }
+  ]
+}
+
+// A subquery as a GROUP BY key groups by its collection (a key position does not coerce
+// to a scalar, as in the legacy evaluator)
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM emp e
+    GROUP BY (SELECT d.title FROM dept d WHERE d.id = e.dept) AS k
+  ''',
+  expect: $bag::[
+    { k: $bag::[], n: 1 },
+    { k: $bag::[{ title: "eng" }], n: 2 },
+    { k: $bag::[{ title: "ops" }], n: 1 }
+  ]
+}
+
+// A subquery as an aggregate's argument runs for each input row
+{
+  sql: '''
+    SELECT COUNT((SELECT VALUE d.id FROM dept d WHERE d.id = e.dept)) AS n
+    FROM emp e
+  ''',
+  expect: $bag::[
+    { n: 4 }
+  ]
+}
+
+// An uncorrelated subquery (run once) inside a correlated one (run per row)
+{
+  sql: '''
+    SELECT VALUE d.title
+    FROM dept d
+    WHERE EXISTS (
+      SELECT e.id
+      FROM emp e
+      WHERE e.dept = d.id AND e.pay >= (SELECT MAX(x.pay) AS m FROM emp x WHERE x.pay < 300)
+    )
+  ''',
+  expect: $bag::["eng", "ops"]
+}
+
+// Known gap (#719): IN over a collection holding NULL is NULL, not false, when nothing
+// matches, so NOT IN keeps no row
+skip::{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE NOT (e.dept IN (SELECT VALUE d.id FROM << {'id': 10}, {'id': NULL} >> d))
+  ''',
+  expect: $bag::[]
+}

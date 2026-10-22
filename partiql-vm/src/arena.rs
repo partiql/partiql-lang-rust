@@ -149,9 +149,30 @@ impl Arena {
     /// every reference handed out by this arena before calling `reset` — the
     /// next allocation overwrites those bytes.
     pub fn reset(&self) {
-        self.current.set(0);
-        self.offset.set(0);
+        self.rewind(ArenaMark::default());
     }
+
+    /// The position of the next allocation, to [`Arena::rewind`] to.
+    pub(crate) fn mark(&self) -> ArenaMark {
+        ArenaMark {
+            chunk: self.current.get(),
+            offset: self.offset.get(),
+        }
+    }
+
+    /// Free what was allocated since `mark` was taken; what was allocated before stays
+    /// valid. Like [`Arena::reset`], callers must drop every reference to the freed part.
+    pub(crate) fn rewind(&self, mark: ArenaMark) {
+        self.current.set(mark.chunk);
+        self.offset.set(mark.offset);
+    }
+}
+
+/// A position in an [`Arena`]: everything allocated before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ArenaMark {
+    chunk: usize,
+    offset: usize,
 }
 
 #[cfg(test)]
@@ -192,6 +213,24 @@ mod tests {
                     "cap {capacity}: allocation {i} was invalidated by a later one"
                 );
             }
+        }
+    }
+
+    /// `rewind` frees only what came after the mark, across chunk boundaries: what came
+    /// before stays intact while the freed space is reused.
+    #[test]
+    fn rewind_keeps_allocations_before_the_mark() {
+        let arena = Arena::new(16);
+        let kept: &[u64] = arena.alloc_slice(&[1, 2]);
+        let mark = arena.mark();
+        for round in 0..3u64 {
+            for i in 0..20 {
+                let _: &[u64] = arena.alloc_slice(&[round * 100 + i; 3]);
+            }
+            assert!(chunk_count(&arena) > 1, "never crossed a chunk");
+            arena.rewind(mark);
+            assert_eq!(arena.mark(), mark);
+            assert_eq!(kept, &[1, 2], "round {round} overwrote the kept allocation");
         }
     }
 

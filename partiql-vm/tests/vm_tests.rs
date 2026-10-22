@@ -674,6 +674,96 @@ fn rerun_starts_sorters_empty() {
     assert_eq!(runs[1..], [expected.clone(), expected]);
 }
 
+/// An uncorrelated subquery runs once per run of the VM, including after a run that stopped
+/// early: each run evaluates it again rather than reading the previous run's freed rows.
+#[test]
+fn uncorrelated_subquery_reruns() {
+    let query = "SELECT VALUE d.a || '!' FROM data AS d \
+                 WHERE d.a IN (SELECT VALUE k.a || '' FROM keys AS k)";
+    let data = [
+        ("data", "[{a: \"x\"}, {a: \"y\"}, {a: \"z\"}]"),
+        ("keys", "[{a: \"z\"}, {a: \"x\"}]"),
+    ];
+    let expected = parse_ion("$bag::[\"x!\", \"z!\"]");
+    let runs = eval_vm_runs(query, &data, &[Some(1), None, None]);
+    assert_eq!(runs[1..], [expected.clone(), expected]);
+}
+
+/// A correlated subquery runs for each row, reading the row's bindings.
+#[test]
+fn correlated_subquery() {
+    assert_vm_eval(
+        "SELECT d.a AS a, (SELECT VALUE k.b FROM keys AS k WHERE k.a = d.a) AS bs FROM data AS d",
+        &[
+            ("data", "[{a: 1}, {a: 2}]"),
+            (
+                "keys",
+                "[{a: 1, b: \"p\"}, {a: 2, b: \"q\"}, {a: 1, b: \"r\"}]",
+            ),
+        ],
+        "$bag::[{a: 1, bs: $bag::[\"p\", \"r\"]}, {a: 2, bs: $bag::[\"q\"]}]",
+    );
+}
+
+/// A correlated subquery reruns cleanly after a run that stopped early, mid-way through the
+/// outer rows.
+#[test]
+fn correlated_subquery_reruns() {
+    let query = "SELECT d.a AS a, (SELECT VALUE k.b || '!' FROM keys AS k WHERE k.a = d.a) AS bs \
+                 FROM data AS d ORDER BY d.a";
+    let data = [
+        ("data", "[{a: 1}, {a: 2}, {a: 3}]"),
+        (
+            "keys",
+            "[{a: 1, b: \"p\"}, {a: 2, b: \"q\"}, {a: 1, b: \"r\"}]",
+        ),
+    ];
+    let expected = parse_ion(
+        "[{a: 1, bs: $bag::[\"p!\", \"r!\"]}, {a: 2, bs: $bag::[\"q!\"]}, {a: 3, bs: $bag::[]}]",
+    );
+    let runs = eval_vm_runs(query, &data, &[Some(1), None, None]);
+    assert_eq!(runs[1..], [expected.clone(), expected]);
+}
+
+/// A subquery's code is emitted once however often it is read, so a FULL JOIN (which emits
+/// its sides twice) of FROM subqueries, nested, stays small. Inlined, this one outgrew the
+/// program size limit.
+#[test]
+fn subqueries_under_full_joins_compile_once() {
+    let mut q = "<<1, 2>>".to_string();
+    for i in 0..9 {
+        q = format!("(SELECT VALUE a{i} FROM {q} a{i} FULL JOIN {q} b{i} ON a{i} = b{i})");
+    }
+    assert_vm_eval(&format!("SELECT VALUE x FROM {q} x"), &[], "$bag::[1, 2]");
+}
+
+/// `depth` FROM subqueries nested in one another.
+fn nested_from_subqueries(depth: usize) -> String {
+    let mut from = "<<1>> t0".to_string();
+    for i in 1..=depth {
+        from = format!("(SELECT VALUE t{} FROM {from}) t{i}", i - 1);
+    }
+    format!("SELECT VALUE t{depth} FROM {from}")
+}
+
+/// Subqueries nest up to a limit, within the stack of a test thread; past it, compiling
+/// fails rather than overflowing the stack.
+#[test]
+fn subquery_nesting_limit() {
+    assert_vm_eval(&nested_from_subqueries(32), &[], "$bag::[1]");
+
+    let query = nested_from_subqueries(33);
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
+    let parsed = Parser::default().parse(&query).expect("parse failed");
+    let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+    let logical = planner.lower(&parsed).expect("lower failed");
+    let context = CompilationContext::new();
+    match PlanCompiler::new(&context, EvaluationMode::Permissive).compile(&logical) {
+        Err(err) => assert!(format!("{err:?}").contains("subquery nesting"), "{err:?}"),
+        Ok(_) => panic!("33 levels compiled"),
+    }
+}
+
 /// GROUP BY tells collection keys apart.
 #[test]
 fn group_by_collection_keys() {
