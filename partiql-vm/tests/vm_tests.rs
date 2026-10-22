@@ -705,6 +705,33 @@ fn correlated_subquery() {
     );
 }
 
+/// `depth` FROM subqueries nested in one another.
+fn nested_from_subqueries(depth: usize) -> String {
+    let mut from = "<<1>> t0".to_string();
+    for i in 1..=depth {
+        from = format!("(SELECT VALUE t{} FROM {from}) t{i}", i - 1);
+    }
+    format!("SELECT VALUE t{depth} FROM {from}")
+}
+
+/// Subqueries nest up to a limit, within the stack of a test thread; past it, compiling
+/// fails rather than overflowing the stack.
+#[test]
+fn subquery_nesting_limit() {
+    assert_vm_eval(&nested_from_subqueries(32), &[], "$bag::[1]");
+
+    let query = nested_from_subqueries(33);
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
+    let parsed = Parser::default().parse(&query).expect("parse failed");
+    let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+    let logical = planner.lower(&parsed).expect("lower failed");
+    let context = CompilationContext::new();
+    match PlanCompiler::new(&context, EvaluationMode::Permissive).compile(&logical) {
+        Err(err) => assert!(format!("{err:?}").contains("subquery nesting"), "{err:?}"),
+        Ok(_) => panic!("33 levels compiled"),
+    }
+}
+
 /// GROUP BY tells collection keys apart.
 #[test]
 fn group_by_collection_keys() {

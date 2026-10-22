@@ -233,6 +233,8 @@ type Row<'r, 'q> = &'r mut dyn FnMut(&mut Emitter<'q>) -> Result<()>;
 struct Emitter<'q> {
     query: &'q Query,
     asm: Asm,
+    /// The entry of each subquery's subroutine, once emitted. Index = subquery id.
+    subqueries: Vec<Option<Label>>,
 }
 
 impl<'q> Emitter<'q> {
@@ -240,6 +242,7 @@ impl<'q> Emitter<'q> {
         Emitter {
             query,
             asm: Asm::new(ProgramBuilder::new(query.reg_count)),
+            subqueries: vec![None; query.subqueries.len()],
         }
     }
 
@@ -798,24 +801,37 @@ impl<'q> Emitter<'q> {
                 }
             });
         }
-        let subqueries = &self.query.subqueries;
         for id in ids {
-            self.emit_subquery(&subqueries[id as usize])?;
+            let id = id as usize;
+            let entry = match self.subqueries[id] {
+                Some(entry) => entry,
+                None => {
+                    let entry = self.emit_subquery(&self.query.subqueries[id])?;
+                    self.subqueries[id] = Some(entry);
+                    entry
+                }
+            };
+            self.asm.gosub(self.query.subqueries[id].ret, entry);
         }
         Ok(())
     }
 
-    /// A subquery: its rows collected in its sorter, then made into a collection. An
-    /// uncorrelated subquery runs only the first time (registers start each run MISSING):
+    /// A subquery, as a subroutine of its own: emitted once however many places read it
+    /// (a FULL JOIN emits its sides twice), so code does not multiply with nesting. Its rows
+    /// are collected in its sorter, then made into a collection. An uncorrelated subquery runs
+    /// only the first time (registers start each run MISSING). A subquery never calls
+    /// itself, so its return register is free whenever it is called:
     /// ```text
-    ///         [if once: goto done]
+    ///   SUB:  [if once: goto done]
     ///         SorterReset
     ///         for each row of the subquery: copy the row into the record; SorterInsert
     ///         SorterCollect → dst
     ///         [once = true]
-    ///   done:
+    ///   done: Return
     /// ```
-    fn emit_subquery(&mut self, subquery: &'q Subquery) -> Result<()> {
+    fn emit_subquery(&mut self, subquery: &'q Subquery) -> Result<Label> {
+        let entry = self.asm.label();
+        let caller = self.asm.begin_routine(entry);
         let sorter_id = subquery.sorter;
         let done = self.asm.label();
         if let Some(once) = subquery.once {
@@ -857,7 +873,11 @@ impl<'q> Emitter<'q> {
             self.asm.load_const(once, ValueOwned::Bool(true))?;
         }
         self.asm.bind(done);
-        Ok(())
+        self.asm.push(Inst::Return {
+            ret_reg: subquery.ret,
+        });
+        self.asm.resume(caller);
+        Ok(entry)
     }
 
     /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group (unless there are

@@ -230,6 +230,8 @@ pub(crate) struct Subquery {
     /// An uncorrelated subquery (one that reads nothing of the queries around it) runs at most
     /// once: this register is set once it has.
     pub(crate) once: Option<SlotId>,
+    /// The subquery is a subroutine, called wherever it is read, returning through this.
+    pub(crate) ret: SlotId,
 }
 
 pub(crate) struct GroupAgg {
@@ -241,6 +243,11 @@ pub(crate) struct GroupAgg {
     pub(crate) finalize: AggFunc,
     pub(crate) accum: SlotId,
 }
+
+/// The deepest a subquery may nest. Lowering and emission recurse once per level (about
+/// 30 KiB of stack each in a debug build), so this keeps them within a 2 MiB thread, the
+/// default for spawned threads, with room to spare.
+const MAX_SUBQUERY_DEPTH: usize = 32;
 
 /// Lower `plan`.
 pub(crate) fn lower(
@@ -451,10 +458,11 @@ enum ScanKind {
     /// A catalog table or literal, bound when the VM starts.
     Bound,
     TableFn(TableFnScan),
-    /// A collection computed at runtime by `expr` into `src`.
+    /// A collection computed at runtime by the scan's expression into `src`, or MISSING when
+    /// `unbound` (a global name that is no table; strict mode then rejects it).
     Expr {
-        expr: ValueExpr,
         src: SlotId,
+        unbound: bool,
     },
 }
 
@@ -468,12 +476,15 @@ struct TableFnScan {
 /// A FROM subtree with its cursors and registers assigned, before its expressions are
 /// lowered (they may read any binding of the FROM clause).
 enum Layout<'p> {
-    Scan(ScanSlots),
+    Scan(ScanSlots<'p>),
     Join(Box<JoinLayout<'p>>),
 }
 
-struct ScanSlots {
+struct ScanSlots<'p> {
     scan_id: ScanId,
+    /// The scan's expression, lowered when the cursor opens if it is computed at runtime.
+    expr: &'p ValueExpr,
+    binding: PipelineSlotResolver,
     cursor: u16,
     window: Range<SlotId>,
     whole_row: bool,
@@ -537,7 +548,7 @@ impl<'a> Lowerer<'a> {
         let op = graph.operator(id)?;
         if let BindingsOp::Scan(_) | BindingsOp::Join(_) = op {
             let (resolver, layout) = self.layout_from(graph, id, ctx)?;
-            let op = self.lower_from(&layout, &resolver)?;
+            let op = self.lower_from(&layout, &mut vec![])?;
             return Ok(Lowered::new(op, resolver, None));
         }
 
@@ -640,6 +651,8 @@ impl<'a> Lowerer<'a> {
                 let binding = binding.shifted(window.start);
                 let slots = ScanSlots {
                     scan_id,
+                    expr: &scan.expr,
+                    binding: binding.clone(),
                     cursor: self.add_cursor(scan_id, window.start)?,
                     window,
                     whole_row: binding.base_row_slot.is_some(),
@@ -688,31 +701,51 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Lower a laid-out FROM subtree, resolving names with the whole FROM clause's
-    /// bindings.
-    fn lower_from(&mut self, layout: &Layout<'_>, resolver: &ResolverKind) -> Result<Op> {
+    /// Lower a laid-out FROM subtree. `left` holds the bindings to its left, in FROM order;
+    /// the subtree's own are appended. A scan's source sees only the bindings to its left
+    /// (`FROM t, t.arr x`), and a join's ON those of both its sides as well, so a name a
+    /// binding shadows still reaches an enclosing query (`(SELECT ... FROM e.items e)`).
+    fn lower_from(
+        &mut self,
+        layout: &Layout<'_>,
+        left: &mut Vec<PipelineSlotResolver>,
+    ) -> Result<Op> {
         match layout {
-            Layout::Scan(scan) => Ok(Op::Scan(ScanLoop {
-                cursor: scan.cursor,
-                open: self.lower_open(scan.scan_id, resolver)?,
-                window: scan.window.clone(),
-                whole_row: scan.whole_row,
-            })),
-            Layout::Join(join) => Ok(Op::Join(Box::new(Join {
-                kind: join.kind,
-                left: self.lower_from(&join.left, resolver)?,
-                right: self.lower_from(&join.right, resolver)?,
-                on: join
-                    .on
-                    .map(|on| self.lower_cond(on, resolver))
-                    .transpose()?,
-                matched: self.alloc_reg()?,
-                ret: self.alloc_reg()?,
-            }))),
+            Layout::Scan(scan) => {
+                let open = self.lower_open(scan.scan_id, scan.expr, &scope_of(left.clone()))?;
+                left.push(scan.binding.clone());
+                Ok(Op::Scan(ScanLoop {
+                    cursor: scan.cursor,
+                    open,
+                    window: scan.window.clone(),
+                    whole_row: scan.whole_row,
+                }))
+            }
+            Layout::Join(join) => {
+                let left_op = self.lower_from(&join.left, left)?;
+                let right_op = self.lower_from(&join.right, left)?;
+                let resolver = scope_of(left.clone());
+                Ok(Op::Join(Box::new(Join {
+                    kind: join.kind,
+                    left: left_op,
+                    right: right_op,
+                    on: join
+                        .on
+                        .map(|on| self.lower_cond(on, &resolver))
+                        .transpose()?,
+                    matched: self.alloc_reg()?,
+                    ret: self.alloc_reg()?,
+                })))
+            }
         }
     }
 
-    fn lower_open(&mut self, scan_id: ScanId, resolver: &ResolverKind) -> Result<Open> {
+    fn lower_open(
+        &mut self,
+        scan_id: ScanId,
+        scan_expr: &ValueExpr,
+        resolver: &ResolverKind,
+    ) -> Result<Open> {
         Ok(match &self.scans[&scan_id] {
             ScanKind::Bound => Open::Bound,
             ScanKind::TableFn(tf) => {
@@ -724,14 +757,14 @@ impl<'a> Lowerer<'a> {
                 }
                 Open::TableFn { func_name, args }
             }
-            ScanKind::Expr { expr, src } => {
-                let (expr, src) = (expr.clone(), *src);
-                Open::Expr {
-                    src,
-                    expr: self.lower_expr(&expr, resolver)?,
-                    assert_collection: self.mode == EvaluationMode::Strict,
-                }
-            }
+            &ScanKind::Expr { src, unbound } => Open::Expr {
+                src,
+                expr: match unbound {
+                    true => Expr::Literal(ValueOwned::Missing),
+                    false => self.lower_expr(scan_expr, resolver)?,
+                },
+                assert_collection: self.mode == EvaluationMode::Strict,
+            },
         })
     }
 
@@ -772,6 +805,10 @@ impl<'a> Lowerer<'a> {
             return Err(EngineError::UnsupportedExpr(
                 "subquery without FROM".to_string(),
             ));
+        }
+        // Lowering and emission recurse once per level
+        if self.scopes.len() >= MAX_SUBQUERY_DEPTH {
+            return Err(EngineError::TooLarge("subquery nesting"));
         }
         self.scopes.push(OuterScope {
             resolver: resolver.clone(),
@@ -816,7 +853,7 @@ impl<'a> Lowerer<'a> {
         self.sorters.push(SorterMetadata {
             keys: SortKeys::Group(0),
         });
-        let dst = self.alloc_reg()?;
+        let (dst, ret) = (self.alloc_reg()?, self.alloc_reg()?);
         let once = match scope.correlated.get() {
             true => None,
             false => Some(self.alloc_reg()?),
@@ -832,6 +869,7 @@ impl<'a> Lowerer<'a> {
             ordered: lowered.ordered,
             dst,
             once,
+            ret,
         });
         Ok(Expr::Subquery { id, dst })
     }
@@ -1127,11 +1165,12 @@ impl<'a> Lowerer<'a> {
         // Catalog tables
         let Ok((catalog_id, reader_factory)) = self.resolve_reader_factory(scan) else {
             // Anything else is evaluated at runtime and scanned from its value
+            let unbound = matches!(
+                scan.expr,
+                ValueExpr::VarRef(_, VarRefType::Global) | ValueExpr::DBRef(_)
+            );
             let src = self.alloc_reg()?;
-            let scan_id = self.whole_value_scan(ScanKind::Expr {
-                expr: scan.expr.clone(),
-                src,
-            });
+            let scan_id = self.whole_value_scan(ScanKind::Expr { src, unbound });
             return Ok((scan_id, whole_row_binding(scan), 1));
         };
         let table_name = extract_table_name(&scan.expr);
@@ -1173,6 +1212,19 @@ impl<'a> Lowerer<'a> {
     ) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
         match &scan.expr {
             ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
+            // In a subquery, a variable of an enclosing query (`FROM e x` over an outer `e`)
+            // hides a table of the same name; a binding of the same FROM clause does not (as
+            // in the legacy evaluator, `FROM l, l l2` scans table `l` twice).
+            ValueExpr::VarRef(name, VarRefType::Local)
+                if self
+                    .scopes
+                    .iter()
+                    .any(|s| s.resolver.resolve_var(name, VarRefType::Local).is_some()) =>
+            {
+                Err(EngineError::InvalidPlan(
+                    "a scan of an enclosing query's variable".to_string(),
+                ))
+            }
             ValueExpr::VarRef(table_name, _) => {
                 let db_ref = DBRef {
                     catalog: "default".to_string(),
@@ -1474,6 +1526,15 @@ impl ResolverKind {
                 "join input is not a FROM source".to_string(),
             )),
         }
+    }
+}
+
+/// The names of FROM bindings, in FROM order.
+fn scope_of(mut bindings: Vec<PipelineSlotResolver>) -> ResolverKind {
+    match bindings.len() {
+        0 => ResolverKind::Empty,
+        1 => ResolverKind::Pipeline(bindings.remove(0)),
+        _ => ResolverKind::Multi(bindings),
     }
 }
 

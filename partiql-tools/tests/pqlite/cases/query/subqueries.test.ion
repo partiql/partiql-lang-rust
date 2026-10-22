@@ -271,3 +271,80 @@
   ''',
   expect: $bag::["bob", "cal", "dee"]
 }
+
+// A FROM source sees only the bindings to its left: `e.items` is the outer `e`, which the
+// binding `e` it defines shadows only after it
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE e.v FROM e.items e)
+    FROM << {'items': [{'v': 1}, {'v': 2}]} >> e
+  ''',
+  expect: $bag::[
+    $bag::[1, 2]
+  ]
+}
+
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x FROM e.items x, x.sub e)
+    FROM << {'items': [{'sub': [1]}]} >> e
+  ''',
+  expect: $bag::[
+    $bag::[{ sub: [1] }]
+  ]
+}
+
+// A subquery ranges over a variable of the query around it
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x FROM e x)
+    FROM << [1, 2], [3] >> e
+  ''',
+  expect: $bag::[
+    $bag::[1, 2],
+    $bag::[3]
+  ]
+}
+
+// ... even when a table has the variable's name: the row `dept` is one tuple, not the table
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x.name FROM dept x)
+    FROM emp dept
+    WHERE dept.id = 1
+  ''',
+  expect: $bag::[
+    $bag::["ann"]
+  ]
+}
+
+// A subquery in a FULL JOIN's ON, which the join evaluates from two places
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM dept a
+    FULL JOIN dept b
+      ON a.id = b.id AND EXISTS (SELECT e.id FROM emp e WHERE e.dept = a.id)
+  ''',
+  expect: $bag::[
+    { n: 4 }
+  ]
+}
+
+// Too deep a nesting of subqueries is an error, not a stack overflow
+{
+  sql: '''
+    SELECT VALUE t33 FROM (SELECT VALUE t32 FROM (SELECT VALUE t31 FROM (SELECT VALUE t30
+    FROM (SELECT VALUE t29 FROM (SELECT VALUE t28 FROM (SELECT VALUE t27 FROM (SELECT VALUE
+    t26 FROM (SELECT VALUE t25 FROM (SELECT VALUE t24 FROM (SELECT VALUE t23 FROM (SELECT
+    VALUE t22 FROM (SELECT VALUE t21 FROM (SELECT VALUE t20 FROM (SELECT VALUE t19 FROM
+    (SELECT VALUE t18 FROM (SELECT VALUE t17 FROM (SELECT VALUE t16 FROM (SELECT VALUE t15
+    FROM (SELECT VALUE t14 FROM (SELECT VALUE t13 FROM (SELECT VALUE t12 FROM (SELECT VALUE
+    t11 FROM (SELECT VALUE t10 FROM (SELECT VALUE t9 FROM (SELECT VALUE t8 FROM (SELECT
+    VALUE t7 FROM (SELECT VALUE t6 FROM (SELECT VALUE t5 FROM (SELECT VALUE t4 FROM (SELECT
+    VALUE t3 FROM (SELECT VALUE t2 FROM (SELECT VALUE t1 FROM (SELECT VALUE t0 FROM << 1 >>
+    t0) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) t13) t14) t15) t16) t17) t18)
+    t19) t20) t21) t22) t23) t24) t25) t26) t27) t28) t29) t30) t31) t32) t33
+  ''',
+  expect: { error: "subquery nesting" }
+}
