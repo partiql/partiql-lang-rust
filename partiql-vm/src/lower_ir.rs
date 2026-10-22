@@ -2017,3 +2017,49 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name(s: &str) -> BindingsName<'static> {
+        BindingsName::CaseInsensitive(s.to_string().into())
+    }
+
+    fn binding(alias: &str, whole_row: Option<SlotId>, fields: &[(&str, SlotId)]) -> ResolverKind {
+        ResolverKind::Pipeline(PipelineSlotResolver {
+            base_row_slot: whole_row,
+            scan_alias: alias.to_string(),
+            table_name: None,
+            column_slots: fields.iter().map(|&(f, s)| (f.to_string(), s)).collect(),
+            group_output: false,
+        })
+    }
+
+    /// `t.a` in a subquery that binds `t` (whole) reads the subquery's `t`, even where an
+    /// outer `t` pushed field `a` down. No query reaches this yet (a subquery makes every
+    /// outer scan load whole rows), so it is checked on the resolver.
+    #[test]
+    fn inner_binding_hides_an_outer_pushed_down_field() {
+        let outer = [OuterScope {
+            resolver: binding("t", None, &[("a", 7)]),
+            correlated: Cell::new(false),
+        }];
+        let inner = binding("t", Some(3), &[]);
+        let scoped = ScopedResolver {
+            inner: &inner,
+            outer: &outer,
+        };
+        assert_eq!(scoped.resolve_qualified(&name("t"), &name("a")), None);
+        assert!(!outer[0].correlated.get());
+
+        // Without an inner `t`, the outer field answers, and the subquery is correlated
+        let inner = binding("u", Some(3), &[]);
+        let scoped = ScopedResolver {
+            inner: &inner,
+            outer: &outer,
+        };
+        assert_eq!(scoped.resolve_qualified(&name("t"), &name("a")), Some(7));
+        assert!(outer[0].correlated.get());
+    }
+}

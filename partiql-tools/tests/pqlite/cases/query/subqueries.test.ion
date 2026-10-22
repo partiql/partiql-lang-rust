@@ -382,3 +382,94 @@
   ''',
   expect: { error: "unresolved var" }
 }
+
+// ... and so cannot a path over the left side (this used to read the left row after its
+// cursor was done)
+{
+  sql: '''
+    SELECT d.title, t
+    FROM dept d
+    FULL JOIN d.tags t ON t = 'z'
+  ''',
+  expect: { error: "unresolved var" }
+}
+
+// A FROM subquery on the right of a LEFT JOIN
+{
+  sql: '''
+    SELECT VALUE [d.title, s.name]
+    FROM dept d
+    LEFT JOIN (SELECT e.name, e.dept FROM emp e) s ON s.dept = d.id
+  ''',
+  expect: $bag::[
+    ["eng", "ann"],
+    ["eng", "bob"],
+    ["ops", "cal"],
+    ["hr", $missing::null]
+  ]
+}
+
+// A correlated subquery in HAVING reads the group key
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM emp e
+    GROUP BY e.dept AS k
+    HAVING COUNT(*) > (SELECT COUNT(*) AS c FROM dept d WHERE d.id = k)
+  ''',
+  expect: $bag::[
+    { k: 10, n: 2 },
+    { k: 30, n: 1 }
+  ]
+}
+
+// A subquery as a GROUP BY key groups by its collection (a key position does not coerce
+// to a scalar, as in the legacy evaluator)
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM emp e
+    GROUP BY (SELECT d.title FROM dept d WHERE d.id = e.dept) AS k
+  ''',
+  expect: $bag::[
+    { k: $bag::[], n: 1 },
+    { k: $bag::[{ title: "eng" }], n: 2 },
+    { k: $bag::[{ title: "ops" }], n: 1 }
+  ]
+}
+
+// A subquery as an aggregate's argument runs for each input row
+{
+  sql: '''
+    SELECT COUNT((SELECT VALUE d.id FROM dept d WHERE d.id = e.dept)) AS n
+    FROM emp e
+  ''',
+  expect: $bag::[
+    { n: 4 }
+  ]
+}
+
+// An uncorrelated subquery (run once) inside a correlated one (run per row)
+{
+  sql: '''
+    SELECT VALUE d.title
+    FROM dept d
+    WHERE EXISTS (
+      SELECT e.id
+      FROM emp e
+      WHERE e.dept = d.id AND e.pay >= (SELECT MAX(x.pay) AS m FROM emp x WHERE x.pay < 300)
+    )
+  ''',
+  expect: $bag::["eng", "ops"]
+}
+
+// Known gap (#719): IN over a collection holding NULL is NULL, not false, when nothing
+// matches, so NOT IN keeps no row
+skip::{
+  sql: '''
+    SELECT VALUE e.name
+    FROM emp e
+    WHERE NOT (e.dept IN (SELECT VALUE d.id FROM << {'id': 10}, {'id': NULL} >> d))
+  ''',
+  expect: $bag::[]
+}

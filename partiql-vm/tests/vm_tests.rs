@@ -705,6 +705,38 @@ fn correlated_subquery() {
     );
 }
 
+/// A correlated subquery reruns cleanly after a run that stopped early, mid-way through the
+/// outer rows.
+#[test]
+fn correlated_subquery_reruns() {
+    let query = "SELECT d.a AS a, (SELECT VALUE k.b || '!' FROM keys AS k WHERE k.a = d.a) AS bs \
+                 FROM data AS d ORDER BY d.a";
+    let data = [
+        ("data", "[{a: 1}, {a: 2}, {a: 3}]"),
+        (
+            "keys",
+            "[{a: 1, b: \"p\"}, {a: 2, b: \"q\"}, {a: 1, b: \"r\"}]",
+        ),
+    ];
+    let expected = parse_ion(
+        "[{a: 1, bs: $bag::[\"p!\", \"r!\"]}, {a: 2, bs: $bag::[\"q!\"]}, {a: 3, bs: $bag::[]}]",
+    );
+    let runs = eval_vm_runs(query, &data, &[Some(1), None, None]);
+    assert_eq!(runs[1..], [expected.clone(), expected]);
+}
+
+/// A subquery's code is emitted once however often it is read, so a FULL JOIN (which emits
+/// its sides twice) of FROM subqueries, nested, stays small. Inlined, this one outgrew the
+/// program size limit.
+#[test]
+fn subqueries_under_full_joins_compile_once() {
+    let mut q = "<<1, 2>>".to_string();
+    for i in 0..9 {
+        q = format!("(SELECT VALUE a{i} FROM {q} a{i} FULL JOIN {q} b{i} ON a{i} = b{i})");
+    }
+    assert_vm_eval(&format!("SELECT VALUE x FROM {q} x"), &[], "$bag::[1, 2]");
+}
+
 /// `depth` FROM subqueries nested in one another.
 fn nested_from_subqueries(depth: usize) -> String {
     let mut from = "<<1>> t0".to_string();
