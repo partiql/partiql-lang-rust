@@ -121,6 +121,19 @@ impl SortOrder {
     }
 }
 
+/// PartiQL's total order of values (NULL and MISSING first), as for MIN and MAX.
+pub(crate) fn total_order(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
+    order_cmp(a, b, true)
+}
+
+/// `items` with duplicates removed, as GROUP BY tells values apart (for `DISTINCT`).
+pub(crate) fn distinct<'a>(items: &[ValueRef<'a>]) -> Vec<ValueRef<'a>> {
+    let mut items = items.to_vec();
+    items.sort_by(compare_value_ref);
+    items.dedup_by(|a, b| compare_value_ref(a, b).is_eq());
+    items
+}
+
 /// PartiQL's total order of values, with NULL and MISSING below every other value when
 /// `nulls_low`, else above.
 fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {

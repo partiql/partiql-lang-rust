@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::aggregate;
 use crate::arena::{Arena, ArenaMark};
 use crate::builtins::BuiltinFunctions;
 use crate::catalog::ExecutionContext;
@@ -114,6 +115,8 @@ pub struct CompiledPlan {
     /// Sorter metadata for GROUP BY and ORDER BY. Index = sorter_id. Each entry describes
     /// how the key fields order the records.
     pub(crate) sorter_metadata: Vec<SorterMetadata>,
+    /// Strict mode: a value an operation can't take is an error, rather than MISSING.
+    pub(crate) mode: EvaluationMode,
 }
 
 /// Compile-time metadata for a sorter used by GROUP BY or ORDER BY.
@@ -155,6 +158,7 @@ impl Clone for CompiledPlan {
             expr_scan_ids: self.expr_scan_ids.clone(),
             table_fn_scans: self.table_fn_scans.clone(),
             sorter_metadata: self.sorter_metadata.clone(),
+            mode: self.mode,
         }
     }
 }
@@ -288,6 +292,7 @@ impl Default for CompiledPlan {
             expr_scan_ids: Vec::new(),
             table_fn_scans: HashMap::new(),
             sorter_metadata: Vec::new(),
+            mode: EvaluationMode::Permissive,
         }
     }
 }
@@ -391,6 +396,7 @@ impl PartiQLVM {
     /// * `compiled` - The compiled query plan (bytecode) to execute
     /// * `exec_context` - ExecutionContext for resolving catalog-based data sources
     pub fn new(compiled: CompiledPlan, exec_context: &ExecutionContext) -> Result<Self> {
+        let strict = compiled.mode == EvaluationMode::Strict;
         let compiled = Arc::new(compiled);
         let slot_count = compiled.slot_count;
 
@@ -424,7 +430,7 @@ impl PartiQLVM {
             ip: 0,
             halted: false,
             slot_count,
-            builtins: BuiltinFunctions::new(),
+            builtins: BuiltinFunctions::new(strict),
             table_functions: exec_context.table_functions().clone(),
             sorters,
             source_open: Vec::new(),
@@ -993,7 +999,8 @@ impl<'vm> QueryIterator<'vm> {
                 } => {
                     let accum = regs[*accum_reg as usize];
                     let input = regs[*input_reg as usize];
-                    regs[*accum_reg as usize] = match agg_step(*func, accum, input) {
+                    let strict = self.vm.compiled.mode == EvaluationMode::Strict;
+                    regs[*accum_reg as usize] = match aggregate::step(*func, accum, input, strict) {
                         Ok(value) => value,
                         Err(e) => return Some(Err(e)),
                     };
@@ -1004,24 +1011,16 @@ impl<'vm> QueryIterator<'vm> {
                     accum_reg,
                     dst_reg,
                 } => {
-                    if *func == AggFunc::Avg {
-                        // AVG: sum is in accum_reg, count is in accum_reg+1
-                        let sum = regs[*accum_reg as usize];
-                        let count = regs[*accum_reg as usize + 1];
-                        regs[*dst_reg as usize] = match (sum, count) {
-                            (ValueRef::Missing, _) | (_, ValueRef::Missing) => ValueRef::Null,
-                            (ValueRef::I64(s), ValueRef::I64(c)) if c > 0 => {
-                                ValueRef::F64(s as f64 / c as f64)
-                            }
-                            (ValueRef::F64(s), ValueRef::I64(c)) if c > 0 => {
-                                ValueRef::F64(s / c as f64)
-                            }
-                            _ => ValueRef::Null,
-                        };
-                    } else {
-                        let accum = regs[*accum_reg as usize];
-                        regs[*dst_reg as usize] = agg_final(*func, accum);
-                    }
+                    // AVG keeps its count in the register after its sum
+                    let accum = regs[*accum_reg as usize];
+                    let count = match func {
+                        AggFunc::Avg => regs[*accum_reg as usize + 1],
+                        _ => ValueRef::Missing,
+                    };
+                    regs[*dst_reg as usize] = match aggregate::finish(*func, accum, count) {
+                        Ok(value) => value,
+                        Err(e) => return Some(Err(e)),
+                    };
                 }
 
                 Inst::AggReset { accum_start, count } => {
@@ -1175,96 +1174,6 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
             let name_bytes = bank.alloc_slice(type_name.as_bytes());
             let copied_name = unsafe { std::str::from_utf8_unchecked(name_bytes) };
             ValueRef::Variant(copied_bytes, copied_name)
-        }
-    }
-}
-
-/// Perform one step of an aggregate function: update the accumulator with a new input.
-#[allow(clippy::missing_transmute_annotations)]
-fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> Result<ValueRef<'static>> {
-    let overflow = || EngineError::Arithmetic("overflow".to_string());
-    Ok(match func {
-        AggFunc::Sum => match (accum, input) {
-            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
-            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
-            (ValueRef::I64(a), ValueRef::I64(b)) => {
-                ValueRef::I64(a.checked_add(b).ok_or_else(overflow)?)
-            }
-            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a + b),
-            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
-                ValueRef::Decimal(a.checked_add(b).ok_or_else(overflow)?)
-            }
-            // Mixed numeric: promote to f64
-            (ValueRef::I64(a), ValueRef::F64(b)) => ValueRef::F64(a as f64 + b),
-            (ValueRef::F64(a), ValueRef::I64(b)) => ValueRef::F64(a + b as f64),
-            _ => unsafe { std::mem::transmute(accum) },
-        },
-        AggFunc::Count => match accum {
-            ValueRef::Missing => ValueRef::I64(1),
-            ValueRef::I64(n) => ValueRef::I64(n.checked_add(1).ok_or_else(overflow)?),
-            _ => ValueRef::I64(1),
-        },
-        AggFunc::Min => match (accum, input) {
-            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
-            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
-            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a.min(b)),
-            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a.min(b)),
-            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
-                ValueRef::Decimal(if a <= b { a } else { b })
-            }
-            _ => unsafe { std::mem::transmute(accum) },
-        },
-        AggFunc::Max => match (accum, input) {
-            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
-            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
-            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a.max(b)),
-            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a.max(b)),
-            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
-                ValueRef::Decimal(if a >= b { a } else { b })
-            }
-            _ => unsafe { std::mem::transmute(accum) },
-        },
-        AggFunc::Any => match (accum, input) {
-            (ValueRef::Bool(true), _) => ValueRef::Bool(true),
-            (_, ValueRef::Bool(true)) => ValueRef::Bool(true),
-            (ValueRef::Missing, ValueRef::Bool(b)) => ValueRef::Bool(b),
-            (ValueRef::Bool(a), _) => ValueRef::Bool(a),
-            _ => unsafe { std::mem::transmute(accum) },
-        },
-        AggFunc::Every => match (accum, input) {
-            (ValueRef::Bool(false), _) => ValueRef::Bool(false),
-            (_, ValueRef::Bool(false)) => ValueRef::Bool(false),
-            (ValueRef::Missing, ValueRef::Bool(b)) => ValueRef::Bool(b),
-            (ValueRef::Bool(a), _) => ValueRef::Bool(a),
-            _ => unsafe { std::mem::transmute(accum) },
-        },
-        AggFunc::Avg => {
-            // Avg stores (count, sum) encoded as two I64 values packed in the accum.
-            // For simplicity, we'll accumulate sum and count separately:
-            // The compiler should allocate TWO accum registers for Avg.
-            // For now, treat as Sum — finalize will need count.
-            // TODO: proper Avg support with paired registers
-            return agg_step(AggFunc::Sum, accum, input);
-        }
-    })
-}
-
-/// Finalize an aggregate: convert the accumulator state to the final result.
-fn agg_final<'a>(func: AggFunc, accum: ValueRef<'a>) -> ValueRef<'a> {
-    match func {
-        AggFunc::Count => match accum {
-            ValueRef::Missing => ValueRef::I64(0),
-            other => other,
-        },
-        AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Any | AggFunc::Every => match accum {
-            ValueRef::Missing => ValueRef::Null,
-            other => other,
-        },
-        AggFunc::Avg => {
-            // AVG finalize: accum_reg holds sum, accum_reg+1 holds count.
-            // This is handled specially in the dispatch loop — not here.
-            // This arm shouldn't be reached; the dispatch handles Avg directly.
-            accum
         }
     }
 }

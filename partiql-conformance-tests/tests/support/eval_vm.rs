@@ -287,7 +287,10 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
 // Catalog Implementations
 // =============================================================================
 
-struct SchemalessMetadata;
+/// A global of the test environment: a collection (read row by row) or a single value.
+struct SchemalessMetadata {
+    collection: bool,
+}
 
 impl DataSourceMetadata for SchemalessMetadata {
     fn buffer_stability(&self) -> BufferStability {
@@ -297,10 +300,15 @@ impl DataSourceMetadata for SchemalessMetadata {
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         Some(ScanSource::field(field_name, PhysicalType::Dynamic))
     }
+
+    fn is_collection(&self) -> bool {
+        self.collection
+    }
 }
 
 struct ConformanceCompilationCatalog {
-    tables: FxHashMap<String, EntryId>,
+    /// Each global's entry, and whether it is a collection.
+    tables: FxHashMap<String, (EntryId, bool)>,
 }
 
 impl CompilationCatalog for ConformanceCompilationCatalog {
@@ -316,7 +324,9 @@ impl CompilationCatalog for ConformanceCompilationCatalog {
         self.tables
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, entry_id)| DataSourceHandle::new(*entry_id, Arc::new(SchemalessMetadata)))
+            .map(|(_, &(entry_id, collection))| {
+                DataSourceHandle::new(entry_id, Arc::new(SchemalessMetadata { collection }))
+            })
     }
 }
 
@@ -444,7 +454,8 @@ pub(crate) fn eval_via_vm<'a>(
                 let entry = TypeEnvEntry::new(key, &[], data_type);
                 catalog.add_type_entry(entry).expect("add type entry");
 
-                comp_tables.insert(key.to_string(), entry_id);
+                let collection = matches!(value, Value::List(_) | Value::Bag(_));
+                comp_tables.insert(key.to_string(), (entry_id, collection));
                 exec_ion.insert(entry_id, value_to_ion_text(value));
             }
         }

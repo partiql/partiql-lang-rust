@@ -1,0 +1,19 @@
+// A table named in a query without FROM is the collection of its rows.
+'''
+  CREATE TABLE nums;
+  INSERT INTO nums SELECT VALUE x FROM << 1, 2, 3, 4 >> x;
+'''
+
+{
+  sql: '''
+    COLL_COUNT(nums)
+  ''',
+  expect: { rows: 4 }
+}
+
+{
+  sql: '''
+    COLL_SUM(nums) + COLL_MAX(nums)
+  ''',
+  expect: { rows: 14 }
+}
