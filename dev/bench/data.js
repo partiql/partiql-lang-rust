@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792707002309,
+  "lastUpdate": 1792790331137,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -50801,6 +50801,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 10843,
             "range": "± 192",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5e2e6abe57db90f5da98bcf430ed01a71a8a2923",
+          "message": "feat(partiql-vm): add Variant literal and IS NULL/IS MISSING support (#722)\n\n* feat(partiql-vm): add Variant literal and IS NULL/IS MISSING support\n\nAdd first-class Ion Variant support to the VM's value system and implement\nIS NULL/IS MISSING type-checking expressions.\n\nKey changes:\n- Add Variant(Vec<u8>, String) to ValueOwned and Variant(&[u8], &str) to\n  ValueRef, preserving the Copy trait on ValueRef\n- Implement Lit::Variant compilation in lit_to_value (it was a todo! panic)\n- Add IsNull/IsMissing Expr variants, Inst bytecode, and execution logic\n- Wire up IsTypeExpr lowering for NullType and MissingType\n- Fix equality null/missing propagation: MISSING now correctly propagates\n  as MISSING (not NULL) per the PartiQL spec\n- Add Variant->Value::Variant conversion in the conformance harness, pqlite\n  and vm_tests\n\nRebased from #643 (written when the VM lived in partiql-eval/src/engine)\nonto the partiql-vm crate:\n- pqlite's conversion is in session/value.rs and returns an error instead of\n  panicking on an undecodable variant\n- the LMDB row codec rejects a variant value as unsupported (no encoding yet)\n- the sorter ranks variants after every other type\n- the removed partiql_hybrid binary and conformance report are dropped\n\nConformance (VM): 4870 -> 5005 passing (+136), legacy unchanged (5672). One\ntest regresses, strict_path_missing_dot_name: it passed only because IS\nMISSING failed to compile, which matched the expected strict-mode error.\n\n* feat(partiql-vm): decode Ion literals where operators read them\n\nAn Ion literal stays a variant, its Ion text as written, and is decoded to\nthe VM value it denotes when an operator reads it:\n- int becomes I64 (Decimal past i64)\n- decimal becomes Decimal, float becomes F64\n- string and symbol become Str, blob and clob become Bytes\n- list and sexp become List, struct becomes Tuple\n- any null becomes Null\nA timestamp, an annotated value, or a number too big for a Decimal stays a\nvariant; nested in a collection, it is a variant of its own.\n\n- eval_inst decodes, in its register, each variant an instruction reads as a\n  value (arithmetic, comparison, IN, LIKE, paths, logic, casts, IS NULL/\n  MISSING, COLL_TO_SCALAR, SELECT *), then puts the variant back, so result\n  rows keep the literal. Function arguments and IN's elements are decoded too.\n- WHERE conditions and scanned collections decode in the VM loop. An Ion list\n  in FROM is a collection of rows.\n- Records decode as they enter a sorter, into its bank: all fields for GROUP\n  BY (keys and aggregate inputs), the keys for ORDER BY. So 1 and an Ion 1\n  group together and sort by value, and an aggregate's accumulator never\n  points into the scratch bank.\n- Literals are checked when compiling: invalid Ion is an InvalidIon error.\n- IS NULL no longer matches null literals by their text.\n\nThe decoder uses ion-rs, pinned like partiql-extension-ion.\n\nConformance (VM): 5005 -> 5059. Two strict-mode ion tests on repeated struct\nfields regress: they passed only because the variant failed to resolve, and\nlegacy fails them too.\n\n* fix(partiql-vm): decode Ion literals in multi-source and strict SELECT *, drop annotations\n\nReview fixes:\n- SELECT * over several FROM items (ConcatTuples) decodes its sources, so an\n  Ion struct's fields are spread instead of being wrapped as _1.\n- Strict SELECT * (AssertTuple) keeps the decoded row: it checks the row in\n  place, so its register is not put back to the raw literal.\n- Ion annotations are dropped when decoding (a::1 is 1, a::null is NULL), at\n  any depth, as in the legacy evaluator. Annotated values used to stay\n  opaque, so most operators failed on them.\n\nTests: e2e for annotations and both SELECT * forms; a vm_tests case for strict\nSELECT *. The harness can now compile in strict mode.\n\n* fix(partiql-vm): keep annotations on nested Ion values in results\n\nDecoding dropped annotations at every depth, so a result holding a nested\nannotated value lost them: SELECT VALUE x FROM `[a::1, 2]` x gave 1, 2 where\nlegacy gives a::1, 2. Only the value being decoded drops its annotations now;\nan annotated element of a decoded collection stays a variant, as written. An\noperator reading it still drops them, since it decodes the element in turn.",
+          "timestamp": "2026-10-23T14:00:57-07:00",
+          "tree_id": "2056bc6ec8df9eeea6d6f790a1056b9b89dc7edf",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/5e2e6abe57db90f5da98bcf430ed01a71a8a2923"
+        },
+        "date": 1792790330084,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 742388,
+            "range": "± 15581",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 827758,
+            "range": "± 6113",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 789810,
+            "range": "± 18825",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 820984,
+            "range": "± 4933",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 793234,
+            "range": "± 4639",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 822418,
+            "range": "± 2880",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 798178,
+            "range": "± 2414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 831959,
+            "range": "± 1880",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 801956,
+            "range": "± 3238",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 824904,
+            "range": "± 11082",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1088057,
+            "range": "± 7956",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1512013,
+            "range": "± 8481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2057890,
+            "range": "± 10201",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1268842,
+            "range": "± 10040",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1743565,
+            "range": "± 9255",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2309123,
+            "range": "± 8912",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5080,
+            "range": "± 43",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 42588,
+            "range": "± 245",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 83394,
+            "range": "± 644",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1333,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 15867,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 31729,
+            "range": "± 68",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 61351,
+            "range": "± 306",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 981147,
+            "range": "± 5736",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1959202,
+            "range": "± 18796",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12948967,
+            "range": "± 263484",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 92277916,
+            "range": "± 1204151",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 176163069,
+            "range": "± 846614",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 507870319,
+            "range": "± 7319475",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 416589662,
+            "range": "± 1275927",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10477,
+            "range": "± 46",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2363,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 377,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 676,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2155,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6652,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 17179,
+            "range": "± 142",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 23861,
+            "range": "± 97",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21760,
+            "range": "± 150",
             "unit": "ns/iter"
           }
         ]
