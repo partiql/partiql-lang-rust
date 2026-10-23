@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792790331137,
+  "lastUpdate": 1792797615833,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -51065,6 +51065,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 21760,
             "range": "± 150",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a6bcf22d738c3f71ff4412a647ce6efbcfa6c18a",
+          "message": "feat(partiql-vm): OFFSET, BETWEEN, NULLIF, COALESCE; fix mixed arithmetic and strict SELECT * (#725)\n\n* feat(partiql-vm): OFFSET, BETWEEN, NULLIF, COALESCE; fix mixed arithmetic and strict SELECT *\n\n- SELECT * of a non-tuple is {'_1': v} in strict mode too, as in the legacy\n  evaluator. The strict-only AssertTuple instruction is gone.\n- LIMIT and OFFSET take expressions (LIMIT 4 / 2 OFFSET 2 + 1), evaluated\n  before the first row. A count that is no non-negative integer is ignored,\n  or an error in strict mode (new RowCount instruction). A negative literal is\n  an error in either mode. OFFSET skips rows with the new SkipRow instruction,\n  before LIMIT counts them.\n- BETWEEN lowers to v >= lo AND v <= hi.\n- NULLIF(a, b) is NULL when a = b, else a (new NullIf instruction).\n- COALESCE is its first value neither NULL nor MISSING, else its last (new\n  Coalesce instruction; an Ion typed null counts as NULL).\n- Dynamic arithmetic widens mixed numbers from int to decimal to float. A\n  float with an int or decimal used the int instruction and failed with\n  \"expected i64\", and a decimal with a float became a decimal. A NULL or\n  MISSING operand now gives NULL or MISSING instead of \"Type mismatch\".\n\nConformance (VM): 5059 -> 5237 (+178), legacy unchanged. Two strict tests on\nSELECT * FROM \"\" (a scalar global) regress. They passed only through the\nremoved strict check, and legacy fails them too.\n\n* fix(partiql-vm): lazy COALESCE, decimal with float, checked arithmetic\n\nReview fixes:\n- COALESCE evaluates an argument only if those before it are absent, as\n  legacy's CASE rewrite does. Each argument's Coalesce instruction, in the VM\n  loop, takes a present value and skips the rest of the expression's code by\n  a relative offset. COALESCE(1, 1/0) is 1, and the later argument doesn't\n  panic or raise an error. With every argument absent, the result is NULL,\n  not the last argument.\n- A float with a decimal widens to a decimal, as in legacy: 1.1 + 2.2e0 is\n  the decimal 3.3. A float no decimal holds (NaN, infinity) gives MISSING.\n  An int with a float is still a float.\n- Integer and decimal arithmetic is checked: overflow and division by zero\n  are an Arithmetic error instead of a panic (a wrap, in release builds).\n  This covers + - * / %, and unary minus.\n- BETWEEN evaluates its value and bounds once each (new Expr::Between).\n- A NULL or MISSING LIMIT or OFFSET count is ignored in strict mode too.\n- SELECT * of MISSING is an empty tuple, as in legacy.\n- Comments updated for LIMIT/OFFSET.\n\n* fix(partiql-vm): checked SUM, ABS and MOD; note COALESCE's eager subqueries\n\nReview follow-ups:\n- SUM (and AVG's sum), COUNT, ABS and MOD on integers or decimals now raise\n  an Arithmetic error on overflow, like the operators, instead of panicking\n  in debug builds or wrapping in release. agg_step returns a Result.\n- Expr::Coalesce's doc notes that a subquery in a later argument still runs,\n  with the expression's other subqueries, before its code. A skip:: fixture\n  records it.",
+          "timestamp": "2026-10-23T16:02:40-07:00",
+          "tree_id": "5c4f47a71b31f6e66ba550011f7614ce1724fb17",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/a6bcf22d738c3f71ff4412a647ce6efbcfa6c18a"
+        },
+        "date": 1792797614521,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 742302,
+            "range": "± 5226",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 828744,
+            "range": "± 12976",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 790732,
+            "range": "± 2066",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 822344,
+            "range": "± 5255",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 795849,
+            "range": "± 1994",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 824039,
+            "range": "± 1645",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 800446,
+            "range": "± 2274",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 831939,
+            "range": "± 2823",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 802348,
+            "range": "± 1482",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 825491,
+            "range": "± 3241",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1080990,
+            "range": "± 15813",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1521788,
+            "range": "± 13039",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2082802,
+            "range": "± 23191",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1265386,
+            "range": "± 5857",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1728074,
+            "range": "± 19753",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2312257,
+            "range": "± 5600",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5080,
+            "range": "± 81",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 43426,
+            "range": "± 205",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 84766,
+            "range": "± 424",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1343,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 16195,
+            "range": "± 55",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 32662,
+            "range": "± 165",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 61617,
+            "range": "± 553",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 977954,
+            "range": "± 1951",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1951620,
+            "range": "± 15169",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12614230,
+            "range": "± 85411",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 90856312,
+            "range": "± 480996",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 175597873,
+            "range": "± 648222",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 482097644,
+            "range": "± 5197372",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 416417588,
+            "range": "± 1253027",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10448,
+            "range": "± 95",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2378,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 372,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 732,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2226,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6773,
+            "range": "± 215",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 17077,
+            "range": "± 121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 24101,
+            "range": "± 119",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21644,
+            "range": "± 127",
             "unit": "ns/iter"
           }
         ]
