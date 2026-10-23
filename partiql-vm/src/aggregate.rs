@@ -45,7 +45,7 @@ pub(crate) fn step<'a>(
         AggFunc::Sum | AggFunc::Avg => match (accum, is_number(input)) {
             (_, false) => None,
             (ValueRef::Missing, true) => Some(input),
-            (accum, true) => add(accum, input)?,
+            (accum, true) => Some(add(accum, input, strict)?),
         },
         AggFunc::Min | AggFunc::Max => Some(match accum {
             ValueRef::Missing => input,
@@ -73,7 +73,8 @@ pub(crate) fn step<'a>(
     match taken {
         Some(value) => Ok(value),
         None if strict => Err(EngineError::TypeError(format!(
-            "{func:?} cannot aggregate {input:?}"
+            "{} cannot aggregate {input:?}",
+            name(func)
         ))),
         None => Ok(INVALID),
     }
@@ -153,33 +154,48 @@ fn is_number(v: ValueRef<'_>) -> bool {
     )
 }
 
-/// `a + b` for two numbers; `None` when a float with no decimal value (NaN, infinity) meets a
-/// decimal.
-fn add<'a>(a: ValueRef<'a>, b: ValueRef<'a>) -> Result<Option<ValueRef<'a>>> {
-    let decimal = |f: f64| Decimal::from_f64(f).filter(|_| f.is_finite());
+/// The aggregate's SQL name. AVG steps as a SUM (with a count beside it).
+fn name(func: AggFunc) -> &'static str {
+    match func {
+        AggFunc::Count => "COUNT",
+        AggFunc::Sum | AggFunc::Avg => "SUM or AVG",
+        AggFunc::Min => "MIN",
+        AggFunc::Max => "MAX",
+        AggFunc::Any => "ANY",
+        AggFunc::Every => "EVERY",
+    }
+}
+
+/// `a + b` for two numbers. A float with no decimal value (NaN, infinity) meeting a decimal
+/// makes the sum invalid (MISSING), or in strict mode is an error, as in the legacy evaluator.
+fn add<'a>(a: ValueRef<'a>, b: ValueRef<'a>, strict: bool) -> Result<ValueRef<'a>> {
+    let checked = |sum: Option<Decimal>| sum.map(ValueRef::Decimal).ok_or_else(overflow);
     Ok(match (a, b) {
         (ValueRef::I64(a), ValueRef::I64(b)) => {
-            Some(ValueRef::I64(a.checked_add(b).ok_or_else(overflow)?))
+            ValueRef::I64(a.checked_add(b).ok_or_else(overflow)?)
         }
-        (ValueRef::F64(a), ValueRef::F64(b)) => Some(ValueRef::F64(a + b)),
+        (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a + b),
         (ValueRef::I64(i), ValueRef::F64(f)) | (ValueRef::F64(f), ValueRef::I64(i)) => {
-            Some(ValueRef::F64(i as f64 + f))
+            ValueRef::F64(i as f64 + f)
         }
         (ValueRef::I64(i), ValueRef::Decimal(d)) | (ValueRef::Decimal(d), ValueRef::I64(i)) => {
-            Some(ValueRef::Decimal(
-                d.checked_add(Decimal::from(i)).ok_or_else(overflow)?,
-            ))
+            checked(d.checked_add(Decimal::from(i)))?
         }
-        (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
-            Some(ValueRef::Decimal(a.checked_add(b).ok_or_else(overflow)?))
-        }
+        (ValueRef::Decimal(a), ValueRef::Decimal(b)) => checked(a.checked_add(b))?,
         (ValueRef::F64(f), ValueRef::Decimal(d)) | (ValueRef::Decimal(d), ValueRef::F64(f)) => {
-            match decimal(f) {
-                Some(f) => Some(ValueRef::Decimal(d.checked_add(f).ok_or_else(overflow)?)),
-                None => None,
+            match Decimal::from_f64(f).filter(|_| f.is_finite()) {
+                Some(f) => checked(d.checked_add(f))?,
+                None if strict => {
+                    return Err(EngineError::Arithmetic(format!("{f} has no decimal value")))
+                }
+                None => INVALID,
             }
         }
-        _ => None,
+        (a, b) => {
+            return Err(EngineError::IllegalState(format!(
+                "adding non-numbers {a:?} and {b:?}"
+            )))
+        }
     })
 }
 

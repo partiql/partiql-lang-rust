@@ -246,6 +246,12 @@ pub trait DataSourceMetadata: Send + Sync {
     fn is_collection(&self) -> bool {
         true
     }
+
+    /// Whether the collection's rows are in an order (a list rather than a bag), so that
+    /// naming it is a list.
+    fn is_ordered(&self) -> bool {
+        false
+    }
 }
 
 /// Factory for creating a streaming DataSource from evaluated arguments.

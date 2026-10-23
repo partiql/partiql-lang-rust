@@ -287,9 +287,11 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
 // Catalog Implementations
 // =============================================================================
 
-/// A global of the test environment: a collection (read row by row) or a single value.
+/// A global of the test environment: a collection (read row by row; a list is ordered) or
+/// a single value.
 struct SchemalessMetadata {
     collection: bool,
+    ordered: bool,
 }
 
 impl DataSourceMetadata for SchemalessMetadata {
@@ -304,11 +306,15 @@ impl DataSourceMetadata for SchemalessMetadata {
     fn is_collection(&self) -> bool {
         self.collection
     }
+
+    fn is_ordered(&self) -> bool {
+        self.ordered
+    }
 }
 
 struct ConformanceCompilationCatalog {
-    /// Each global's entry, and whether it is a collection.
-    tables: FxHashMap<String, (EntryId, bool)>,
+    /// Each global's entry, and whether it is a collection, and ordered.
+    tables: FxHashMap<String, (EntryId, bool, bool)>,
 }
 
 impl CompilationCatalog for ConformanceCompilationCatalog {
@@ -324,8 +330,12 @@ impl CompilationCatalog for ConformanceCompilationCatalog {
         self.tables
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, &(entry_id, collection))| {
-                DataSourceHandle::new(entry_id, Arc::new(SchemalessMetadata { collection }))
+            .map(|(_, &(entry_id, collection, ordered))| {
+                let metadata = SchemalessMetadata {
+                    collection,
+                    ordered,
+                };
+                DataSourceHandle::new(entry_id, Arc::new(metadata))
             })
     }
 }
@@ -455,7 +465,8 @@ pub(crate) fn eval_via_vm<'a>(
                 catalog.add_type_entry(entry).expect("add type entry");
 
                 let collection = matches!(value, Value::List(_) | Value::Bag(_));
-                comp_tables.insert(key.to_string(), (entry_id, collection));
+                let ordered = matches!(value, Value::List(_));
+                comp_tables.insert(key.to_string(), (entry_id, collection, ordered));
                 exec_ion.insert(entry_id, value_to_ion_text(value));
             }
         }

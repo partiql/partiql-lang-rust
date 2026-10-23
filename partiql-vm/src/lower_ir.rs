@@ -1118,7 +1118,8 @@ impl<'a> Lowerer<'a> {
             let Some(name) = db_ref.path.first().and_then(binding_name_string) else {
                 continue;
             };
-            if slots.contains_key(&name) {
+            // `t` and `T` name one table
+            if slots.keys().any(|k: &String| k.eq_ignore_ascii_case(&name)) {
                 continue;
             }
             let Ok((catalog_id, reader_factory)) = self.resolve_catalog_table(&db_ref) else {
@@ -1166,7 +1167,7 @@ impl<'a> Lowerer<'a> {
                 row: vec![row],
                 record: row,
                 fields: None,
-                ordered: false,
+                ordered: reader_factory.is_ordered(),
                 dst: slot,
                 once: Some(once),
                 ret,
@@ -2003,7 +2004,6 @@ fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
     }
 }
 
-/// Recursively collect all DBRef nodes from a ValueExpr tree.
 /// The catalog objects `expr` names: a `DBRef`, or a global name (as a planner without the
 /// catalog's schema writes one).
 fn collect_db_refs(expr: &ValueExpr) -> Vec<DBRef> {
@@ -2054,6 +2054,37 @@ fn collect_db_refs_inner(expr: &ValueExpr, out: &mut Vec<DBRef>) {
             for lookup in lookups.iter() {
                 collect_db_refs_inner(lookup, out);
             }
+        }
+        ValueExpr::BetweenExpr(b) => {
+            for e in [&b.value, &b.from, &b.to] {
+                collect_db_refs_inner(e, out);
+            }
+        }
+        ValueExpr::IsTypeExpr(t) => collect_db_refs_inner(&t.expr, out),
+        ValueExpr::NullIfExpr(n) => {
+            collect_db_refs_inner(&n.lhs, out);
+            collect_db_refs_inner(&n.rhs, out);
+        }
+        ValueExpr::CoalesceExpr(c) => {
+            for e in &c.elements {
+                collect_db_refs_inner(e, out);
+            }
+        }
+        ValueExpr::PatternMatchExpr(m) => collect_db_refs_inner(&m.value, out),
+        ValueExpr::SimpleCase(c) => {
+            collect_db_refs_inner(&c.expr, out);
+            for (when, then) in &c.cases {
+                collect_db_refs_inner(when, out);
+                collect_db_refs_inner(then, out);
+            }
+            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
+        }
+        ValueExpr::SearchedCase(c) => {
+            for (when, then) in &c.cases {
+                collect_db_refs_inner(when, out);
+                collect_db_refs_inner(then, out);
+            }
+            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
         }
         _ => {}
     }
