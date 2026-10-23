@@ -1913,8 +1913,9 @@ impl Program {
             Inst::ConcatTuples { dst, srcs } => {
                 let name = ValueRef::Str("_1");
                 let mut fields = Vec::new();
+                // `srcs` has no fixed length, so its variants are decoded here
                 for src in srcs {
-                    match regs[*src as usize] {
+                    match variant::lower(regs[*src as usize], arena)? {
                         ValueRef::Tuple(t) => {
                             fields.extend(t.fields.iter().map(|f| (ValueRef::Str(f.name), f.value)))
                         }
@@ -2884,7 +2885,8 @@ impl ValueOperands {
                 pattern,
                 escape,
             } => ops(Some(dst), &[value, pattern, escape]),
-            Inst::AssertTuple { src } => ops(None, &[src]),
+            // SELECT * (strict) checks its row in place: the row is the decoded value
+            Inst::AssertTuple { src } => ops(Some(src), &[src]),
             _ => None,
         }
     }

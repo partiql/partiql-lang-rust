@@ -17,9 +17,10 @@ pub(crate) fn validate(bytes: &[u8]) -> Result<()> {
         .map_err(|e| EngineError::InvalidIon(e.to_string()))
 }
 
-/// `value`, with a variant decoded into `arena` as the VM value it holds. A variant the VM
-/// has no type for (a timestamp, an annotated value) stays as it is; so does one nested in
-/// a decoded collection, as a variant of its own.
+/// `value`, with a variant decoded into `arena` as the VM value it holds. Ion annotations
+/// are dropped (`a::1` is 1), as in the legacy evaluator. A variant the VM has no type for
+/// (a timestamp) stays as it is; so does one nested in a decoded collection, as a variant
+/// of its own.
 pub(crate) fn lower<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRef<'a>> {
     let ValueRef::Variant(bytes, _) = value else {
         return Ok(value);
@@ -30,9 +31,6 @@ pub(crate) fn lower<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRe
 
 /// `element` as a VM value, or `None` when the VM has no type for it.
 fn decode<'a>(element: &Element, arena: &'a Arena) -> Option<ValueRef<'a>> {
-    if !element.annotations().is_empty() {
-        return None;
-    }
     if element.is_null() {
         return Some(ValueRef::Null);
     }
@@ -151,12 +149,20 @@ mod tests {
     #[test]
     fn what_the_vm_cannot_hold_stays_a_variant() {
         assert!(lowered("2000-01-02T03:04:05Z").starts_with("Variant("));
-        assert!(lowered("a::1").starts_with("Variant("));
         // Past a decimal's 96 bits
         assert!(lowered("170141183460469231731687303715884105727").starts_with("Variant("));
         // A nested timestamp is a variant of its own in a decoded list
         let list = lowered("[1, 2000T]");
         assert!(list.starts_with("List([I64(1), Variant("), "{list}");
+    }
+
+    #[test]
+    fn annotations_are_dropped() {
+        assert_eq!(lowered("a::1"), "I64(1)");
+        assert_eq!(lowered("a::b::null.int"), "Null");
+        let nested = lowered("[a::1, {b: c::\"x\"}]");
+        assert!(nested.starts_with("List([I64(1), Tuple("), "{nested}");
+        assert!(nested.contains("value: Str(\"x\")"), "{nested}");
     }
 
     #[test]

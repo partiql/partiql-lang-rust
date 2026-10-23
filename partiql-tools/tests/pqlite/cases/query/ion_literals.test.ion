@@ -119,14 +119,46 @@
   ]
 }
 
-// Ion the VM has no type for (a timestamp) stays a literal, equal to nothing else
+// Ion the VM has no type for (a timestamp) stays a literal, unequal to any VM value
 {
   sql: '''
-    SELECT VALUE [`2000T` = 1, `a::1` = 1]
+    SELECT VALUE [`2000T` = 1]
     FROM << 0 >> d
   ''',
   expect: $bag::[
-    [false, false]
+    [false]
+  ]
+}
+
+// Annotations are dropped, as in the legacy evaluator
+{
+  sql: '''
+    SELECT VALUE [`a::1` = 1, `a::1` + 1, `a::null` IS NULL, `{x: b::2}`.x * 2]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, 2, true, 4]
+  ]
+}
+
+// SELECT * spreads an Ion struct's fields, from one FROM item or several
+{
+  sql: '''
+    SELECT *
+    FROM << `{a: "hello"}` >> x
+  ''',
+  expect: $bag::[
+    { a: "hello" }
+  ]
+}
+
+{
+  sql: '''
+    SELECT *
+    FROM << `{a: "hello"}` >> x, << {'b': 1} >> y
+  ''',
+  expect: $bag::[
+    { a: "hello", b: 1 }
   ]
 }
 
