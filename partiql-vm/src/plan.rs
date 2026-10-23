@@ -87,7 +87,7 @@ pub struct CursorInfo {
 /// - Scalar instructions (Add, Eq, GetField, MakeTuple, etc.) compute expressions
 /// - `JumpIfNotTrue` implements WHERE clause filtering
 /// - `EmitRow` yields a result row (coroutine-style pause)
-/// - `DecrOrJump` implements LIMIT
+/// - `DecrOrJump` implements LIMIT, `SkipRow` OFFSET
 /// - `Halt` terminates execution
 ///
 /// # Thread Safety
@@ -718,6 +718,18 @@ impl<'vm> QueryIterator<'vm> {
                             // Counter is 0 or not an integer — jump (limit reached)
                             self.vm.ip = *target as usize;
                         }
+                    }
+                }
+
+                Inst::Coalesce { dst, src, skip } => {
+                    // An Ion typed null is NULL; a present value is passed on as written
+                    let value = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
+                        Ok(value) => value,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    if !matches!(value, ValueRef::Null | ValueRef::Missing) {
+                        regs[*dst as usize] = regs[*src as usize];
+                        self.vm.ip += *skip as usize;
                     }
                 }
 

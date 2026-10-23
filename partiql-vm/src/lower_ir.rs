@@ -107,7 +107,8 @@ pub(crate) enum Output {
     ConcatTuples { dst: SlotId, srcs: Vec<SlotId> },
 }
 
-/// LIMIT `count`: `counter` counts down the rows left.
+/// LIMIT and OFFSET: `counter` counts down the rows left to produce, `skip` those left to
+/// skip.
 pub(crate) struct Limit {
     pub(crate) input: Op,
     /// LIMIT's count, evaluated into `counter` before the first row: none for no limit.
@@ -116,7 +117,7 @@ pub(crate) struct Limit {
     /// OFFSET's count of rows to skip, evaluated into `skip`.
     pub(crate) offset: Option<Expr>,
     pub(crate) skip: SlotId,
-    /// A count that is no non-negative integer is an error, rather than ignored.
+    /// A count that is not a non-negative integer is an error, rather than ignored.
     pub(crate) strict: bool,
 }
 

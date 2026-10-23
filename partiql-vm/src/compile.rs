@@ -358,8 +358,9 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// LIMIT and OFFSET. The counts are evaluated first; one that is no non-negative integer
-    /// is ignored (or, in strict mode, an error). The LIMIT count is checked after each row,
+    /// LIMIT and OFFSET. The counts are evaluated first; one that is not a non-negative integer
+    /// is ignored (in strict mode, an error unless NULL or MISSING). The LIMIT count is
+    /// checked after each row,
     /// so the input stops as soon as the last row is out rather than when it produces one
     /// more; `LIMIT 0` reads nothing. Stopping mid-row leaves the input's cursors open, so
     /// `done` closes them (closing is idempotent):

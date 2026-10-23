@@ -81,13 +81,24 @@
   expect: $bag::[]
 }
 
-// A count that is no non-negative integer is ignored (strict mode: an error)
+// A count that is not a non-negative integer is ignored (strict mode: an error)
 {
   sql: '''
     SELECT VALUE x
     FROM << 1, 2, 3 >> x
     ORDER BY x
     LIMIT 'a' OFFSET 1 - 2
+  ''',
+  expect: [1, 2, 3]
+}
+
+// An unknown count is no count
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3 >> x
+    ORDER BY x
+    LIMIT NULL OFFSET MISSING
   ''',
   expect: [1, 2, 3]
 }

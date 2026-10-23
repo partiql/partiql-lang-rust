@@ -739,10 +739,18 @@ fn strict_select_star() {
     );
 }
 
-/// In strict mode, a LIMIT or OFFSET count that is no non-negative integer is an error
+/// In strict mode, a LIMIT or OFFSET count that is not a non-negative integer is an error
 /// (permissive mode ignores it).
 #[test]
 fn strict_limit_offset_counts() {
+    // An unknown count is no count, in strict mode too
+    let rows = eval_vm_mode(
+        "SELECT VALUE x FROM <<1, 2>> x LIMIT NULL OFFSET MISSING",
+        &[],
+        &[None],
+        EvaluationMode::Strict,
+    );
+    assert_eq!(rows, [parse_ion("$bag::[1, 2]")]);
     for query in [
         "SELECT VALUE x FROM <<1, 2>> x LIMIT 'a'",
         "SELECT VALUE x FROM <<1, 2>> x OFFSET 2.5",
