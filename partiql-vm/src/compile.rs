@@ -213,6 +213,7 @@ impl Asm {
                 | Inst::Jump { target: t }
                 | Inst::JumpIfNotTrue { target: t, .. }
                 | Inst::DecrOrJump { target: t, .. }
+                | Inst::SkipRow { target: t, .. }
                 | Inst::Gosub { target: t, .. }
                 | Inst::SorterNext { target: t, .. } => *t = addr,
                 other => unreachable!("not a jump: {other:?}"),
@@ -349,7 +350,6 @@ impl<'q> Emitter<'q> {
                     const_idx,
                 });
             }
-            Output::AssertTuple(reg) => self.asm.push(Inst::AssertTuple { src: *reg }),
             Output::ConcatTuples { dst, srcs } => self.asm.push(Inst::ConcatTuples {
                 dst: *dst,
                 srcs: srcs.clone(),
@@ -358,33 +358,60 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// The count is checked after each row, so the input stops as soon as the last row is
-    /// out rather than when it produces one more. `LIMIT 0` runs nothing. Stopping mid-row
-    /// leaves the input's cursors open, so `done` closes them (closing is idempotent):
+    /// LIMIT and OFFSET. The counts are evaluated first; one that is no non-negative integer
+    /// is ignored (or, in strict mode, an error). The LIMIT count is checked after each row,
+    /// so the input stops as soon as the last row is out rather than when it produces one
+    /// more; `LIMIT 0` reads nothing. Stopping mid-row leaves the input's cursors open, so
+    /// `done` closes them (closing is idempotent):
     /// ```text
-    ///         counter = count - 1
+    ///         [skip = OFFSET]
+    ///         [counter = LIMIT; if counter = 0: goto done; counter -= 1]
     ///         for each input row:
+    ///             [if skip > 0: skip -= 1; goto next]
     ///             <row>
-    ///             if counter = 0: goto done
-    ///             counter -= 1
+    ///             [if counter = 0: goto done; counter -= 1]
+    ///   next:
     ///   done: CloseCursor each of the input's cursors
     /// ```
     fn emit_limit(&mut self, limit: &'q Limit, row: Row<'_, 'q>) -> Result<()> {
-        if limit.count == 0 {
-            return Ok(());
-        }
         let done = self.asm.label();
-        self.asm
-            .load_const(limit.counter, ValueOwned::I64(limit.count - 1))?;
+        let decr = Inst::DecrOrJump {
+            counter_reg: limit.counter,
+            target: 0,
+        };
+        if let Some(offset) = &limit.offset {
+            self.emit_expr(offset, limit.skip)?;
+            self.asm.push(Inst::RowCount {
+                reg: limit.skip,
+                strict: limit.strict,
+                otherwise: 0,
+            });
+        }
+        if let Some(count) = &limit.limit {
+            self.emit_expr(count, limit.counter)?;
+            self.asm.push(Inst::RowCount {
+                reg: limit.counter,
+                strict: limit.strict,
+                otherwise: i64::MAX,
+            });
+            self.asm.push_to(decr.clone(), done);
+        }
         self.emit_op(&limit.input, &mut |e| {
+            let next = e.asm.label();
+            if limit.offset.is_some() {
+                e.asm.push_to(
+                    Inst::SkipRow {
+                        counter_reg: limit.skip,
+                        target: 0,
+                    },
+                    next,
+                );
+            }
             row(e)?;
-            e.asm.push_to(
-                Inst::DecrOrJump {
-                    counter_reg: limit.counter,
-                    target: 0,
-                },
-                done,
-            );
+            if limit.limit.is_some() {
+                e.asm.push_to(decr.clone(), done);
+            }
+            e.asm.bind(next);
             Ok(())
         })?;
         self.asm.bind(done);

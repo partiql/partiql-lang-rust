@@ -723,33 +723,48 @@ fn correlated_subquery() {
     );
 }
 
-/// Strict `SELECT *` of an Ion struct literal is the struct's fields, not the literal.
+/// Strict `SELECT *` of an Ion struct literal is the struct's fields, not the literal. A
+/// value that is not a tuple becomes `{'_1': v}`, in strict mode too, as in the legacy
+/// evaluator.
 #[test]
-fn strict_select_star_of_ion_struct() {
-    let query = "SELECT * FROM << `{a: \"hello\", b: 1}` >> x";
-    let rows = eval_vm_mode(query, &[], &[None], EvaluationMode::Strict);
-    assert_eq!(rows, [parse_ion("$bag::[{a: \"hello\", b: 1}]")]);
-    // Not a struct: strict mode rejects it
-    let query = "SELECT * FROM << `1` >> x";
-    let parsed = Parser::default().parse(query).expect("parse failed");
-    let catalog = PartiqlCatalog::default().to_shared_catalog();
-    let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
-    let logical = planner.lower(&parsed).expect("lower failed");
-    let context = CompilationContext::new();
-    let compiled = PlanCompiler::new(&context, EvaluationMode::Strict)
-        .compile(&logical)
-        .expect("compile failed");
-    let mut vm = PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
-    let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
-    let err = iter
-        .next()
-        .expect("a row or an error")
-        .err()
-        .expect("an error");
-    assert!(
-        format!("{err:?}").contains("SELECT * requires tuple value"),
-        "{err:?}"
+fn strict_select_star() {
+    let strict = |query| eval_vm_mode(query, &[], &[None], EvaluationMode::Strict);
+    assert_eq!(
+        strict("SELECT * FROM << `{a: \"hello\", b: 1}` >> x"),
+        [parse_ion("$bag::[{a: \"hello\", b: 1}]")]
     );
+    assert_eq!(
+        strict("SELECT * FROM [TRUE, `1`] x"),
+        [parse_ion("$bag::[{'_1': true}, {'_1': 1}]")]
+    );
+}
+
+/// In strict mode, a LIMIT or OFFSET count that is no non-negative integer is an error
+/// (permissive mode ignores it).
+#[test]
+fn strict_limit_offset_counts() {
+    for query in [
+        "SELECT VALUE x FROM <<1, 2>> x LIMIT 'a'",
+        "SELECT VALUE x FROM <<1, 2>> x OFFSET 2.5",
+        "SELECT VALUE x FROM <<1, 2>> x OFFSET 1 - 2",
+    ] {
+        let parsed = Parser::default().parse(query).expect("parse failed");
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+        let logical = planner.lower(&parsed).expect("lower failed");
+        let context = CompilationContext::new();
+        let compiled = PlanCompiler::new(&context, EvaluationMode::Strict)
+            .compile(&logical)
+            .expect("compile failed");
+        let mut vm =
+            PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
+        let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
+        let err = iter.next().expect("a row or an error").err();
+        assert!(
+            format!("{err:?}").contains("non-negative integer"),
+            "{query}: {err:?}"
+        );
+    }
 }
 
 /// A correlated subquery reruns cleanly after a run that stopped early, mid-way through the

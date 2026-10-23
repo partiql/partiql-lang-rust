@@ -721,6 +721,18 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
+                Inst::SkipRow {
+                    counter_reg,
+                    target,
+                } => {
+                    if let ValueRef::I64(n) = &mut regs[*counter_reg as usize] {
+                        if *n > 0 {
+                            *n -= 1;
+                            self.vm.ip = *target as usize;
+                        }
+                    }
+                }
+
                 Inst::AssertCollection { src } => {
                     let value = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
                         Ok(value) => value,

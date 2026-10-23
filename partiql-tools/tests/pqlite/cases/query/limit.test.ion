@@ -48,3 +48,65 @@
     [1, 1]
   ]
 }
+
+// OFFSET skips rows before LIMIT counts them
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3, 4, 5 >> x
+    ORDER BY x
+    LIMIT 2 OFFSET 1
+  ''',
+  expect: [2, 3]
+}
+
+// The counts are expressions
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3, 4, 5 >> x
+    ORDER BY x
+    LIMIT 4 / 2 OFFSET 2 + 1
+  ''',
+  expect: [4, 5]
+}
+
+// OFFSET past the end
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3 >> x
+    OFFSET 2147483648
+  ''',
+  expect: $bag::[]
+}
+
+// A count that is no non-negative integer is ignored (strict mode: an error)
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3 >> x
+    ORDER BY x
+    LIMIT 'a' OFFSET 1 - 2
+  ''',
+  expect: [1, 2, 3]
+}
+
+// ... except a negative literal, an error in either mode
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3 >> x
+    OFFSET -1
+  ''',
+  expect: { error: "non-negative integer" }
+}
+
+// OFFSET in a correlated subquery
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE y FROM << 1, 2, 3 >> y ORDER BY y LIMIT 1 OFFSET x)
+    FROM << 0, 2, 5 >> x
+  ''',
+  expect: $bag::[[1], [3], []]
+}

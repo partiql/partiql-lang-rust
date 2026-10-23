@@ -23,9 +23,9 @@ use crate::source::{
 };
 use crate::value::{variant, FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, OrderBy,
-    PathComponent, Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder,
-    SubQueryExpr, ValueExpr, VarRefType,
+    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LogicalPlan, OpId, OrderBy, PathComponent,
+    Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder, SubQueryExpr,
+    ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -100,10 +100,9 @@ pub(crate) struct Project {
 pub(crate) enum Output {
     /// Evaluate `expr` into `dst`.
     Eval { dst: SlotId, expr: Expr },
-    /// SELECT * of one binding (permissive): make the value in the register a tuple.
+    /// SELECT * of one binding: make the value in the register a tuple (`{'_1': v}` for a
+    /// non-tuple, in strict mode too, as in the legacy evaluator).
     CoerceToTuple(SlotId),
-    /// SELECT * of one binding (strict): fail unless the value in the register is a tuple.
-    AssertTuple(SlotId),
     /// SELECT * of a join: merge the bindings' tuples into `dst`.
     ConcatTuples { dst: SlotId, srcs: Vec<SlotId> },
 }
@@ -111,8 +110,14 @@ pub(crate) enum Output {
 /// LIMIT `count`: `counter` counts down the rows left.
 pub(crate) struct Limit {
     pub(crate) input: Op,
-    pub(crate) count: i64,
+    /// LIMIT's count, evaluated into `counter` before the first row: none for no limit.
+    pub(crate) limit: Option<Expr>,
     pub(crate) counter: SlotId,
+    /// OFFSET's count of rows to skip, evaluated into `skip`.
+    pub(crate) offset: Option<Expr>,
+    pub(crate) skip: SlotId,
+    /// A count that is no non-negative integer is an error, rather than ignored.
+    pub(crate) strict: bool,
 }
 
 /// A cursor loop over one scan.
@@ -596,17 +601,31 @@ impl<'a> Lowerer<'a> {
                 let shape = Shape::Bag(RowShape::Register(dst as usize, PhysicalType::Dynamic));
                 Lowered::projected(input, outputs, shape)
             }
-            BindingsOp::LimitOffset(lo) => match parse_limit(lo)? {
-                Some(count) => {
-                    let limit = Limit {
-                        input,
-                        count: count as i64,
-                        counter: self.alloc_reg()?,
+            BindingsOp::LimitOffset(lo) => {
+                // The counts are expressions of nothing in the query (`LIMIT 2 * 3`), checked
+                // when run; a negative literal is an error now, in either mode
+                let mut count = |expr: &Option<ValueExpr>| {
+                    let Some(expr) = expr else {
+                        return Ok(None);
                     };
-                    Lowered::new(Op::Limit(Box::new(limit)), resolver, shape)
-                }
-                None => Lowered::new(input, resolver, shape),
-            },
+                    if negative_literal(expr) {
+                        return Err(EngineError::InvalidPlan(
+                            "LIMIT and OFFSET take a non-negative integer".to_string(),
+                        ));
+                    }
+                    self.lower_expr(expr, &ResolverKind::Empty).map(Some)
+                };
+                let (limit, offset) = (count(&lo.limit)?, count(&lo.offset)?);
+                let limit = Limit {
+                    input,
+                    limit,
+                    counter: self.alloc_reg()?,
+                    offset,
+                    skip: self.alloc_reg()?,
+                    strict: self.mode == EvaluationMode::Strict,
+                };
+                Lowered::new(Op::Limit(Box::new(limit)), resolver, shape)
+            }
             BindingsOp::GroupBy(group_by) => {
                 let (aggregate, grouped) = self.lower_group_by(group_by, input, &resolver)?;
                 Lowered::new(Op::Aggregate(Box::new(aggregate)), grouped, shape)
@@ -922,10 +941,7 @@ impl<'a> Lowerer<'a> {
                     dst,
                     expr: self.lower_expr(&row, resolver)?,
                 });
-                outputs.push(match self.mode {
-                    EvaluationMode::Permissive => Output::CoerceToTuple(dst),
-                    EvaluationMode::Strict => Output::AssertTuple(dst),
-                });
+                outputs.push(Output::CoerceToTuple(dst));
             }
             ResolverKind::Multi(bindings) => {
                 // Concatenate each binding's fields, in FROM order
@@ -1978,37 +1994,26 @@ fn collect_db_refs_inner<'a>(expr: &'a ValueExpr, out: &mut Vec<&'a DBRef>) {
     }
 }
 
-fn parse_limit(lo: &LimitOffset) -> Result<Option<usize>> {
-    if lo.offset.is_some() {
-        return Err(EngineError::InvalidPlan("offset not supported".to_string()));
-    }
-    let expr = match &lo.limit {
-        Some(expr) => expr,
-        None => return Ok(None),
-    };
+/// A negative integer literal, as written (`-1`).
+fn negative_literal(expr: &ValueExpr) -> bool {
+    use partiql_logical::{Lit, UnaryOp};
     match expr {
-        ValueExpr::Lit(lit) => match &**lit {
-            partiql_logical::Lit::Int8(v) => limit_to_usize(*v as i64),
-            partiql_logical::Lit::Int16(v) => limit_to_usize(*v as i64),
-            partiql_logical::Lit::Int32(v) => limit_to_usize(*v as i64),
-            partiql_logical::Lit::Int64(v) => limit_to_usize(*v),
-            _ => Err(EngineError::InvalidPlan(
-                "limit must be integer literal".to_string(),
-            )),
+        ValueExpr::Lit(lit) => match **lit {
+            Lit::Int8(n) => n < 0,
+            Lit::Int16(n) => n < 0,
+            Lit::Int32(n) => n < 0,
+            Lit::Int64(n) => n < 0,
+            _ => false,
         },
-        _ => Err(EngineError::InvalidPlan(
-            "limit must be a literal".to_string(),
-        )),
+        ValueExpr::UnExpr(UnaryOp::Neg, operand) => matches!(
+            **operand,
+            ValueExpr::Lit(ref lit) if matches!(
+                **lit,
+                Lit::Int8(1..) | Lit::Int16(1..) | Lit::Int32(1..) | Lit::Int64(1..)
+            )
+        ),
+        _ => false,
     }
-}
-
-fn limit_to_usize(value: i64) -> Result<Option<usize>> {
-    if value < 0 {
-        return Err(EngineError::InvalidPlan(
-            "limit must be non-negative".to_string(),
-        ));
-    }
-    Ok(Some(value as usize))
 }
 
 fn binding_name_string(name: &BindingsName<'_>) -> Option<String> {
