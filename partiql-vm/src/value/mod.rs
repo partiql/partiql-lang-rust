@@ -6,6 +6,7 @@ mod value_view;
 
 // Internal types
 mod internal;
+pub(crate) mod variant;
 
 // Public exports
 pub use register_reader::RegisterReader;

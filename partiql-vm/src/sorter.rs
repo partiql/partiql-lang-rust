@@ -38,6 +38,16 @@ impl Sorter {
         self.position = 0;
     }
 
+    /// How many of a record's leading fields are read as values (keys, aggregate inputs),
+    /// so that an Ion variant in them is decoded on insert: all of GROUP BY's, ORDER BY's
+    /// keys but not its payload, which is copied back to the rows unchanged.
+    pub fn decoded_fields(&self) -> usize {
+        match &self.keys {
+            SortKeys::Group(_) => usize::MAX,
+            SortKeys::Order(orders) => orders.len(),
+        }
+    }
+
     /// Insert a record. The fields must already point into this sorter's bank.
     pub fn insert(&mut self, record: SorterRecord) {
         self.records.push(record);

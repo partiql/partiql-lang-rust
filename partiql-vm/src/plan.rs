@@ -9,7 +9,7 @@ use crate::error::{EngineError, Result};
 use crate::expr::{AggFunc, Inst, Program};
 use crate::source::RegisterWriter;
 use crate::source::{DataSourceImpl, InlineDataSource, ScanLayout};
-use crate::value::{value_ref_to_owned, RegisterReader, Shape, ValueOwned, ValueRef};
+use crate::value::{value_ref_to_owned, variant, RegisterReader, Shape, ValueOwned, ValueRef};
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -684,7 +684,10 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 Inst::JumpIfNotTrue { src, target } => {
-                    let val = regs[*src as usize];
+                    let val = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
+                        Ok(val) => val,
+                        Err(e) => return Some(Err(e)),
+                    };
                     if !matches!(val, ValueRef::Bool(true)) {
                         self.vm.ip = *target as usize;
                     }
@@ -719,7 +722,10 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 Inst::AssertCollection { src } => {
-                    let value = regs[*src as usize];
+                    let value = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
+                        Ok(value) => value,
+                        Err(e) => return Some(Err(e)),
+                    };
                     if !matches!(value, ValueRef::Bag(_) | ValueRef::List(_)) {
                         return Some(Err(EngineError::StrictModeViolation(
                             "FROM clause requires collection value".to_string(),
@@ -728,7 +734,11 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 Inst::MaterializeCursor { src, cursor_id } => {
-                    let collection = regs[*src as usize];
+                    // An Ion list literal is scanned element by element
+                    let collection = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
+                        Ok(collection) => collection,
+                        Err(e) => return Some(Err(e)),
+                    };
                     let values = match collection {
                         ValueRef::Bag(items) | ValueRef::List(items) => {
                             items.iter().map(|item| value_ref_to_owned(*item)).collect()
@@ -786,11 +796,25 @@ impl<'vm> QueryIterator<'vm> {
                     let bank = &self.vm.banks[sorter.bank_id];
                     let start = *src_reg as usize;
                     let count = *reg_count as usize;
+                    let decoded = sorter.decoded_fields();
                     let mut fields = Vec::with_capacity(count);
-                    for reg in &regs[start..start + count] {
+                    for (i, reg) in regs[start..start + count].iter().enumerate() {
                         // Safety: sorter bank outlives the sorter records.
                         // Same contract as the VM's register/arena relationship.
-                        let copied = copy_value_ref_to_bank(*reg, bank);
+                        let copied = match (i < decoded, *reg) {
+                            // A variant decodes straight into the bank; one the VM has no
+                            // type for stays a variant, copied like any value
+                            (true, value @ ValueRef::Variant(..)) => {
+                                match variant::lower(value, bank) {
+                                    Ok(ValueRef::Variant(..)) => {
+                                        copy_value_ref_to_bank(value, bank)
+                                    }
+                                    Ok(value) => value,
+                                    Err(e) => return Some(Err(e)),
+                                }
+                            }
+                            (_, value) => copy_value_ref_to_bank(value, bank),
+                        };
                         let copied: ValueRef<'static> = unsafe {
                             std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(copied)
                         };

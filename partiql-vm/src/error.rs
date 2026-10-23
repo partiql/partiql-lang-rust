@@ -22,6 +22,8 @@ pub enum EngineError {
     SlotOutOfBounds(u16),
     #[error("strict mode violation: {0}")]
     StrictModeViolation(String),
+    #[error("invalid Ion literal: {0}")]
+    InvalidIon(String),
     /// The query needs more of something (registers, constants, instructions, ...) than
     /// the bytecode can address.
     #[error("query too large: too many {0}")]
