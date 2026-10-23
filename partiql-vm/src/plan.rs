@@ -993,7 +993,10 @@ impl<'vm> QueryIterator<'vm> {
                 } => {
                     let accum = regs[*accum_reg as usize];
                     let input = regs[*input_reg as usize];
-                    regs[*accum_reg as usize] = agg_step(*func, accum, input);
+                    regs[*accum_reg as usize] = match agg_step(*func, accum, input) {
+                        Ok(value) => value,
+                        Err(e) => return Some(Err(e)),
+                    };
                 }
 
                 Inst::AggFinal {
@@ -1178,14 +1181,19 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
 
 /// Perform one step of an aggregate function: update the accumulator with a new input.
 #[allow(clippy::missing_transmute_annotations)]
-fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> ValueRef<'static> {
-    match func {
+fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> Result<ValueRef<'static>> {
+    let overflow = || EngineError::Arithmetic("overflow".to_string());
+    Ok(match func {
         AggFunc::Sum => match (accum, input) {
             (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
             (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
-            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a + b),
+            (ValueRef::I64(a), ValueRef::I64(b)) => {
+                ValueRef::I64(a.checked_add(b).ok_or_else(overflow)?)
+            }
             (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a + b),
-            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => ValueRef::Decimal(a + b),
+            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
+                ValueRef::Decimal(a.checked_add(b).ok_or_else(overflow)?)
+            }
             // Mixed numeric: promote to f64
             (ValueRef::I64(a), ValueRef::F64(b)) => ValueRef::F64(a as f64 + b),
             (ValueRef::F64(a), ValueRef::I64(b)) => ValueRef::F64(a + b as f64),
@@ -1193,7 +1201,7 @@ fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> ValueRef
         },
         AggFunc::Count => match accum {
             ValueRef::Missing => ValueRef::I64(1),
-            ValueRef::I64(n) => ValueRef::I64(n + 1),
+            ValueRef::I64(n) => ValueRef::I64(n.checked_add(1).ok_or_else(overflow)?),
             _ => ValueRef::I64(1),
         },
         AggFunc::Min => match (accum, input) {
@@ -1236,9 +1244,9 @@ fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> ValueRef
             // The compiler should allocate TWO accum registers for Avg.
             // For now, treat as Sum — finalize will need count.
             // TODO: proper Avg support with paired registers
-            agg_step(AggFunc::Sum, accum, input)
+            return agg_step(AggFunc::Sum, accum, input);
         }
-    }
+    })
 }
 
 /// Finalize an aggregate: convert the accumulator state to the final result.

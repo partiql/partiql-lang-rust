@@ -109,3 +109,29 @@
     { a: 2 }
   ]
 }
+
+// SUM, ABS and MOD overflow are errors, like the operators
+{
+  sql: '''
+    SELECT SUM(x) AS s
+    FROM << 9223372036854775807, 1 >> x
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+{
+  sql: '''
+    SELECT VALUE ABS(-9223372036854775807 - 1)
+    FROM << 0 >> d
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+// Known gap: a subquery in a later COALESCE argument still runs, before the expression
+skip::{
+  sql: '''
+    SELECT VALUE COALESCE(1, (SELECT VALUE 1 / 0 FROM << 1 >> z))
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[1]
+}

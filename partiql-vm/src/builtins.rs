@@ -199,7 +199,10 @@ fn builtin_overlay<'a>(args: &[ValueRef<'a>], arena: &'a Arena) -> Result<ValueR
 
 fn builtin_abs<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
     match args.first() {
-        Some(ValueRef::I64(n)) => Ok(ValueRef::I64(n.abs())),
+        Some(ValueRef::I64(n)) => n
+            .checked_abs()
+            .map(ValueRef::I64)
+            .ok_or_else(|| EngineError::Arithmetic("overflow".to_string())),
         Some(ValueRef::F64(n)) => Ok(ValueRef::F64(n.abs())),
         Some(ValueRef::Decimal(d)) => {
             let abs_val = if d.is_sign_negative() { -d } else { *d };
@@ -217,7 +220,9 @@ fn builtin_mod<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
             if *b == 0 {
                 Ok(ValueRef::Missing)
             } else {
-                Ok(ValueRef::I64(a % b))
+                a.checked_rem(*b)
+                    .map(ValueRef::I64)
+                    .ok_or_else(|| EngineError::Arithmetic("overflow".to_string()))
             }
         }
         (Some(ValueRef::F64(a)), Some(ValueRef::F64(b))) => Ok(ValueRef::F64(a % b)),

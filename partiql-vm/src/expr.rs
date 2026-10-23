@@ -67,7 +67,8 @@ pub enum Expr {
     /// NULLIF(a, b): NULL when `a = b` is true, else `a`.
     NullIf(Box<Expr>, Box<Expr>),
     /// COALESCE: the first value that is neither NULL nor MISSING, else NULL. Each argument
-    /// is evaluated only if those before it are absent.
+    /// is evaluated only if those before it are absent; the subqueries an argument reads,
+    /// though, run with the expression's others, before any of its code.
     Coalesce(Vec<Expr>),
     /// `v BETWEEN lo AND hi`, each evaluated once.
     Between(Box<Expr>, Box<Expr>, Box<Expr>),
