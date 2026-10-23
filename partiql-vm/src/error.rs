@@ -24,6 +24,8 @@ pub enum EngineError {
     StrictModeViolation(String),
     #[error("invalid Ion literal: {0}")]
     InvalidIon(String),
+    #[error("arithmetic error: {0}")]
+    Arithmetic(String),
     /// The query needs more of something (registers, constants, instructions, ...) than
     /// the bytecode can address.
     #[error("query too large: too many {0}")]

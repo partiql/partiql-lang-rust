@@ -5,7 +5,7 @@ use partiql_logical::{
     CallExpr, CallName, Lit, PathComponent, SubQueryExpr, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
-use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use rustc_hash::FxHashMap;
 
@@ -64,6 +64,14 @@ pub enum Expr {
     },
     /// COLL_TO_SCALAR: the one attribute of the one tuple in a collection, else MISSING.
     CollToScalar(Box<Expr>),
+    /// NULLIF(a, b): NULL when `a = b` is true, else `a`.
+    NullIf(Box<Expr>, Box<Expr>),
+    /// COALESCE: the first value that is neither NULL nor MISSING, else NULL. Each argument
+    /// is evaluated only if those before it are absent; the subqueries an argument reads,
+    /// though, run with the expression's others, before any of its code.
+    Coalesce(Vec<Expr>),
+    /// `v BETWEEN lo AND hi`, each evaluated once.
+    Between(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 impl Expr {
@@ -96,6 +104,16 @@ impl Expr {
             | Expr::CollToScalar(e)
             | Expr::IsNull(e)
             | Expr::IsMissing(e) => e.for_each_subquery(f),
+            Expr::NullIf(a, b) => {
+                a.for_each_subquery(f);
+                b.for_each_subquery(f);
+            }
+            Expr::Coalesce(exprs) => exprs.iter().for_each(|e| e.for_each_subquery(f)),
+            Expr::Between(v, lo, hi) => {
+                for e in [v, lo, hi] {
+                    e.for_each_subquery(f);
+                }
+            }
             Expr::LikeDynamic {
                 value,
                 pattern,
@@ -392,6 +410,19 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+    /// NULLIF: NULL when `eq` holds true, else the value in `value`.
+    NullIf {
+        dst: u16,
+        value: u16,
+        eq: u16,
+    },
+    /// One argument of COALESCE: if `src` is neither NULL nor MISSING, copy it into `dst` and
+    /// skip the next `skip` instructions (the arguments after it). Handled in the VM loop.
+    Coalesce {
+        dst: u16,
+        src: u16,
+        skip: u32,
+    },
     /// COLL_TO_SCALAR (spec 9.1): a collection of one tuple with one attribute becomes that
     /// attribute's value; anything else becomes MISSING.
     CollToScalar {
@@ -471,11 +502,6 @@ pub enum Inst {
         const_idx: u16,
     },
 
-    /// Strict mode: assert src is a Tuple. If not, runtime error.
-    AssertTuple {
-        src: u16,
-    },
-
     /// Build one tuple from the values in `srcs`, in order: `SELECT *` over a join, where
     /// each register holds one FROM binding's row (as the legacy evaluator's
     /// `coerce_into_tuple` + concatenation).
@@ -540,11 +566,26 @@ pub enum Inst {
     Halt,
 
     /// Decrement the i64 counter in `counter_reg`. If it was already 0, jump to `target`.
-    /// Used for LIMIT: initialize counter with the limit value minus one, then DecrOrJump
-    /// after each row.
+    /// Used for LIMIT: with the counter loaded with the count, once before the first row
+    /// and then after each row.
     DecrOrJump {
         counter_reg: u16,
         target: u32,
+    },
+
+    /// Used for OFFSET: if the i64 counter in `counter_reg` is above 0, decrement it and jump
+    /// to `target` (skipping the row); else fall through.
+    SkipRow {
+        counter_reg: u16,
+        target: u32,
+    },
+
+    /// A LIMIT or OFFSET count: leave a non-negative integer in `reg`. Replace NULL or
+    /// MISSING with `otherwise`, and anything else too, except in strict mode, where it fails.
+    RowCount {
+        reg: u16,
+        strict: bool,
+        otherwise: i64,
     },
 
     // === Sorter Instructions (GROUP BY, ORDER BY) ===
@@ -846,6 +887,16 @@ impl Program {
     ) -> Result<()> {
         let av = regs[lhs as usize];
         let bv = regs[rhs as usize];
+        // An unknown operand makes the result unknown: MISSING over NULL
+        if is_null_or_missing(av) || is_null_or_missing(bv) {
+            regs[dst as usize] = match is_missing(av) || is_missing(bv) {
+                true => ValueRef::Missing,
+                false => ValueRef::Null,
+            };
+            return Ok(());
+        }
+        // Mixed numbers widen: an int to the other operand's type; a float with a decimal to
+        // a decimal (as in the legacy evaluator)
         match (av, bv) {
             (ValueRef::I64(_), ValueRef::I64(_)) => {
                 self.eval_inst(&fn_i64(dst, lhs, rhs), arena, regs, udf)?
@@ -871,7 +922,6 @@ impl Program {
             (ValueRef::F64(_), ValueRef::F64(_)) => {
                 self.eval_inst(&fn_f64(dst, lhs, rhs), arena, regs, udf)?
             }
-            // TODO: Check this.
             (ValueRef::F64(_), ValueRef::I64(_)) => {
                 let cast = Inst::Cast {
                     dst: rhs_cast,
@@ -879,17 +929,19 @@ impl Program {
                     to: CastTarget::F64,
                 };
                 self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_i64(dst, lhs, rhs_cast), arena, regs, udf)?
+                self.eval_inst(&fn_f64(dst, lhs, rhs_cast), arena, regs, udf)?
             }
-            // TODO: Check this. May need to be other way around.
             (ValueRef::F64(_), ValueRef::Decimal(_)) => {
                 let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::F64,
+                    dst: lhs_cast,
+                    from: lhs,
+                    to: CastTarget::Decimal,
                 };
                 self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_i64(dst, lhs, rhs_cast), arena, regs, udf)?
+                match regs[lhs_cast as usize] {
+                    ValueRef::Missing => regs[dst as usize] = ValueRef::Missing,
+                    _ => self.eval_inst(&fn_decimal(dst, lhs_cast, rhs), arena, regs, udf)?,
+                }
             }
             (ValueRef::Decimal(_), ValueRef::Decimal(_)) => {
                 self.eval_inst(&fn_decimal(dst, lhs, rhs), arena, regs, udf)?
@@ -905,12 +957,15 @@ impl Program {
             }
             (ValueRef::Decimal(_), ValueRef::F64(_)) => {
                 let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
+                    dst: rhs_cast,
+                    from: rhs,
                     to: CastTarget::Decimal,
                 };
                 self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_decimal(dst, lhs_cast, rhs), arena, regs, udf)?
+                match regs[rhs_cast as usize] {
+                    ValueRef::Missing => regs[dst as usize] = ValueRef::Missing,
+                    _ => self.eval_inst(&fn_decimal(dst, lhs, rhs_cast), arena, regs, udf)?,
+                }
             }
             (_, _) => {
                 return Err(EngineError::IllegalState(
@@ -1245,6 +1300,15 @@ impl Program {
                 CastTarget::I64 => v,
                 CastTarget::String => return Err(EngineError::NotImplemented),
             },
+            // A float that no decimal holds (NaN, infinity) is MISSING, as in the legacy
+            // evaluator
+            ValueRef::F64(f) => match to {
+                CastTarget::Decimal => Decimal::from_f64(f)
+                    .filter(|_| f.is_finite())
+                    .map_or(ValueRef::Missing, ValueRef::Decimal),
+                CastTarget::F64 => v,
+                _ => return Err(EngineError::NotImplemented),
+            },
             ValueRef::Decimal(d) => match to {
                 CastTarget::Decimal => v,
                 CastTarget::I64 => {
@@ -1315,7 +1379,7 @@ impl Program {
             Inst::AddI64 { dst, a, b } => {
                 let av = regs[*a as usize].as_i64()?;
                 let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::I64(av + bv);
+                regs[*dst as usize] = ValueRef::I64(arithmetic(av.checked_add(bv))?);
             }
             Inst::AddF64 { dst, a, b } => {
                 let av = regs[*a as usize].as_f64()?;
@@ -1325,7 +1389,7 @@ impl Program {
             Inst::AddDecimal { dst, a, b } => {
                 let av = regs[*a as usize].as_decimal()?;
                 let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Decimal(av + bv);
+                regs[*dst as usize] = ValueRef::Decimal(arithmetic(av.checked_add(bv))?);
             }
             Inst::Cast { dst, from, to } => {
                 self.eval_cast(*dst, *from, to, arena, regs)?;
@@ -1356,7 +1420,7 @@ impl Program {
             Inst::SubI64 { dst, a, b } => {
                 let av = regs[*a as usize].as_i64()?;
                 let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::I64(av - bv);
+                regs[*dst as usize] = ValueRef::I64(arithmetic(av.checked_sub(bv))?);
             }
             Inst::SubF64 { dst, a, b } => {
                 let av = regs[*a as usize].as_f64()?;
@@ -1366,7 +1430,7 @@ impl Program {
             Inst::SubDecimal { dst, a, b } => {
                 let av = regs[*a as usize].as_decimal()?;
                 let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Decimal(av - bv);
+                regs[*dst as usize] = ValueRef::Decimal(arithmetic(av.checked_sub(bv))?);
             }
             Inst::SubDynamic {
                 dst,
@@ -1392,7 +1456,7 @@ impl Program {
             Inst::ModI64 { dst, a, b } => {
                 let av = regs[*a as usize].as_i64()?;
                 let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::I64(av % bv);
+                regs[*dst as usize] = ValueRef::I64(arithmetic(av.checked_rem(bv))?);
             }
             Inst::ModF64 { dst, a, b } => {
                 let av = regs[*a as usize].as_f64()?;
@@ -1402,7 +1466,7 @@ impl Program {
             Inst::ModDecimal { dst, a, b } => {
                 let av = regs[*a as usize].as_decimal()?;
                 let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Decimal(av % bv);
+                regs[*dst as usize] = ValueRef::Decimal(arithmetic(av.checked_rem(bv))?);
             }
             Inst::ModDynamic {
                 dst,
@@ -1467,7 +1531,7 @@ impl Program {
             Inst::MulI64 { dst, a, b } => {
                 let av = regs[*a as usize].as_i64()?;
                 let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::I64(av * bv);
+                regs[*dst as usize] = ValueRef::I64(arithmetic(av.checked_mul(bv))?);
             }
             Inst::MulF64 { dst, a, b } => {
                 let av = regs[*a as usize].as_f64()?;
@@ -1477,7 +1541,7 @@ impl Program {
             Inst::MulDecimal { dst, a, b } => {
                 let av = regs[*a as usize].as_decimal()?;
                 let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Decimal(av * bv);
+                regs[*dst as usize] = ValueRef::Decimal(arithmetic(av.checked_mul(bv))?);
             }
             Inst::MulDynamic {
                 dst,
@@ -1504,7 +1568,7 @@ impl Program {
             Inst::DivI64 { dst, a, b } => {
                 let av = regs[*a as usize].as_i64()?;
                 let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::I64(av / bv);
+                regs[*dst as usize] = ValueRef::I64(arithmetic(av.checked_div(bv))?);
             }
             Inst::DivF64 { dst, a, b } => {
                 let av = regs[*a as usize].as_f64()?;
@@ -1514,7 +1578,7 @@ impl Program {
             Inst::DivDecimal { dst, a, b } => {
                 let av = regs[*a as usize].as_decimal()?;
                 let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Decimal(av / bv);
+                regs[*dst as usize] = ValueRef::Decimal(arithmetic(av.checked_div(bv))?);
             }
             Inst::DivDynamic {
                 dst,
@@ -1738,6 +1802,29 @@ impl Program {
                     other => other,
                 };
             }
+            Inst::RowCount {
+                reg,
+                strict,
+                otherwise,
+            } => {
+                regs[*reg as usize] = match regs[*reg as usize] {
+                    ValueRef::I64(n) if n >= 0 => ValueRef::I64(n),
+                    // An unknown count is no count (`LIMIT NULL`), in strict mode too
+                    ValueRef::Null | ValueRef::Missing => ValueRef::I64(*otherwise),
+                    other if *strict => {
+                        return Err(EngineError::StrictModeViolation(format!(
+                            "LIMIT and OFFSET take a non-negative integer, not {other:?}"
+                        )))
+                    }
+                    _ => ValueRef::I64(*otherwise),
+                };
+            }
+            Inst::NullIf { dst, value, eq } => {
+                regs[*dst as usize] = match regs[*eq as usize] {
+                    ValueRef::Bool(true) => ValueRef::Null,
+                    _ => regs[*value as usize],
+                };
+            }
             Inst::CollToScalar { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
                     ValueRef::Bag([ValueRef::Tuple(t)]) | ValueRef::List([ValueRef::Tuple(t)]) => {
@@ -1759,7 +1846,7 @@ impl Program {
             }
             Inst::NegNum { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
-                    ValueRef::I64(n) => ValueRef::I64(-n),
+                    ValueRef::I64(n) => ValueRef::I64(arithmetic(n.checked_neg())?),
                     ValueRef::F64(n) => ValueRef::F64(-n),
                     ValueRef::Decimal(d) => ValueRef::Decimal(-d),
                     ValueRef::Null => ValueRef::Null,
@@ -1887,6 +1974,10 @@ impl Program {
                     ValueRef::Tuple(_) => {
                         regs[*dst as usize] = value;
                     }
+                    // A MISSING row has no attributes
+                    ValueRef::Missing => {
+                        regs[*dst as usize] = ValueRef::Tuple(arena.alloc_tuple([]));
+                    }
                     _ => {
                         let name_ref = self
                             .const_refs
@@ -1899,14 +1990,6 @@ impl Program {
                         let tuple_ref = arena.alloc_tuple(fields);
                         regs[*dst as usize] = ValueRef::Tuple(tuple_ref);
                     }
-                }
-            }
-            Inst::AssertTuple { src } => {
-                let value = regs[*src as usize];
-                if !matches!(value, ValueRef::Tuple(_)) {
-                    return Err(EngineError::StrictModeViolation(
-                        "SELECT * requires tuple value".to_string(),
-                    ));
                 }
             }
 
@@ -1936,6 +2019,8 @@ impl Program {
             | Inst::EmitRow
             | Inst::Halt
             | Inst::DecrOrJump { .. }
+            | Inst::SkipRow { .. }
+            | Inst::Coalesce { .. }
             | Inst::MaterializeCursor { .. }
             | Inst::CreateTableFnCursor { .. }
             | Inst::AssertCollection { .. }
@@ -2455,6 +2540,63 @@ impl ExprCompiler<'_> {
             Expr::Subquery { id, .. } => Err(EngineError::IllegalState(format!(
                 "subquery {id} read without running it"
             ))),
+            Expr::NullIf(a, b) => {
+                let value = self.compile_expr(a)?;
+                let other = self.compile_expr(b)?;
+                let eq = self.compile_expr(&Expr::Eq(
+                    Expr::SlotRef(value).into(),
+                    Expr::SlotRef(other).into(),
+                ))?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::NullIf { dst, value, eq });
+                Ok(dst)
+            }
+            // ```text
+            //         dst = NULL
+            //         <a1>; if a1 is present: dst = a1, skip to end
+            //         <a2>; if a2 is present: dst = a2, skip to end
+            //   end:
+            // ```
+            // An argument's code runs only if those before it are absent. The skips are
+            // relative, so they hold wherever the expression's code is laid out.
+            Expr::Coalesce(exprs) => {
+                let dst = self.builder.alloc_reg()?;
+                let const_idx = self.builder.push_const(ValueOwned::Null)?;
+                self.builder.insts.push(Inst::LoadConst { dst, const_idx });
+                let mut checks = Vec::with_capacity(exprs.len());
+                for expr in exprs {
+                    let src = self.compile_expr(expr)?;
+                    checks.push(self.builder.insts.len());
+                    self.builder
+                        .insts
+                        .push(Inst::Coalesce { dst, src, skip: 0 });
+                }
+                let end = self.builder.insts.len();
+                for at in checks {
+                    if let Inst::Coalesce { skip, .. } = &mut self.builder.insts[at] {
+                        *skip = u32::try_from(end - at - 1)
+                            .map_err(|_| EngineError::TooLarge("instructions"))?;
+                    }
+                }
+                Ok(dst)
+            }
+            Expr::Between(value, lo, hi) => {
+                let (value, lo, hi) = (
+                    self.compile_expr(value)?,
+                    self.compile_expr(lo)?,
+                    self.compile_expr(hi)?,
+                );
+                let reg = |r| Box::new(Expr::SlotRef(r));
+                let at_least = Expr::Or(
+                    Expr::Gt(reg(value), reg(lo)).into(),
+                    Expr::Eq(reg(value), reg(lo)).into(),
+                );
+                let at_most = Expr::Or(
+                    Expr::Lt(reg(value), reg(hi)).into(),
+                    Expr::Eq(reg(value), reg(hi)).into(),
+                );
+                self.compile_expr(&Expr::And(at_least.into(), at_most.into()))
+            }
             Expr::CollToScalar(expr) => {
                 let src = self.compile_expr(expr)?;
                 let dst = self.builder.alloc_reg()?;
@@ -2678,9 +2820,12 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Expr::Tuple { attrs, values })
             }
-            ValueExpr::BetweenExpr(_between_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
-            }
+            // `v BETWEEN lo AND hi` is `v >= lo AND v <= hi`
+            ValueExpr::BetweenExpr(between) => Ok(Expr::Between(
+                self.lower_expr(&between.value)?.into(),
+                self.lower_expr(&between.from)?.into(),
+                self.lower_expr(&between.to)?.into(),
+            )),
             ValueExpr::PatternMatchExpr(pm) => {
                 let value = self.lower_expr(&pm.value)?;
                 match &pm.pattern {
@@ -2731,11 +2876,17 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     Ok(check)
                 }
             }
-            ValueExpr::NullIfExpr(_null_if_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
-            }
-            ValueExpr::CoalesceExpr(_coalesce_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            ValueExpr::NullIfExpr(nullif) => Ok(Expr::NullIf(
+                self.lower_expr(&nullif.lhs)?.into(),
+                self.lower_expr(&nullif.rhs)?.into(),
+            )),
+            ValueExpr::CoalesceExpr(coalesce) if !coalesce.elements.is_empty() => {
+                let exprs = coalesce
+                    .elements
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Expr::Coalesce(exprs))
             }
             ValueExpr::GraphMatch(_graph_match_expr) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
@@ -2824,6 +2975,12 @@ fn call_name(call: &CallExpr) -> String {
     }
 }
 
+/// The result of checked integer or decimal arithmetic: an error on overflow or division by
+/// zero, where unchecked arithmetic would panic.
+fn arithmetic<T>(result: Option<T>) -> Result<T> {
+    result.ok_or_else(|| EngineError::Arithmetic("overflow or division by zero".to_string()))
+}
+
 fn is_null_or_missing(v: ValueRef<'_>) -> bool {
     matches!(v, ValueRef::Null | ValueRef::Missing)
 }
@@ -2869,6 +3026,7 @@ impl ValueOperands {
                 value,
                 collection,
             } => ops(Some(dst), &[value, collection]),
+            Inst::RowCount { reg, .. } => ops(Some(reg), &[reg]),
             Inst::NotBool { dst, src }
             | Inst::NegNum { dst, src }
             | Inst::MissingToNull { dst, src }
@@ -2885,8 +3043,6 @@ impl ValueOperands {
                 pattern,
                 escape,
             } => ops(Some(dst), &[value, pattern, escape]),
-            // SELECT * (strict) checks its row in place: the row is the decoded value
-            Inst::AssertTuple { src } => ops(Some(src), &[src]),
             _ => None,
         }
     }

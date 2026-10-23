@@ -1,0 +1,137 @@
+// BETWEEN, NULLIF, COALESCE, and arithmetic over mixed and unknown operands.
+
+// BETWEEN includes both bounds, compares across number types and strings, and is NULL
+// over an unknown value
+{
+  sql: '''
+    SELECT VALUE [3 BETWEEN 1 AND 5, 1 BETWEEN 1 AND 5, 5 BETWEEN 1 AND 5, 0 BETWEEN 1 AND 5,
+                  1.5 BETWEEN 1 AND 2e0, 'b' BETWEEN 'a' AND 'c', 3 NOT BETWEEN 1 AND 5,
+                  NULL BETWEEN 1 AND 2]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, true, true, false, true, true, false, null]
+  ]
+}
+
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << 1, 2, 3, 4, 5 >> x
+    WHERE x BETWEEN 2 AND 4
+  ''',
+  expect: $bag::[2, 3, 4]
+}
+
+// NULLIF(a, b) is NULL when a = b, else a
+{
+  sql: '''
+    SELECT VALUE [NULLIF(1, 1), NULLIF(1.0, 1), NULLIF(1, 2), NULLIF(2, '2'), NULLIF(1, NULL),
+                  NULLIF(NULL, 1), NULLIF(1, MISSING), NULLIF(MISSING, 1)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [null, null, 1, 2, 1, null, 1, $missing::null]
+  ]
+}
+
+// COALESCE is its first value neither NULL nor MISSING, else NULL
+{
+  sql: '''
+    SELECT VALUE [COALESCE(1), COALESCE(NULL, 2), COALESCE(MISSING, NULL, 3),
+                  COALESCE(NULL, MISSING, NULL, 9, 4), COALESCE(`null.int`, 5),
+                  COALESCE(MISSING, NULL), COALESCE(NULL, MISSING), COALESCE(MISSING)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [1, 2, 3, 9, 5, null, null, null]
+  ]
+}
+
+{
+  sql: '''
+    SELECT VALUE COALESCE(x.a, x.b, 'none')
+    FROM << {'a': 1}, {'b': 2}, {'a': NULL} >> x
+  ''',
+  expect: $bag::[1, 2, "none"]
+}
+
+// COALESCE evaluates an argument only if those before it are absent
+{
+  sql: '''
+    SELECT VALUE [COALESCE(1, 1 / 0), COALESCE(NULL, 2, 1 + 'a'), COALESCE(1, 1.0 / 0)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [1, 2, 1]
+  ]
+}
+
+// Arithmetic widens mixed numbers: an int to the other operand's type, a float with a
+// decimal to a decimal. A NULL or MISSING operand makes the result NULL or MISSING
+{
+  sql: '''
+    SELECT VALUE [x.f * 2, x.f - x.i, x.f + x.d, x.d + x.f, x.f / 2, 1.1 + `2.2e0`,
+                  x.i + MISSING, x.i + NULL, NULL * MISSING]
+    FROM << {'i': 1, 'd': 1.5, 'f': `2.5e0`} >> x
+  ''',
+  expect: $bag::[
+    [5e0, 1.5e0, 4.0, 4.0, 1.25e0, 3.3, $missing::null, null, $missing::null]
+  ]
+}
+
+// Integer and decimal overflow, and division by zero, are errors
+{
+  sql: '''
+    SELECT VALUE 9223372036854775807 + 1
+    FROM << 0 >> d
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+{
+  sql: '''
+    SELECT VALUE 1 / 0
+    FROM << 0 >> d
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+// SELECT * of a non-tuple is {'_1': v}; of MISSING, an empty tuple
+{
+  sql: '''
+    SELECT *
+    FROM << MISSING, 1, {'a': 2} >> x
+  ''',
+  expect: $bag::[
+    {},
+    { _1: 1 },
+    { a: 2 }
+  ]
+}
+
+// SUM, ABS and MOD overflow are errors, like the operators
+{
+  sql: '''
+    SELECT SUM(x) AS s
+    FROM << 9223372036854775807, 1 >> x
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+{
+  sql: '''
+    SELECT VALUE ABS(-9223372036854775807 - 1)
+    FROM << 0 >> d
+  ''',
+  expect: { error: "Arithmetic" }
+}
+
+// Known gap: a subquery in a later COALESCE argument still runs, before the expression
+skip::{
+  sql: '''
+    SELECT VALUE COALESCE(1, (SELECT VALUE 1 / 0 FROM << 1 >> z))
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[1]
+}
