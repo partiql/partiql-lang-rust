@@ -171,3 +171,12 @@
   ''',
   expect: { error: "InvalidIon" }
 }
+
+// An operator drops annotations, but a result keeps a nested annotated value as written
+{
+  sql: '''
+    SELECT VALUE x
+    FROM `[a::1, 2]` x
+  ''',
+  expect: $bag::[$ion::a::1, 2]
+}

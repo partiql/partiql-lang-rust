@@ -17,10 +17,10 @@ pub(crate) fn validate(bytes: &[u8]) -> Result<()> {
         .map_err(|e| EngineError::InvalidIon(e.to_string()))
 }
 
-/// `value`, with a variant decoded into `arena` as the VM value it holds. Ion annotations
-/// are dropped (`a::1` is 1), as in the legacy evaluator. A variant the VM has no type for
-/// (a timestamp) stays as it is; so does one nested in a decoded collection, as a variant
-/// of its own.
+/// `value`, with a variant decoded into `arena` as the VM value it holds. The value's own
+/// Ion annotations are dropped (`a::1` is 1), as in the legacy evaluator. A variant the VM
+/// has no type for (a timestamp) stays as it is; so does one nested in a decoded collection
+/// (or an annotated one), as a variant of its own.
 pub(crate) fn lower<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRef<'a>> {
     let ValueRef::Variant(bytes, _) = value else {
         return Ok(value);
@@ -83,9 +83,15 @@ pub(crate) fn decode_owned(bytes: &[u8]) -> Result<ValueOwned> {
     })
 }
 
-/// A collection's element: decoded, or else a variant of its own.
+/// A collection's element: decoded, or else a variant of its own. An annotated element stays
+/// a variant, so a result that holds it keeps its annotations; an operator reading it drops
+/// them when it decodes it in turn.
 fn nested<'a>(element: &Element, arena: &'a Arena) -> ValueRef<'a> {
-    decode(element, arena).unwrap_or_else(|| {
+    let decoded = match element.annotations().is_empty() {
+        true => decode(element, arena),
+        false => None,
+    };
+    decoded.unwrap_or_else(|| {
         ValueRef::Variant(arena.alloc_slice(element.to_string().as_bytes()), ION)
     })
 }
@@ -160,9 +166,13 @@ mod tests {
     fn annotations_are_dropped() {
         assert_eq!(lowered("a::1"), "I64(1)");
         assert_eq!(lowered("a::b::null.int"), "Null");
-        let nested = lowered("[a::1, {b: c::\"x\"}]");
-        assert!(nested.starts_with("List([I64(1), Tuple("), "{nested}");
-        assert!(nested.contains("value: Str(\"x\")"), "{nested}");
+        // A nested annotated value stays a variant, annotations and all, until read
+        let nested = lowered("[a::1, {b: c::\"x\", d: 2}]");
+        assert!(nested.starts_with("List([Variant("), "{nested}");
+        assert!(nested.contains("value: I64(2)"), "{nested}");
+        let arena = Arena::default();
+        let child = lower(ValueRef::Variant(b"a::1", ION), &arena).expect("valid Ion");
+        assert_eq!(format!("{child:?}"), "I64(1)");
     }
 
     #[test]
