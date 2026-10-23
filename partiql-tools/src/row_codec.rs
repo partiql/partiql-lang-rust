@@ -294,6 +294,15 @@ fn write_value_from_view(
         ValueType::Tuple => write_tuple_via_view(view, depth + 1, buf)?,
         ValueType::List => write_list_or_bag_via_view(view, TAG_LIST, "list", depth + 1, buf)?,
         ValueType::Bag => write_list_or_bag_via_view(view, TAG_BAG, "bag", depth + 1, buf)?,
+        ValueType::Variant => {
+            let prefix = match field_name {
+                Some(name) => format!("field '{name}'"),
+                None => "top-level value".to_string(),
+            };
+            return Err(SerializeError::Unsupported(format!(
+                "{prefix}: an Ion literal (variant) value cannot be stored yet"
+            )));
+        }
     }
     Ok(())
 }

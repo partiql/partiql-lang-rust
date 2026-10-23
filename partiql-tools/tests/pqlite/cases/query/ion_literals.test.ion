@@ -1,0 +1,182 @@
+// Ion literals (`...`) are kept as written and decoded where an operator reads them, so
+// every operator treats `1` like 1. An operator that only passes a value on (a projection)
+// keeps the literal, so these steps read each one through an operator.
+
+// Equality and comparison, across Ion and PartiQL values
+{
+  sql: '''
+    SELECT VALUE [`1` = 1, `1` = `1`, `"a"` = 'a', `abc` = 'abc', `2` > 1, `1.5` < 2, `1e0` = 1e0]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, true, true, true, true, true, true]
+  ]
+}
+
+// Arithmetic, concatenation, negation and logic
+{
+  sql: '''
+    SELECT VALUE [`1` + 1, `1.5` * 2, -`2`, `abc` || 'd', `true` AND true, NOT `false`]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [2, 3.0, -2, "abcd", true, true]
+  ]
+}
+
+// Paths into an Ion struct or list, and a function's arguments
+{
+  sql: '''
+    SELECT VALUE [`{a: 1, b: {c: "x"}}`.a, `{a: 1, b: {c: "x"}}`.b.c, UPPER(`"a"`)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [1, "x", "A"]
+  ]
+}
+
+// IN, and LIKE
+{
+  sql: '''
+    SELECT VALUE [`1` IN [1, 2], 1 IN [`1`], 3 IN `[1, 2]`, `"abc"` LIKE 'a%']
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, true, false, true]
+  ]
+}
+
+// Ion typed nulls are NULL
+{
+  sql: '''
+    SELECT VALUE [`null` IS NULL, `null.int` IS NULL, ` null.string ` IS NULL, `1` IS NULL,
+                  `null.int` IS MISSING]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, true, true, false, false]
+  ]
+}
+
+// An Ion literal in WHERE
+{
+  sql: '''
+    SELECT VALUE x + 0
+    FROM << `1`, `2`, `3` >> x
+    WHERE x > 1 AND `true`
+  ''',
+  expect: $bag::[2, 3]
+}
+
+// An Ion list (or s-expression) scanned in FROM is a collection of rows
+{
+  sql: '''
+    SELECT VALUE x * 10
+    FROM `[1, 2, 3]` x
+  ''',
+  expect: $bag::[10, 20, 30]
+}
+
+{
+  sql: '''
+    SELECT VALUE x.a + 0
+    FROM `[{a: 1}, {a: 2}]` x
+  ''',
+  expect: $bag::[1, 2]
+}
+
+// ORDER BY orders Ion values by what they denote
+{
+  sql: '''
+    SELECT VALUE x + 0
+    FROM << `2`, `10`, `1` >> x
+    ORDER BY x
+  ''',
+  expect: [1, 2, 10]
+}
+
+// GROUP BY groups an Ion value with the PartiQL value it denotes
+{
+  sql: '''
+    SELECT k, COUNT(*) AS n
+    FROM << {'a': `1`}, {'a': 1}, {'a': `2`} >> x
+    GROUP BY x.a AS k
+  ''',
+  expect: $bag::[
+    { k: 1, n: 2 },
+    { k: 2, n: 1 }
+  ]
+}
+
+// Aggregates read Ion values
+{
+  sql: '''
+    SELECT COUNT(x) AS c, SUM(x) AS s, MAX(x) AS m
+    FROM << `1`, `2`, 3 >> x
+  ''',
+  expect: $bag::[
+    { c: 3, s: 6, m: 3 }
+  ]
+}
+
+// Ion the VM has no type for (a timestamp) stays a literal, unequal to any VM value
+{
+  sql: '''
+    SELECT VALUE [`2000T` = 1]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [false]
+  ]
+}
+
+// Annotations are dropped, as in the legacy evaluator
+{
+  sql: '''
+    SELECT VALUE [`a::1` = 1, `a::1` + 1, `a::null` IS NULL, `{x: b::2}`.x * 2]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [true, 2, true, 4]
+  ]
+}
+
+// SELECT * spreads an Ion struct's fields, from one FROM item or several
+{
+  sql: '''
+    SELECT *
+    FROM << `{a: "hello"}` >> x
+  ''',
+  expect: $bag::[
+    { a: "hello" }
+  ]
+}
+
+{
+  sql: '''
+    SELECT *
+    FROM << `{a: "hello"}` >> x, << {'b': 1} >> y
+  ''',
+  expect: $bag::[
+    { a: "hello", b: 1 }
+  ]
+}
+
+// Invalid Ion is an error when compiling, even where it would never be read
+{
+  sql: '''
+    SELECT VALUE d
+    FROM << 0 >> d
+    WHERE false AND `{{ bad` IS NULL
+  ''',
+  expect: { error: "InvalidIon" }
+}
+
+// An operator drops annotations, but a result keeps a nested annotated value as written
+{
+  sql: '''
+    SELECT VALUE x
+    FROM `[a::1, 2]` x
+  ''',
+  expect: $bag::[$ion::a::1, 2]
+}

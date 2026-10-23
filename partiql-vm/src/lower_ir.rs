@@ -21,7 +21,7 @@ use crate::plan::{
 use crate::source::{
     DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TableFunctionHandle,
 };
-use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
+use crate::value::{variant, FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
     BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, OrderBy,
     PathComponent, Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder,
@@ -1826,6 +1826,11 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
                 }
             }
             partiql_logical::Lit::Struct(_) => lit_to_value(lit).ok().map(|val| vec![val]),
+            // An Ion list literal is a collection of rows
+            partiql_logical::Lit::Variant(bytes, _) => match variant::decode_owned(bytes).ok()? {
+                ValueOwned::List(items) | ValueOwned::Bag(items) => Some(items),
+                value => Some(vec![value]),
+            },
             _ => lit_to_value(lit).ok().map(|val| vec![val]),
         },
         ValueExpr::ListExpr(list) => {
@@ -1863,10 +1868,14 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
 /// Whether a literal FROM source is a collection (rather than a value scanned as `<<value>>`).
 fn is_collection_expr(expr: &ValueExpr) -> bool {
     match expr {
-        ValueExpr::Lit(lit) => matches!(
-            lit.as_ref(),
-            partiql_logical::Lit::List(_) | partiql_logical::Lit::Bag(_)
-        ),
+        ValueExpr::Lit(lit) => match lit.as_ref() {
+            partiql_logical::Lit::List(_) | partiql_logical::Lit::Bag(_) => true,
+            partiql_logical::Lit::Variant(bytes, _) => matches!(
+                variant::decode_owned(bytes),
+                Ok(ValueOwned::List(_) | ValueOwned::Bag(_))
+            ),
+            _ => false,
+        },
         ValueExpr::ListExpr(_) | ValueExpr::BagExpr(_) => true,
         _ => false,
     }

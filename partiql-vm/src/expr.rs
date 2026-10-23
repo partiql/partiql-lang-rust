@@ -1,6 +1,6 @@
 use crate::arena::{Arena, SlotId};
 use crate::error::{count_u16, EngineError, Result};
-use crate::value::{value_get_field_ref, ValueOwned, ValueRef};
+use crate::value::{value_get_field_ref, variant, ValueOwned, ValueRef};
 use partiql_logical::{
     CallExpr, CallName, Lit, PathComponent, SubQueryExpr, ValueExpr, VarRefType,
 };
@@ -27,6 +27,8 @@ pub enum Expr {
     Not(Box<Expr>),
     Neg(Box<Expr>),
     Pos(Box<Expr>),
+    IsNull(Box<Expr>),
+    IsMissing(Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
     In(Box<Expr>, Box<Expr>),
     Like {
@@ -91,7 +93,9 @@ impl Expr {
             | Expr::Neg(e)
             | Expr::Pos(e)
             | Expr::GetField(e, _)
-            | Expr::CollToScalar(e) => e.for_each_subquery(f),
+            | Expr::CollToScalar(e)
+            | Expr::IsNull(e)
+            | Expr::IsMissing(e) => e.for_each_subquery(f),
             Expr::LikeDynamic {
                 value,
                 pattern,
@@ -391,6 +395,14 @@ pub enum Inst {
     /// COLL_TO_SCALAR (spec 9.1): a collection of one tuple with one attribute becomes that
     /// attribute's value; anything else becomes MISSING.
     CollToScalar {
+        dst: u16,
+        src: u16,
+    },
+    IsNull {
+        dst: u16,
+        src: u16,
+    },
+    IsMissing {
         dst: u16,
         src: u16,
     },
@@ -932,11 +944,13 @@ impl Program {
         let av = regs[lhs as usize];
         let bv = regs[rhs as usize];
 
-        // Null/Missing propagation: any operand is Null or Missing → result is Null
-        if matches!(av, ValueRef::Null | ValueRef::Missing)
-            || matches!(bv, ValueRef::Null | ValueRef::Missing)
-        {
-            regs[dst as usize] = ValueRef::Null;
+        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
+        if is_null_or_missing(av) || is_null_or_missing(bv) {
+            if is_missing(av) || is_missing(bv) {
+                regs[dst as usize] = ValueRef::Missing;
+            } else {
+                regs[dst as usize] = ValueRef::Null;
+            }
             return Ok(());
         }
 
@@ -1069,11 +1083,13 @@ impl Program {
         let av = regs[lhs as usize];
         let bv = regs[rhs as usize];
 
-        // Null/Missing propagation
-        if matches!(av, ValueRef::Null | ValueRef::Missing)
-            || matches!(bv, ValueRef::Null | ValueRef::Missing)
-        {
-            regs[dst as usize] = ValueRef::Null;
+        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
+        if is_null_or_missing(av) || is_null_or_missing(bv) {
+            if is_missing(av) || is_missing(bv) {
+                regs[dst as usize] = ValueRef::Missing;
+            } else {
+                regs[dst as usize] = ValueRef::Null;
+            }
             return Ok(());
         }
 
@@ -1246,7 +1262,38 @@ impl Program {
     }
 
     #[inline]
+    /// Run a scalar instruction. An Ion variant it reads as a value is first decoded (into
+    /// `arena`) in its register, so each operator sees VM values only, then put back: a
+    /// result row shows the literal as written.
     pub(crate) fn eval_inst<'a>(
+        &self,
+        inst: &Inst,
+        arena: &'a Arena,
+        regs: &mut [ValueRef<'a>],
+        udf: Option<&'a dyn UdfRegistry>,
+    ) -> Result<()> {
+        let Some(operands) = ValueOperands::of(inst) else {
+            return self.eval_decoded(inst, arena, regs, udf);
+        };
+        let mut variants = [None; 3];
+        for (saved, &reg) in variants.iter_mut().zip(operands.regs()) {
+            let value = regs[reg as usize];
+            if let ValueRef::Variant(..) = value {
+                regs[reg as usize] = variant::lower(value, arena)?;
+                *saved = Some((reg, value));
+            }
+        }
+        let result = self.eval_decoded(inst, arena, regs, udf);
+        for (reg, value) in variants.into_iter().flatten() {
+            if operands.dst != Some(reg) {
+                regs[reg as usize] = value;
+            }
+        }
+        result
+    }
+
+    /// Run a scalar instruction whose operands are decoded.
+    fn eval_decoded<'a>(
         &self,
         inst: &Inst,
         arena: &'a Arena,
@@ -1653,7 +1700,7 @@ impl Program {
                         ValueRef::List(items) | ValueRef::Bag(items) => {
                             let mut found = false;
                             for item in items.iter() {
-                                if value_ref_eq(val, *item) {
+                                if value_ref_eq(val, variant::lower(*item, arena)?) {
                                     found = true;
                                     break;
                                 }
@@ -1701,6 +1748,14 @@ impl Program {
                     }
                     _ => ValueRef::Missing,
                 };
+            }
+            // An Ion typed null (`null.int`) is NULL once decoded
+            Inst::IsNull { dst, src } => {
+                regs[*dst as usize] = ValueRef::Bool(is_null_or_missing(regs[*src as usize]));
+            }
+            Inst::IsMissing { dst, src } => {
+                regs[*dst as usize] =
+                    ValueRef::Bool(matches!(regs[*src as usize], ValueRef::Missing));
             }
             Inst::NegNum { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
@@ -1776,7 +1831,7 @@ impl Program {
                 let registry = udf.ok_or_else(|| EngineError::UdfNotFound(name.clone()))?;
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
-                    argv.push(regs[*arg as usize]);
+                    argv.push(variant::lower(regs[*arg as usize], arena)?);
                 }
                 let result = registry.call(name, &argv, arena)?;
                 regs[*dst as usize] = result;
@@ -1858,8 +1913,9 @@ impl Program {
             Inst::ConcatTuples { dst, srcs } => {
                 let name = ValueRef::Str("_1");
                 let mut fields = Vec::new();
+                // `srcs` has no fixed length, so its variants are decoded here
                 for src in srcs {
-                    match regs[*src as usize] {
+                    match variant::lower(regs[*src as usize], arena)? {
                         ValueRef::Tuple(t) => {
                             fields.extend(t.fields.iter().map(|f| (ValueRef::Str(f.name), f.value)))
                         }
@@ -2174,6 +2230,18 @@ impl ExprCompiler<'_> {
                 let src = self.compile_expr(expr)?;
                 let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::NotBool { dst, src });
+                Ok(dst)
+            }
+            Expr::IsNull(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::IsNull { dst, src });
+                Ok(dst)
+            }
+            Expr::IsMissing(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::IsMissing { dst, src });
                 Ok(dst)
             }
             Expr::Neg(expr) => {
@@ -2644,8 +2712,24 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
             ValueExpr::SearchedCase(_searched_case) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
             }
-            ValueExpr::IsTypeExpr(_is_type_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            ValueExpr::IsTypeExpr(is_type_expr) => {
+                use partiql_logical::Type;
+                let inner = self.lower_expr(&is_type_expr.expr)?;
+                let check = match &is_type_expr.is_type {
+                    Type::NullType => Expr::IsNull(inner.into()),
+                    Type::MissingType => Expr::IsMissing(inner.into()),
+                    other => {
+                        return Err(EngineError::UnsupportedExpr(format!(
+                            "IS type check for {:?}",
+                            other
+                        )));
+                    }
+                };
+                if is_type_expr.not {
+                    Ok(Expr::Not(check.into()))
+                } else {
+                    Ok(check)
+                }
             }
             ValueExpr::NullIfExpr(_null_if_expr) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
@@ -2704,7 +2788,11 @@ pub(crate) fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
         Lit::Int32(v) => ValueOwned::I64((*v).into()),
         Lit::Decimal(d) => ValueOwned::Decimal(*d),
         Lit::Double(f) => ValueOwned::F64(*f),
-        Lit::Variant(_, _) => todo!("Variant literals are not (yet) supported."),
+        // Kept as written and decoded where an operator reads it, but checked now
+        Lit::Variant(bytes, type_name) => {
+            variant::validate(bytes)?;
+            ValueOwned::Variant(bytes.clone(), type_name.clone())
+        }
         other => return Err(EngineError::UnsupportedExpr(format!("{other:?}"))),
     })
 }
@@ -2733,6 +2821,78 @@ fn call_name(call: &CallExpr) -> String {
         CallName::ByName(name) => name.clone(),
         CallName::ById(name, _, _) => name.clone(),
         other => format!("{other:?}"),
+    }
+}
+
+fn is_null_or_missing(v: ValueRef<'_>) -> bool {
+    matches!(v, ValueRef::Null | ValueRef::Missing)
+}
+
+fn is_missing(v: ValueRef<'_>) -> bool {
+    matches!(v, ValueRef::Missing)
+}
+
+/// The registers an instruction reads as values of any type, and the one it writes: where
+/// an Ion variant is decoded before the instruction runs.
+struct ValueOperands {
+    regs: [u16; 3],
+    len: usize,
+    dst: Option<u16>,
+}
+
+impl ValueOperands {
+    fn of(inst: &Inst) -> Option<Self> {
+        let ops = |dst: Option<u16>, regs: &[u16]| {
+            let mut ops = ValueOperands {
+                regs: [0; 3],
+                len: regs.len(),
+                dst,
+            };
+            ops.regs[..regs.len()].copy_from_slice(regs);
+            Some(ops)
+        };
+        match *inst {
+            Inst::AddDynamic { dst, a, b, .. }
+            | Inst::SubDynamic { dst, a, b, .. }
+            | Inst::ModDynamic { dst, a, b, .. }
+            | Inst::MulDynamic { dst, a, b, .. }
+            | Inst::DivDynamic { dst, a, b, .. }
+            | Inst::ExpDynamic { dst, a, b, .. }
+            | Inst::EqDynamic { dst, a, b, .. }
+            | Inst::GtDynamic { dst, a, b, .. }
+            | Inst::LtDynamic { dst, a, b, .. }
+            | Inst::ConcatDynamic { dst, a, b }
+            | Inst::AndBool { dst, a, b }
+            | Inst::OrBool { dst, a, b } => ops(Some(dst), &[a, b]),
+            Inst::InDynamic {
+                dst,
+                value,
+                collection,
+            } => ops(Some(dst), &[value, collection]),
+            Inst::NotBool { dst, src }
+            | Inst::NegNum { dst, src }
+            | Inst::MissingToNull { dst, src }
+            | Inst::CollToScalar { dst, src }
+            | Inst::IsNull { dst, src }
+            | Inst::IsMissing { dst, src }
+            | Inst::CoerceToTuple { dst, src, .. } => ops(Some(dst), &[src]),
+            Inst::Cast { dst, from, .. } => ops(Some(dst), &[from]),
+            Inst::GetField { dst, base, .. } => ops(Some(dst), &[base]),
+            Inst::LikeMatch { dst, value, .. } => ops(Some(dst), &[value]),
+            Inst::LikeDynamicMatch {
+                dst,
+                value,
+                pattern,
+                escape,
+            } => ops(Some(dst), &[value, pattern, escape]),
+            // SELECT * (strict) checks its row in place: the row is the decoded value
+            Inst::AssertTuple { src } => ops(Some(src), &[src]),
+            _ => None,
+        }
+    }
+
+    fn regs(&self) -> &[u16] {
+        &self.regs[..self.len]
     }
 }
 

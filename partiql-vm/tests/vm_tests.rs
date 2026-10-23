@@ -359,6 +359,15 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             }
             Value::Bag(Box::new(Bag::from(items)))
         }
+        ValueType::Variant => {
+            use partiql_extension_ion::boxed_ion::BoxedIonType;
+            use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
+            let (bytes, _type_name) = view.get_variant().unwrap();
+            let type_tag = BoxedIonType::default().to_dyn_type_tag();
+            let variant =
+                partiql_value::Variant::new(bytes.to_vec(), type_tag).expect("variant decode");
+            Value::from(variant)
+        }
     }
 }
 
@@ -371,6 +380,15 @@ fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
 /// Execute `query` once per entry of `runs` on the same VM, each run reading at most that
 /// many rows (all when `None`).
 fn eval_vm_runs(query: &str, tables: &[(&str, &str)], runs: &[Option<usize>]) -> Vec<Value> {
+    eval_vm_mode(query, tables, runs, EvaluationMode::Permissive)
+}
+
+fn eval_vm_mode(
+    query: &str,
+    tables: &[(&str, &str)],
+    runs: &[Option<usize>],
+    mode: EvaluationMode,
+) -> Vec<Value> {
     // PartiqlCatalog for name resolution during lowering
     let mut catalog = PartiqlCatalog::default();
     for (name, _) in tables.iter() {
@@ -405,7 +423,7 @@ fn eval_vm_runs(query: &str, tables: &[(&str, &str)], runs: &[Option<usize>]) ->
     // Compile
     let mut context = CompilationContext::new();
     let catalog_id = context.add_catalog("default", comp_catalog);
-    let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
+    let mut compiler = PlanCompiler::new(&context, mode);
     let compiled = compiler.compile(&logical).expect("compile failed");
 
     // Prepare execution catalog
@@ -702,6 +720,35 @@ fn correlated_subquery() {
             ),
         ],
         "$bag::[{a: 1, bs: $bag::[\"p\", \"r\"]}, {a: 2, bs: $bag::[\"q\"]}]",
+    );
+}
+
+/// Strict `SELECT *` of an Ion struct literal is the struct's fields, not the literal.
+#[test]
+fn strict_select_star_of_ion_struct() {
+    let query = "SELECT * FROM << `{a: \"hello\", b: 1}` >> x";
+    let rows = eval_vm_mode(query, &[], &[None], EvaluationMode::Strict);
+    assert_eq!(rows, [parse_ion("$bag::[{a: \"hello\", b: 1}]")]);
+    // Not a struct: strict mode rejects it
+    let query = "SELECT * FROM << `1` >> x";
+    let parsed = Parser::default().parse(query).expect("parse failed");
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
+    let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+    let logical = planner.lower(&parsed).expect("lower failed");
+    let context = CompilationContext::new();
+    let compiled = PlanCompiler::new(&context, EvaluationMode::Strict)
+        .compile(&logical)
+        .expect("compile failed");
+    let mut vm = PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
+    let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
+    let err = iter
+        .next()
+        .expect("a row or an error")
+        .err()
+        .expect("an error");
+    assert!(
+        format!("{err:?}").contains("SELECT * requires tuple value"),
+        "{err:?}"
     );
 }
 
