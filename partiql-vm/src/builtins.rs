@@ -1,13 +1,17 @@
+use crate::aggregate;
 use crate::arena::Arena;
 use crate::error::{EngineError, Result};
-use crate::expr::UdfRegistry;
+use crate::expr::{AggFunc, UdfRegistry};
 use crate::value::ValueRef;
 
-pub(crate) struct BuiltinFunctions;
+pub(crate) struct BuiltinFunctions {
+    /// Strict mode: an argument a function can't take is an error, rather than MISSING.
+    strict: bool,
+}
 
 impl BuiltinFunctions {
-    pub fn new() -> Self {
-        BuiltinFunctions
+    pub fn new(strict: bool) -> Self {
+        BuiltinFunctions { strict }
     }
 }
 
@@ -34,14 +38,13 @@ impl UdfRegistry for BuiltinFunctions {
             "BTrim" => builtin_btrim(args),
             "RTrim" => builtin_rtrim(args),
             "Exists" => builtin_exists(args),
-            "CollCount(All)" | "CollCount(Distinct)" => builtin_coll_count(args),
-            "CollSum(All)" | "CollSum(Distinct)" => builtin_coll_sum(args),
-            "CollAvg(All)" | "CollAvg(Distinct)" => builtin_coll_avg(args),
-            "CollMin(All)" | "CollMin(Distinct)" => builtin_coll_min(args),
-            "CollMax(All)" | "CollMax(Distinct)" => builtin_coll_max(args),
-            "CollAny(All)" | "CollAny(Distinct)" => builtin_coll_any(args),
-            "CollEvery(All)" | "CollEvery(Distinct)" => builtin_coll_every(args),
-            _ => Err(EngineError::UdfNotFound(name.to_string())),
+            _ => match coll_function(name) {
+                Some((func, distinct)) => {
+                    let collection = args.first().copied().unwrap_or(ValueRef::Missing);
+                    aggregate::over_collection(func, distinct, collection, self.strict)
+                }
+                None => Err(EngineError::UdfNotFound(name.to_string())),
+            },
         }
     }
 }
@@ -290,188 +293,23 @@ fn builtin_exists<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
     }
 }
 
-fn get_collection_items<'a>(args: &[ValueRef<'a>]) -> Option<&'a [ValueRef<'a>]> {
-    match args.first() {
-        Some(ValueRef::List(items)) => Some(items),
-        Some(ValueRef::Bag(items)) => Some(items),
+/// The aggregate a `COLL_*` function name (as the planner calls it) computes, and whether
+/// over distinct values.
+fn coll_function(name: &str) -> Option<(AggFunc, bool)> {
+    let (func, quantifier) = name.strip_suffix(')')?.split_once('(')?;
+    let func = match func {
+        "CollCount" => AggFunc::Count,
+        "CollSum" => AggFunc::Sum,
+        "CollAvg" => AggFunc::Avg,
+        "CollMin" => AggFunc::Min,
+        "CollMax" => AggFunc::Max,
+        "CollAny" => AggFunc::Any,
+        "CollEvery" => AggFunc::Every,
+        _ => return None,
+    };
+    match quantifier {
+        "All" => Some((func, false)),
+        "Distinct" => Some((func, true)),
         _ => None,
-    }
-}
-
-fn builtin_coll_count<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    match args.first() {
-        Some(ValueRef::Null) => Ok(ValueRef::Null),
-        Some(ValueRef::Missing) => Ok(ValueRef::Missing),
-        _ => {
-            let items = get_collection_items(args);
-            match items {
-                Some(items) => {
-                    let count = items
-                        .iter()
-                        .filter(|v| !matches!(v, ValueRef::Null | ValueRef::Missing))
-                        .count();
-                    Ok(ValueRef::I64(count as i64))
-                }
-                None => Ok(ValueRef::Missing),
-            }
-        }
-    }
-}
-
-fn builtin_coll_sum<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    if items.is_empty() {
-        return Ok(ValueRef::Null);
-    }
-    let mut sum_i64: i64 = 0;
-    let mut sum_f64: f64 = 0.0;
-    let mut is_float = false;
-    let mut has_value = false;
-    for item in items {
-        match item {
-            ValueRef::I64(n) => {
-                sum_i64 += n;
-                sum_f64 += *n as f64;
-                has_value = true;
-            }
-            ValueRef::F64(n) => {
-                sum_f64 += n;
-                is_float = true;
-                has_value = true;
-            }
-            ValueRef::Null | ValueRef::Missing => {}
-            _ => {}
-        }
-    }
-    if !has_value {
-        return Ok(ValueRef::Null);
-    }
-    if is_float {
-        Ok(ValueRef::F64(sum_f64))
-    } else {
-        Ok(ValueRef::I64(sum_i64))
-    }
-}
-
-fn builtin_coll_avg<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    if items.is_empty() {
-        return Ok(ValueRef::Null);
-    }
-    let mut sum: f64 = 0.0;
-    let mut count: i64 = 0;
-    for item in items {
-        match item {
-            ValueRef::I64(n) => {
-                sum += *n as f64;
-                count += 1;
-            }
-            ValueRef::F64(n) => {
-                sum += n;
-                count += 1;
-            }
-            ValueRef::Null | ValueRef::Missing => {}
-            _ => {}
-        }
-    }
-    if count == 0 {
-        return Ok(ValueRef::Null);
-    }
-    Ok(ValueRef::F64(sum / count as f64))
-}
-
-fn builtin_coll_min<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    let mut min: Option<ValueRef<'a>> = None;
-    for item in items {
-        match item {
-            ValueRef::Null | ValueRef::Missing => {}
-            val => match min {
-                None => min = Some(*val),
-                Some(current) => {
-                    let less = match (current, val) {
-                        (ValueRef::I64(a), ValueRef::I64(b)) => *b < a,
-                        (ValueRef::F64(a), ValueRef::F64(b)) => *b < a,
-                        (ValueRef::Str(a), ValueRef::Str(b)) => *b < a,
-                        _ => false,
-                    };
-                    if less {
-                        min = Some(*val);
-                    }
-                }
-            },
-        }
-    }
-    Ok(min.unwrap_or(ValueRef::Null))
-}
-
-fn builtin_coll_max<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    let mut max: Option<ValueRef<'a>> = None;
-    for item in items {
-        match item {
-            ValueRef::Null | ValueRef::Missing => {}
-            val => match max {
-                None => max = Some(*val),
-                Some(current) => {
-                    let greater = match (current, val) {
-                        (ValueRef::I64(a), ValueRef::I64(b)) => *b > a,
-                        (ValueRef::F64(a), ValueRef::F64(b)) => *b > a,
-                        (ValueRef::Str(a), ValueRef::Str(b)) => *b > a,
-                        _ => false,
-                    };
-                    if greater {
-                        max = Some(*val);
-                    }
-                }
-            },
-        }
-    }
-    Ok(max.unwrap_or(ValueRef::Null))
-}
-
-fn builtin_coll_any<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    for item in items {
-        if matches!(item, ValueRef::Bool(true)) {
-            return Ok(ValueRef::Bool(true));
-        }
-    }
-    if items.iter().any(|i| matches!(i, ValueRef::Bool(false))) {
-        Ok(ValueRef::Bool(false))
-    } else {
-        Ok(ValueRef::Null)
-    }
-}
-
-fn builtin_coll_every<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
-    let items = match get_collection_items(args) {
-        Some(i) => i,
-        None => return Ok(ValueRef::Null),
-    };
-    for item in items {
-        if matches!(item, ValueRef::Bool(false)) {
-            return Ok(ValueRef::Bool(false));
-        }
-    }
-    if items.iter().any(|i| matches!(i, ValueRef::Bool(true))) {
-        Ok(ValueRef::Bool(true))
-    } else {
-        Ok(ValueRef::Null)
     }
 }

@@ -1,0 +1,28 @@
+// A table named in a query without FROM is the collection of its rows.
+'''
+  CREATE TABLE nums;
+  INSERT INTO nums SELECT VALUE x FROM << 1, 2, 3, 4 >> x;
+'''
+
+{
+  sql: '''
+    COLL_COUNT(nums)
+  ''',
+  expect: { rows: 4 }
+}
+
+{
+  sql: '''
+    COLL_SUM(nums) + COLL_MAX(nums)
+  ''',
+  expect: { rows: 14 }
+}
+
+// ... under any expression, and whatever the case of its name
+{
+  sql: '''
+    [COALESCE(COLL_COUNT(nums), 0), NULLIF(COLL_COUNT(nums), 2), COLL_COUNT(NUMS) BETWEEN 1 AND 5,
+     nums IS MISSING]
+  ''',
+  expect: { rows: [4, 4, true, false] }
+}

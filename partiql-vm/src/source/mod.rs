@@ -144,6 +144,16 @@ impl DataSourceHandle {
     pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         self.metadata.resolve(field_name)
     }
+
+    /// Whether the object is a collection of rows; see [`DataSourceMetadata::is_collection`].
+    pub fn is_collection(&self) -> bool {
+        self.metadata.is_collection()
+    }
+
+    /// Whether the collection is ordered; see [`DataSourceMetadata::is_ordered`].
+    pub fn is_ordered(&self) -> bool {
+        self.metadata.is_ordered()
+    }
 }
 
 /// Data source backed by an inline collection of owned values.

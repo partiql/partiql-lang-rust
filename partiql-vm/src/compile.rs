@@ -61,6 +61,7 @@ impl<'a> PlanCompiler<'a> {
             expr_scan_ids: query.expr_scan_ids,
             table_fn_scans: query.table_fn_scans,
             sorter_metadata: query.sorters,
+            mode: self.mode,
         })
     }
 }
@@ -249,7 +250,12 @@ impl<'q> Emitter<'q> {
 
     fn emit(mut self) -> Result<Program> {
         match &self.query.root {
-            Root::Expr { cursors, expr, dst } => {
+            Root::Expr {
+                tables,
+                cursors,
+                expr,
+                dst,
+            } => {
                 let halt = self.asm.label();
                 for &cursor_id in cursors {
                     self.asm.push(Inst::OpenCursor { cursor_id });
@@ -260,6 +266,9 @@ impl<'q> Emitter<'q> {
                         },
                         halt,
                     );
+                }
+                for &id in tables {
+                    self.call_subquery(id as usize)?;
                 }
                 self.emit_expr(expr, *dst)?;
                 self.asm.push(Inst::EmitRow);
@@ -815,21 +824,26 @@ impl<'q> Emitter<'q> {
             }
         });
         for id in ids {
-            let id = id as usize;
-            let entry = match self.subqueries[id] {
-                Some(entry) => entry,
-                None => {
-                    let entry = self.emit_subquery(&self.query.subqueries[id])?;
-                    self.subqueries[id] = Some(entry);
-                    entry
-                }
-            };
-            self.asm.gosub(self.query.subqueries[id].ret, entry);
+            self.call_subquery(id as usize)?;
         }
         self.asm.b.subqueries_run = true;
         let emitted = self.asm.b.emit_expr(expr, dst);
         self.asm.b.subqueries_run = false;
         emitted
+    }
+
+    /// Run subquery `id`: a call of its subroutine, emitted the first time.
+    fn call_subquery(&mut self, id: usize) -> Result<()> {
+        let entry = match self.subqueries[id] {
+            Some(entry) => entry,
+            None => {
+                let entry = self.emit_subquery(&self.query.subqueries[id])?;
+                self.subqueries[id] = Some(entry);
+                entry
+            }
+        };
+        self.asm.gosub(self.query.subqueries[id].ret, entry);
+        Ok(())
     }
 
     /// A subquery, as a subroutine of its own: emitted once however many places read it
