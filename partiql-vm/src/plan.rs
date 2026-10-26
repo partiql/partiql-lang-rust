@@ -859,8 +859,11 @@ impl<'vm> QueryIterator<'vm> {
                     let bank = &self.vm.banks[sorter.bank_id];
                     let start = *src_reg as usize;
                     let count = *reg_count as usize;
-                    let (group_keys, decoded) =
-                        (sorter.group_key_fields(), sorter.decoded_fields());
+                    let (group_keys, order_keys, decoded) = (
+                        sorter.group_key_fields(),
+                        sorter.order_key_fields(),
+                        sorter.decoded_fields(),
+                    );
                     // Safety: sorter bank outlives the sorter records.
                     // Same contract as the VM's register/arena relationship.
                     let copy = |value: ValueRef<'_>| unsafe {
@@ -872,20 +875,22 @@ impl<'vm> QueryIterator<'vm> {
                     let mut keys = Vec::with_capacity(group_keys);
                     for (i, reg) in regs[start..start + count].iter().enumerate() {
                         // A GROUP BY key is grouped by its `eqg` key (made in scratch, then
-                        // copied); a value read as one has its variant decoded, unless the VM
-                        // has no type for it
+                        // copied); an ORDER BY key has its variants decoded however nested,
+                        // and another value read as one its own; the VM has no type for some
                         if i < group_keys {
                             match crate::compare::eqg_key(*reg, &self.vm.banks[1]) {
                                 Ok(key) => keys.push(copy(key)),
                                 Err(e) => return Some(Err(e)),
                             }
                         }
-                        let value = match i < decoded {
-                            true => match variant::lower(*reg, &self.vm.banks[1]) {
-                                Ok(value) => value,
-                                Err(e) => return Some(Err(e)),
-                            },
-                            false => *reg,
+                        let value = match (i < order_keys, i < decoded) {
+                            (true, _) => variant::lower_deep(*reg, &self.vm.banks[1]),
+                            (false, true) => variant::lower(*reg, &self.vm.banks[1]),
+                            (false, false) => Ok(*reg),
+                        };
+                        let value = match value {
+                            Ok(value) => value,
+                            Err(e) => return Some(Err(e)),
                         };
                         fields.push(copy(value));
                     }

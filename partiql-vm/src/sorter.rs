@@ -49,6 +49,15 @@ impl Sorter {
         }
     }
 
+    /// How many of a record's leading fields are ORDER BY keys, compared as the values they
+    /// hold however nested, so that their Ion variants are decoded all the way down.
+    pub fn order_key_fields(&self) -> usize {
+        match &self.keys {
+            SortKeys::Group(_) => 0,
+            SortKeys::Order(orders) => orders.len(),
+        }
+    }
+
     /// How many of a record's leading fields are read as values (keys, aggregate inputs),
     /// so that an Ion variant in them is decoded on insert: all of GROUP BY's, ORDER BY's
     /// keys but not its payload, which is copied back to the rows unchanged.

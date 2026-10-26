@@ -29,6 +29,55 @@ pub(crate) fn lower<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRe
     Ok(decode(&element, arena).unwrap_or(value))
 }
 
+/// `value` with every variant in it decoded into `arena`, however deeply nested (as for an
+/// ORDER BY key, compared as the values it holds). A collection is copied only when
+/// something in it decodes.
+pub(crate) fn lower_deep<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRef<'a>> {
+    let lower_all = |items: &[ValueRef<'a>]| -> Result<Option<Vec<ValueRef<'a>>>> {
+        if !items.iter().any(holds_variant) {
+            return Ok(None);
+        }
+        items
+            .iter()
+            .map(|item| lower_deep(*item, arena))
+            .collect::<Result<_>>()
+            .map(Some)
+    };
+    Ok(match lower(value, arena)? {
+        value @ ValueRef::List(items) => match lower_all(items)? {
+            Some(items) => ValueRef::List(arena.alloc_slice(&items)),
+            None => value,
+        },
+        value @ ValueRef::Bag(items) => match lower_all(items)? {
+            Some(items) => ValueRef::Bag(arena.alloc_slice(&items)),
+            None => value,
+        },
+        ValueRef::Tuple(tuple) if tuple.fields.iter().any(|f| holds_variant(&f.value)) => {
+            let mut fields = Vec::with_capacity(tuple.fields.len());
+            for field in tuple.fields {
+                fields.push(TupleField {
+                    name: field.name,
+                    value: lower_deep(field.value, arena)?,
+                });
+            }
+            ValueRef::Tuple(arena.alloc_tuple_ref(TupleRef {
+                fields: arena.alloc_slice(&fields),
+            }))
+        }
+        value => value,
+    })
+}
+
+/// Whether `value` is or holds a variant.
+fn holds_variant(value: &ValueRef<'_>) -> bool {
+    match value {
+        ValueRef::Variant(..) => true,
+        ValueRef::List(items) | ValueRef::Bag(items) => items.iter().any(holds_variant),
+        ValueRef::Tuple(tuple) => tuple.fields.iter().any(|f| holds_variant(&f.value)),
+        _ => false,
+    }
+}
+
 /// The canonical text of the Ion value in `bytes`, without its annotations: the same for
 /// every way of writing one value (` 2000-01-01T00:00+00:00` and `2000-01-01T00:00Z`).
 pub(crate) fn canonical<'a>(bytes: &[u8], arena: &'a Arena) -> Result<&'a [u8]> {
