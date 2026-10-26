@@ -154,3 +154,96 @@
     { l: { a: 2 }, c: 2 }
   ]
 }
+
+// SUM and AVG widen mixed numbers (an int to the other operand's type), AVG of ints is a
+// decimal, and MIN and MAX order across types
+{
+  sql: '''
+    SELECT VALUE [SUM(x), MIN(x), MAX(x), COUNT(x)]
+    FROM << 1, 2.5, 3 >> x
+  ''',
+  expect: $bag::[
+    [6.5, 1, 3, 3]
+  ]
+}
+
+{
+  sql: '''
+    SELECT VALUE [AVG(x), MIN(x), MAX(x)]
+    FROM << 1, 2 >> x
+  ''',
+  expect: $bag::[
+    [1.50, 1, 2]
+  ]
+}
+
+// AVG of decimals, by group; of only NULLs, NULL
+{
+  sql: '''
+    SELECT k, AVG(x.p) AS a
+    FROM << {'k': 1, 'p': 1.0}, {'k': 1, 'p': 2.0}, {'k': 1, 'p': 3.0}, {'k': 2, 'p': NULL} >> x
+    GROUP BY x.k AS k
+  ''',
+  expect: $bag::[
+    { k: 1, a: 2.0 },
+    { k: 2, a: null }
+  ]
+}
+
+// An input an aggregate can't take makes it MISSING; COUNT counts every present input, and
+// MIN and MAX take any value
+{
+  sql: '''
+    SELECT VALUE [SUM(x), AVG(x), COUNT(x), MIN(x), MAX(x)]
+    FROM << 1, 'a', NULL, 3 >> x
+  ''',
+  expect: $bag::[
+    [$missing::null, $missing::null, 3, 1, "a"]
+  ]
+}
+
+// MIN and MAX of strings
+{
+  sql: '''
+    SELECT VALUE [MIN(x), MAX(x)]
+    FROM << 'b', 'a', 'c' >> x
+  ''',
+  expect: $bag::[
+    ["a", "c"]
+  ]
+}
+
+// DISTINCT in an aggregate is not supported yet: an error, not a silently wrong result
+{
+  sql: '''
+    SELECT AVG(DISTINCT x) AS a
+    FROM << 1, 1, 2 >> x
+  ''',
+  expect: { error: "DISTINCT" }
+}
+
+// The COLL_ functions share the same rules
+{
+  sql: '''
+    SELECT VALUE [COLL_SUM(<<1, 2.5>>), COLL_AVG([1, 2]), COLL_MIN(<<'b', 'a'>>),
+                  COLL_MAX(<<1, 'b'>>), COLL_COUNT([1, NULL, 'a']), COLL_COUNT(DISTINCT [1, 1, 2]),
+                  COLL_AVG(DISTINCT [1, 1, 1, 3]), COLL_ANY(<<false, true>>),
+                  COLL_EVERY(<<true, false>>)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [3.5, 1.50, "a", "b", 2, 2, 2., true, false]
+  ]
+}
+
+// ... and for an argument that is NULL, MISSING, empty or no collection
+{
+  sql: '''
+    SELECT VALUE [COLL_SUM(NULL), COLL_SUM(MISSING), COLL_SUM(<<>>), COLL_COUNT(<<>>),
+                  COLL_SUM('x'), COLL_SUM(<<1, 'a'>>), COLL_ANY(<<true, 5>>)]
+    FROM << 0 >> d
+  ''',
+  expect: $bag::[
+    [null, $missing::null, null, 0, $missing::null, $missing::null, $missing::null]
+  ]
+}

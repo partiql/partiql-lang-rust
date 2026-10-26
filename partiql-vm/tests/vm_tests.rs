@@ -756,22 +756,40 @@ fn strict_limit_offset_counts() {
         "SELECT VALUE x FROM <<1, 2>> x OFFSET 2.5",
         "SELECT VALUE x FROM <<1, 2>> x OFFSET 1 - 2",
     ] {
-        let parsed = Parser::default().parse(query).expect("parse failed");
-        let catalog = PartiqlCatalog::default().to_shared_catalog();
-        let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
-        let logical = planner.lower(&parsed).expect("lower failed");
-        let context = CompilationContext::new();
-        let compiled = PlanCompiler::new(&context, EvaluationMode::Strict)
-            .compile(&logical)
-            .expect("compile failed");
-        let mut vm =
-            PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
-        let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
-        let err = iter.next().expect("a row or an error").err();
-        assert!(
-            format!("{err:?}").contains("non-negative integer"),
-            "{query}: {err:?}"
-        );
+        let err = strict_error(query);
+        assert!(err.contains("non-negative integer"), "{query}: {err}");
+    }
+}
+
+/// The error a query (over no tables) raises in strict mode, from its first row.
+fn strict_error(query: &str) -> String {
+    let parsed = Parser::default().parse(query).expect("parse failed");
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
+    let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+    let logical = planner.lower(&parsed).expect("lower failed");
+    let context = CompilationContext::new();
+    let compiled = PlanCompiler::new(&context, EvaluationMode::Strict)
+        .compile(&logical)
+        .expect("compile failed");
+    let mut vm = PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
+    let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
+    let err = iter.next().expect("a row or an error").err();
+    format!("{err:?}")
+}
+
+/// In strict mode, an aggregate (SQL or `COLL_*`) over an input it can't take, or a
+/// `COLL_*` function of a value that is no collection, is an error (permissive mode gives
+/// MISSING).
+#[test]
+fn strict_aggregate_inputs() {
+    for query in [
+        "SELECT SUM(x) AS s FROM <<1, 'a'>> x",
+        "SELECT VALUE ANY(x) FROM <<true, 5>> x",
+        "SELECT VALUE COLL_SUM(<<1, 'a'>>) FROM <<0>> d",
+        "SELECT VALUE COLL_COUNT('x') FROM <<0>> d",
+    ] {
+        let err = strict_error(query);
+        assert!(err.contains("TypeError"), "{query}: {err}");
     }
 }
 

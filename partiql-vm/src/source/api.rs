@@ -239,6 +239,19 @@ pub trait DataSourceMetadata: Send + Sync {
     /// Returns `Some(ScanSource)` if the field can be provided, `None` otherwise.
     /// Used by the compiler to determine how to access each required field.
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
+
+    /// Whether the catalog object is a collection of rows (a table), as most are. One that
+    /// is not is a single value, read as its one row: its name means that value, not a
+    /// collection of it, and strict mode rejects it as a FROM source.
+    fn is_collection(&self) -> bool {
+        true
+    }
+
+    /// Whether the collection's rows are in an order (a list rather than a bag), so that
+    /// naming it is a list.
+    fn is_ordered(&self) -> bool {
+        false
+    }
 }
 
 /// Factory for creating a streaming DataSource from evaluated arguments.

@@ -54,9 +54,11 @@ pub(crate) struct Query {
 }
 
 pub(crate) enum Root {
-    /// A query without FROM: read the one row of each catalog object it names (`cursors`),
-    /// then evaluate `expr` into `dst`.
+    /// A query without FROM: collect the rows of each catalog table it names (each a
+    /// subquery, into the register the name reads), read the one row of each single value
+    /// it names (`cursors`), then evaluate `expr` into `dst`.
     Expr {
+        tables: Vec<u32>,
         cursors: Vec<u16>,
         expr: Expr,
         dst: SlotId,
@@ -986,6 +988,16 @@ impl<'a> Lowerer<'a> {
             record_exprs.push(self.lower_expr(expr, resolver)?);
         }
         for agg in &group_by.aggregate_exprs {
+            // DISTINCT changes nothing for MIN, MAX, ANY and EVERY, which a duplicate can't
+            // move. TODO: DISTINCT COUNT, SUM and AVG, with the sorter's duplicate elimination
+            use partiql_logical::AggFunc as F;
+            let duplicates_count = matches!(agg.func, F::AggCount | F::AggSum | F::AggAvg);
+            if agg.setq == partiql_logical::SetQuantifier::Distinct && duplicates_count {
+                return Err(EngineError::UnsupportedExpr(format!(
+                    "{:?}(DISTINCT ...)",
+                    agg.func
+                )));
+            }
             record_exprs.push(self.lower_expr(&agg.expr, resolver)?);
         }
         let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
@@ -1101,15 +1113,16 @@ impl<'a> Lowerer<'a> {
         expr_query: &partiql_logical::ExprQuery,
     ) -> Result<(Root, Shape)> {
         let mut slots = FxHashMap::default();
-        let mut cursors = vec![];
+        let (mut tables, mut cursors) = (vec![], vec![]);
         for db_ref in collect_db_refs(&expr_query.expr) {
             let Some(name) = db_ref.path.first().and_then(binding_name_string) else {
                 continue;
             };
-            if slots.contains_key(&name) {
+            // `t` and `T` name one table
+            if slots.keys().any(|k: &String| k.eq_ignore_ascii_case(&name)) {
                 continue;
             }
-            let Ok((catalog_id, reader_factory)) = self.resolve_catalog_table(db_ref) else {
+            let Ok((catalog_id, reader_factory)) = self.resolve_catalog_table(&db_ref) else {
                 continue;
             };
 
@@ -1125,7 +1138,40 @@ impl<'a> Lowerer<'a> {
             self.scan_metadata
                 .insert(scan_id, ScanMetadata { layout, object_id });
             self.scans.insert(scan_id, ScanKind::Bound);
-            cursors.push(self.add_cursor(scan_id, slot)?);
+            if !reader_factory.is_collection() {
+                cursors.push(self.add_cursor(scan_id, slot)?);
+                slots.insert(name, slot);
+                continue;
+            }
+            // A table's name is the collection of its rows (`COLL_COUNT(t)`), collected like
+            // an uncorrelated `(SELECT VALUE r FROM t r)` into the register the name reads
+            let row = self.alloc_reg()?;
+            let scan = Op::Scan(ScanLoop {
+                cursor: self.add_cursor(scan_id, row)?,
+                open: Open::Bound,
+                window: row..row + 1,
+                whole_row: true,
+            });
+            let sorter = count_u16(self.sorters.len(), "subqueries")?;
+            self.sorters.push(SorterMetadata {
+                keys: SortKeys::Group(0),
+            });
+            tables.push(
+                u32::try_from(self.subqueries.len())
+                    .map_err(|_| EngineError::TooLarge("subqueries"))?,
+            );
+            let (once, ret) = (self.alloc_reg()?, self.alloc_reg()?);
+            self.subqueries.push(Subquery {
+                input: scan,
+                sorter,
+                row: vec![row],
+                record: row,
+                fields: None,
+                ordered: reader_factory.is_ordered(),
+                dst: slot,
+                once: Some(once),
+                ret,
+            });
             slots.insert(name, slot);
         }
 
@@ -1137,7 +1183,15 @@ impl<'a> Lowerer<'a> {
         let expr = self.lower_expr(&expr_query.expr, &resolver)?;
         let dst = self.alloc_reg()?;
         let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
-        Ok((Root::Expr { cursors, expr, dst }, shape))
+        Ok((
+            Root::Expr {
+                tables,
+                cursors,
+                expr,
+                dst,
+            },
+            shape,
+        ))
     }
 
     // -----------------------------------------------------------------------
@@ -1202,6 +1256,11 @@ impl<'a> Lowerer<'a> {
             let scan_id = self.whole_value_scan(ScanKind::Expr { src, unbound });
             return Ok((scan_id, whole_row_binding(scan), 1));
         };
+        if self.mode == EvaluationMode::Strict && !reader_factory.is_collection() {
+            return Err(EngineError::StrictModeViolation(
+                "FROM clause requires collection value".to_string(),
+            ));
+        }
         let table_name = extract_table_name(&scan.expr);
         let (binding, layout) =
             pushdown(scan, table_name, ctx, |field| reader_factory.resolve(field));
@@ -1945,16 +2004,21 @@ fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
     }
 }
 
-/// Recursively collect all DBRef nodes from a ValueExpr tree.
-fn collect_db_refs(expr: &ValueExpr) -> Vec<&DBRef> {
+/// The catalog objects `expr` names: a `DBRef`, or a global name (as a planner without the
+/// catalog's schema writes one).
+fn collect_db_refs(expr: &ValueExpr) -> Vec<DBRef> {
     let mut refs = Vec::new();
     collect_db_refs_inner(expr, &mut refs);
     refs
 }
 
-fn collect_db_refs_inner<'a>(expr: &'a ValueExpr, out: &mut Vec<&'a DBRef>) {
+fn collect_db_refs_inner(expr: &ValueExpr, out: &mut Vec<DBRef>) {
     match expr {
-        ValueExpr::DBRef(db_ref) => out.push(db_ref),
+        ValueExpr::DBRef(db_ref) => out.push(db_ref.clone()),
+        ValueExpr::VarRef(name, VarRefType::Global) => out.push(DBRef {
+            catalog: "default".to_string(),
+            path: vec![name.clone()],
+        }),
         ValueExpr::UnExpr(_, inner) => collect_db_refs_inner(inner, out),
         ValueExpr::BinaryExpr(_, lhs, rhs) => {
             collect_db_refs_inner(lhs, out);
@@ -1990,6 +2054,37 @@ fn collect_db_refs_inner<'a>(expr: &'a ValueExpr, out: &mut Vec<&'a DBRef>) {
             for lookup in lookups.iter() {
                 collect_db_refs_inner(lookup, out);
             }
+        }
+        ValueExpr::BetweenExpr(b) => {
+            for e in [&b.value, &b.from, &b.to] {
+                collect_db_refs_inner(e, out);
+            }
+        }
+        ValueExpr::IsTypeExpr(t) => collect_db_refs_inner(&t.expr, out),
+        ValueExpr::NullIfExpr(n) => {
+            collect_db_refs_inner(&n.lhs, out);
+            collect_db_refs_inner(&n.rhs, out);
+        }
+        ValueExpr::CoalesceExpr(c) => {
+            for e in &c.elements {
+                collect_db_refs_inner(e, out);
+            }
+        }
+        ValueExpr::PatternMatchExpr(m) => collect_db_refs_inner(&m.value, out),
+        ValueExpr::SimpleCase(c) => {
+            collect_db_refs_inner(&c.expr, out);
+            for (when, then) in &c.cases {
+                collect_db_refs_inner(when, out);
+                collect_db_refs_inner(then, out);
+            }
+            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
+        }
+        ValueExpr::SearchedCase(c) => {
+            for (when, then) in &c.cases {
+                collect_db_refs_inner(when, out);
+                collect_db_refs_inner(then, out);
+            }
+            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
         }
         _ => {}
     }
