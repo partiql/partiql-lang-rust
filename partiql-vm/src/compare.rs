@@ -3,8 +3,10 @@
 //! - `eqg`, the equivalence that tells values apart for GROUP BY, DISTINCT and the set
 //!   operators (spec section 7.1.1), as a total order and with a matching hash.
 
+use crate::arena::Arena;
+use crate::error::Result;
 use crate::plan::SortOrder;
-use crate::value::{TupleRef, ValueRef};
+use crate::value::{variant, TupleField, TupleRef, ValueRef};
 use rust_decimal::Decimal;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
@@ -57,12 +59,61 @@ fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {
     }
 }
 
-/// `eqg` as a total order: the order GROUP BY sorts its keys in, equal exactly when the
-/// values are `eqg`. Unlike `=`, NULL equals NULL and MISSING equals MISSING (but not
-/// each other); numbers are equal by value whatever their type (`1`, `1.0` and `1e0`), and
-/// NaN equals NaN; a tuple's attributes and a bag's elements compare in any order. A tuple
-/// attribute whose value is MISSING is no attribute. An Ion variant the VM has no type for
-/// (a timestamp) equals only a variant of the same text.
+/// A value as `eqg` compares it: its key. Values are `eqg` exactly when their keys compare
+/// equal under `eqg_cmp`, which reads keys element by element. A key has:
+/// - its Ion variants decoded, annotations dropped; one the VM has no type for (a timestamp)
+///   as the canonical text of its Ion value, so that `2000-01-01T00:00Z` and
+///   ` 2000-01-01T00:00+00:00` are one key;
+/// - each bag's elements sorted, and each tuple's attributes sorted by name then value, leaving
+///   out those whose value is MISSING (which are no attributes).
+///
+/// What differs from `value` is allocated in `arena`.
+pub(crate) fn eqg_key<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRef<'a>> {
+    let keys = |items: &[ValueRef<'a>]| -> Result<Vec<ValueRef<'a>>> {
+        items.iter().map(|item| eqg_key(*item, arena)).collect()
+    };
+    Ok(match variant::lower(value, arena)? {
+        ValueRef::Variant(bytes, type_name) => {
+            ValueRef::Variant(variant::canonical(bytes, arena)?, type_name)
+        }
+        ValueRef::List(items) if items.iter().all(is_key_scalar) => ValueRef::List(items),
+        ValueRef::List(items) => ValueRef::List(arena.alloc_slice(&keys(items)?)),
+        ValueRef::Bag(items) => {
+            let mut items = keys(items)?;
+            items.sort_by(eqg_cmp);
+            ValueRef::Bag(arena.alloc_slice(&items))
+        }
+        ValueRef::Tuple(tuple) => {
+            let mut fields = Vec::with_capacity(tuple.fields.len());
+            for field in tuple.fields {
+                if !matches!(field.value, ValueRef::Missing) {
+                    fields.push(TupleField {
+                        name: field.name,
+                        value: eqg_key(field.value, arena)?,
+                    });
+                }
+            }
+            fields.sort_by(|x, y| x.name.cmp(y.name).then_with(|| eqg_cmp(&x.value, &y.value)));
+            ValueRef::Tuple(arena.alloc_tuple_ref(TupleRef {
+                fields: arena.alloc_slice(&fields),
+            }))
+        }
+        value => value,
+    })
+}
+
+/// A value that is its own key: neither a collection nor a variant.
+fn is_key_scalar(value: &ValueRef<'_>) -> bool {
+    !matches!(
+        value,
+        ValueRef::List(_) | ValueRef::Bag(_) | ValueRef::Tuple(_) | ValueRef::Variant(..)
+    )
+}
+
+/// `eqg` as a total order of keys (`eqg_key`): the order GROUP BY sorts its keys in, equal
+/// exactly when the values are `eqg`. Unlike `=`, NULL equals NULL and MISSING equals MISSING
+/// (but not each other); numbers are equal by value whatever their type (`1`, `1.0` and
+/// `1e0`), and NaN equals NaN; a tuple's attributes and a bag's elements compare in any order.
 pub(crate) fn eqg_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
     match (a, b) {
         (ValueRef::Missing, ValueRef::Missing) | (ValueRef::Null, ValueRef::Null) => {
@@ -71,18 +122,16 @@ pub(crate) fn eqg_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
         (ValueRef::Bool(a), ValueRef::Bool(b)) => a.cmp(b),
         (ValueRef::Str(a), ValueRef::Str(b)) => a.cmp(b),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a.cmp(b),
-        (ValueRef::List(a), ValueRef::List(b)) => cmp_seq(a, b, &eqg_cmp),
-        (ValueRef::Bag(a), ValueRef::Bag(b)) => {
-            cmp_seq(&sorted_bag(a, &eqg_cmp), &sorted_bag(b, &eqg_cmp), &eqg_cmp)
+        (ValueRef::List(a), ValueRef::List(b)) | (ValueRef::Bag(a), ValueRef::Bag(b)) => {
+            cmp_seq(a, b, &eqg_cmp)
         }
-        (ValueRef::Tuple(a), ValueRef::Tuple(b)) => {
-            let (a, b) = (present_fields(a), present_fields(b));
-            a.iter()
-                .zip(&b)
-                .map(|((xn, xv), (yn, yv))| xn.cmp(yn).then_with(|| eqg_cmp(xv, yv)))
-                .find(|ord| ord.is_ne())
-                .unwrap_or_else(|| a.len().cmp(&b.len()))
-        }
+        (ValueRef::Tuple(a), ValueRef::Tuple(b)) => a
+            .fields
+            .iter()
+            .zip(b.fields)
+            .map(|(x, y)| x.name.cmp(y.name).then_with(|| eqg_cmp(&x.value, &y.value)))
+            .find(|ord| ord.is_ne())
+            .unwrap_or_else(|| a.fields.len().cmp(&b.fields.len())),
         (ValueRef::Variant(a, a_type), ValueRef::Variant(b, b_type)) => {
             (a_type, a).cmp(&(b_type, b))
         }
@@ -93,34 +142,34 @@ pub(crate) fn eqg_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
     }
 }
 
-/// Whether `a` and `b` are `eqg`.
-pub(crate) fn eqg(a: &ValueRef<'_>, b: &ValueRef<'_>) -> bool {
-    eqg_cmp(a, b).is_eq()
-}
-
-/// Whether two rows of values are `eqg`, value by value.
+/// Whether two rows of keys are `eqg`, key by key.
 pub(crate) fn eqg_rows(a: &[ValueRef<'_>], b: &[ValueRef<'_>]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| eqg(x, y))
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| eqg_cmp(x, y).is_eq())
 }
 
 /// `items` without duplicates under `eqg`, each first occurrence in order (for
-/// `COLL_*(DISTINCT ...)`).
-pub(crate) fn distinct<'a>(items: &[ValueRef<'a>]) -> Vec<ValueRef<'a>> {
+/// `COLL_*(DISTINCT ...)`). The keys are made in `arena`.
+pub(crate) fn distinct<'a>(items: &[ValueRef<'a>], arena: &'a Arena) -> Result<Vec<ValueRef<'a>>> {
     let hasher = EqgHasher::new();
     let mut seen: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
-    let mut kept: Vec<ValueRef<'a>> = Vec::new();
+    let (mut kept, mut kept_keys) = (Vec::new(), Vec::new());
     for item in items {
-        let indexes = seen.entry(hasher.hash(item)).or_default();
-        if !indexes.iter().any(|&i| eqg(&kept[i], item)) {
+        let key = eqg_key(*item, arena)?;
+        let indexes = seen.entry(hasher.hash(&key)).or_default();
+        if !indexes
+            .iter()
+            .any(|&i| eqg_cmp(&kept_keys[i], &key).is_eq())
+        {
             indexes.push(kept.len());
             kept.push(*item);
+            kept_keys.push(key);
         }
     }
-    kept
+    Ok(kept)
 }
 
-/// A hash of values consistent with `eqg`: `eqg` values hash alike. It is keyed afresh for
-/// each hasher, so a query's data can't be chosen to make its values collide.
+/// A hash of keys (`eqg_key`) consistent with `eqg`: `eqg` values hash alike. It is keyed
+/// afresh for each hasher, so a query's data can't be chosen to make its values collide.
 pub(crate) struct EqgHasher {
     keys: RandomState,
 }
@@ -132,80 +181,67 @@ impl EqgHasher {
         }
     }
 
-    pub(crate) fn hash(&self, value: &ValueRef<'_>) -> u64 {
+    pub(crate) fn hash(&self, key: &ValueRef<'_>) -> u64 {
         let mut state = self.keys.build_hasher();
-        self.write(value, &mut state);
+        write_key(key, &mut state);
         state.finish()
     }
 
-    /// The hash of a row of values, in order.
+    /// The hash of a row of keys, in order.
     pub(crate) fn hash_row(&self, row: &[ValueRef<'_>]) -> u64 {
         let mut state = self.keys.build_hasher();
-        for value in row {
-            self.write(value, &mut state);
+        for key in row {
+            write_key(key, &mut state);
         }
         state.finish()
     }
+}
 
-    fn write(&self, value: &ValueRef<'_>, state: &mut impl Hasher) {
-        match value {
-            ValueRef::Missing => state.write_u8(0),
-            ValueRef::Null => state.write_u8(1),
-            ValueRef::Bool(b) => {
-                state.write_u8(2);
-                b.hash(state);
+fn write_key(key: &ValueRef<'_>, state: &mut impl Hasher) {
+    match key {
+        ValueRef::Missing => state.write_u8(0),
+        ValueRef::Null => state.write_u8(1),
+        ValueRef::Bool(b) => {
+            state.write_u8(2);
+            b.hash(state);
+        }
+        ValueRef::I64(_) | ValueRef::F64(_) | ValueRef::Decimal(_) => {
+            state.write_u8(3);
+            let number = Number::of(key).expect("a number");
+            number.canonical().hash(state);
+        }
+        ValueRef::Str(s) => {
+            state.write_u8(4);
+            s.hash(state);
+        }
+        ValueRef::Bytes(b) => {
+            state.write_u8(5);
+            b.hash(state);
+        }
+        // A key's bags and tuples are sorted, so they hash in order like lists
+        ValueRef::List(items) | ValueRef::Bag(items) => {
+            state.write_u8(if matches!(key, ValueRef::List(_)) {
+                6
+            } else {
+                7
+            });
+            state.write_usize(items.len());
+            for item in *items {
+                write_key(item, state);
             }
-            ValueRef::I64(_) | ValueRef::F64(_) | ValueRef::Decimal(_) => {
-                state.write_u8(3);
-                let number = Number::of(value).expect("a number");
-                number.canonical().hash(state);
+        }
+        ValueRef::Tuple(tuple) => {
+            state.write_u8(8);
+            state.write_usize(tuple.fields.len());
+            for field in tuple.fields {
+                field.name.hash(state);
+                write_key(&field.value, state);
             }
-            ValueRef::Str(s) => {
-                state.write_u8(4);
-                s.hash(state);
-            }
-            ValueRef::Bytes(b) => {
-                state.write_u8(5);
-                b.hash(state);
-            }
-            ValueRef::List(items) => {
-                state.write_u8(6);
-                state.write_usize(items.len());
-                for item in *items {
-                    self.write(item, state);
-                }
-            }
-            // A bag's elements and a tuple's attributes, in any order: a sum of their hashes
-            ValueRef::Bag(items) => {
-                state.write_u8(7);
-                state.write_usize(items.len());
-                let sum = items
-                    .iter()
-                    .fold(0u64, |sum, item| sum.wrapping_add(self.hash(item)));
-                state.write_u64(sum);
-            }
-            ValueRef::Tuple(tuple) => {
-                state.write_u8(8);
-                let mut len = 0;
-                let mut sum = 0u64;
-                for field in tuple.fields {
-                    if matches!(field.value, ValueRef::Missing) {
-                        continue;
-                    }
-                    let mut field_state = self.keys.build_hasher();
-                    field.name.hash(&mut field_state);
-                    self.write(&field.value, &mut field_state);
-                    sum = sum.wrapping_add(field_state.finish());
-                    len += 1;
-                }
-                state.write_usize(len);
-                state.write_u64(sum);
-            }
-            ValueRef::Variant(bytes, type_name) => {
-                state.write_u8(9);
-                type_name.hash(state);
-                bytes.hash(state);
-            }
+        }
+        ValueRef::Variant(bytes, type_name) => {
+            state.write_u8(9);
+            type_name.hash(state);
+            bytes.hash(state);
         }
     }
 }
@@ -257,18 +293,6 @@ fn sorted_bag<'a>(bag: &[ValueRef<'a>], canon: Cmp<'_>) -> Vec<ValueRef<'a>> {
 fn sorted_fields<'a>(tuple: &TupleRef<'a>, canon: Cmp<'_>) -> Vec<(&'a str, ValueRef<'a>)> {
     let mut fields: Vec<_> = tuple.fields.iter().map(|f| (f.name, f.value)).collect();
     fields.sort_by(|(xn, xv), (yn, yv)| xn.cmp(yn).then_with(|| canon(xv, yv)));
-    fields
-}
-
-/// A tuple's attributes other than those whose value is MISSING, sorted by name then value.
-fn present_fields<'a>(tuple: &TupleRef<'a>) -> Vec<(&'a str, ValueRef<'a>)> {
-    let mut fields: Vec<_> = tuple
-        .fields
-        .iter()
-        .filter(|f| !matches!(f.value, ValueRef::Missing))
-        .map(|f| (f.name, f.value))
-        .collect();
-    fields.sort_by(|(xn, xv), (yn, yv)| xn.cmp(yn).then_with(|| eqg_cmp(xv, yv)));
     fields
 }
 
@@ -599,6 +623,19 @@ mod tests {
         order_cmp(a, b, true)
     }
 
+    fn keys<'a>(values: &[ValueRef<'a>], arena: &'a Arena) -> Vec<ValueRef<'a>> {
+        values
+            .iter()
+            .map(|v| eqg_key(*v, arena).expect("valid Ion"))
+            .collect()
+    }
+
+    fn eqg(a: &ValueRef<'_>, b: &ValueRef<'_>) -> bool {
+        let arena = Arena::default();
+        let (a, b) = (eqg_key(*a, &arena).unwrap(), eqg_key(*b, &arena).unwrap());
+        eqg_cmp(&a, &b).is_eq()
+    }
+
     #[test]
     fn number_order_is_total() {
         let v = numbers();
@@ -641,7 +678,7 @@ mod tests {
     #[test]
     fn eqg_order_is_total() {
         let arena = Arena::default();
-        let v = values(&arena);
+        let v = keys(&values(&arena), &arena);
         for a in &v {
             for b in &v {
                 assert_eq!(eqg_cmp(a, b), eqg_cmp(b, a).reverse(), "{a:?} vs {b:?}");
@@ -657,11 +694,11 @@ mod tests {
     #[test]
     fn eqg_values_hash_alike() {
         let arena = Arena::default();
-        let v = values(&arena);
+        let v = keys(&values(&arena), &arena);
         let hasher = EqgHasher::new();
         for a in &v {
             for b in &v {
-                if eqg(a, b) {
+                if eqg_cmp(a, b).is_eq() {
                     assert_eq!(hasher.hash(a), hasher.hash(b), "{a:?} eqg {b:?}");
                 }
             }
@@ -697,6 +734,21 @@ mod tests {
         );
         apart(list(&[ValueRef::I64(1)]), bag(&[ValueRef::I64(1)]));
         apart(list(&[ValueRef::Null]), list(&[ValueRef::Missing]));
+        // An Ion value is the value it holds, its annotations dropped; one the VM has no type
+        // for is its Ion value, however written
+        let ion = |text: &'static str| ValueRef::Variant(text.as_bytes(), "Ion");
+        same(ion("a::1"), ValueRef::I64(1));
+        same(
+            ion("[a::1, 2e0]"),
+            list(&[ValueRef::I64(1), ValueRef::I64(2)]),
+        );
+        same(ion("2000-01-01T00:00Z"), ion(" 2000-01-01T00:00+00:00"));
+        same(ion("2000-01-01T00:00Z"), ion("a::2000-01-01T00:00Z"));
+        same(
+            list(&[ion("2000-01-01T00:00Z")]),
+            ion("[2000-01-01T00:00Z]"),
+        );
+        apart(ion("2000-01-01T00:00Z"), ion("2000-01-01T00:01Z"));
     }
 
     #[test]
@@ -711,7 +763,8 @@ mod tests {
             ValueRef::Null,
             ValueRef::Str("a"),
         ];
-        let kept = distinct(&items);
+        let arena = Arena::default();
+        let kept = distinct(&items, &arena).unwrap();
         assert_eq!(
             format!("{kept:?}"),
             r#"[I64(2), F64(1.0), Null, Missing, Str("a")]"#

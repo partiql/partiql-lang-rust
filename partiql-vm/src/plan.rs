@@ -501,6 +501,19 @@ impl PartiQLVM {
         Ok(())
     }
 
+    /// Free every bank, with the sorter records and hash table keys that point into them.
+    fn free_memory(&mut self) {
+        for bank in &self.banks {
+            bank.reset();
+        }
+        for sorter in self.sorters.iter_mut().flatten() {
+            sorter.reset();
+        }
+        for table in &mut self.hash_tables {
+            table.free();
+        }
+    }
+
     /// Forget which sources are open.
     fn reset_cursor_state(&mut self) {
         self.source_open = vec![false; self.compiled.cursors.len()];
@@ -534,9 +547,7 @@ impl PartiQLVM {
         // Reset VM state for a new execution
         self.ip = 0;
         self.halted = false;
-        for bank in &self.banks {
-            bank.reset();
-        }
+        self.free_memory();
         // Reset registers
         for reg in self.registers.iter_mut() {
             *reg = ValueRef::Missing;
@@ -561,9 +572,7 @@ impl PartiQLVM {
         self.reset_cursor_state();
         self.ip = 0;
         self.halted = false;
-        for bank in &self.banks {
-            bank.reset();
-        }
+        self.free_memory();
         Ok(())
     }
 }
@@ -855,11 +864,11 @@ impl<'vm> QueryIterator<'vm> {
                     for (i, reg) in regs[start..start + count].iter().enumerate() {
                         // Safety: sorter bank outlives the sorter records.
                         // Same contract as the VM's register/arena relationship.
-                        // A value read as one has its variants decoded (into scratch, then
-                        // copied), a key's however nested, as keys compare by `eqg`; one
-                        // the VM has no type for stays a variant, copied like any value
+                        // A key is made its `eqg` key, as keys compare by `eqg`; another
+                        // value read as one has its variant decoded (into scratch, then
+                        // copied); one the VM has no type for stays a variant
                         let value = match (i < keys, i < decoded) {
-                            (true, _) => variant::lower_deep(*reg, &self.vm.banks[1]),
+                            (true, _) => crate::compare::eqg_key(*reg, &self.vm.banks[1]),
                             (false, true) => variant::lower(*reg, &self.vm.banks[1]),
                             (false, false) => Ok(*reg),
                         };
@@ -1128,7 +1137,8 @@ impl<'vm> QueryIterator<'vm> {
                 } => {
                     let lhs = regs[*lhs_reg as usize];
                     let rhs = regs[*rhs_reg as usize];
-                    regs[*dst_reg as usize] = ValueRef::Bool(crate::compare::eqg(&lhs, &rhs));
+                    regs[*dst_reg as usize] =
+                        ValueRef::Bool(crate::compare::eqg_cmp(&lhs, &rhs).is_eq());
                 }
 
                 // All scalar instructions delegate to eval_inst
@@ -1173,9 +1183,7 @@ impl Drop for QueryIterator<'_> {
             }
             *open = false;
         }
-        for bank in &self.vm.banks {
-            bank.reset();
-        }
+        self.vm.free_memory();
         self.vm.halted = true;
     }
 }
@@ -1184,15 +1192,14 @@ fn unbound_table(table: u16) -> EngineError {
     EngineError::IllegalState(format!("hash table {table} not bound"))
 }
 
-/// The values of a hash table key, in registers `regs`, with their variants decoded into
-/// `scratch` so that they compare as the values they hold.
+/// The `eqg` keys of the values in registers `regs`, made in `scratch`.
 fn lower_key<'a>(
     registers: &[ValueRef<'a>],
     regs: &[u16],
     scratch: &'a Arena,
 ) -> Result<Vec<ValueRef<'a>>> {
     regs.iter()
-        .map(|&reg| variant::lower_deep(registers[reg as usize], scratch))
+        .map(|&reg| crate::compare::eqg_key(registers[reg as usize], scratch))
         .collect()
 }
 

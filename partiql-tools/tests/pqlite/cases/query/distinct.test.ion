@@ -78,6 +78,29 @@
   ]
 }
 
+// An Ion value the VM has no type for (a timestamp) is told apart by its Ion value, however
+// written
+{
+  sql: '''
+    SELECT DISTINCT VALUE x
+    FROM << `2000-01-01T00:00Z`, ` 2000-01-01T00:00Z`, `2000-01-01T00:00+00:00`, `a::2000-01-01T00:00Z`,
+            `2000-01-01T00:01Z` >> x
+  ''',
+  expect: $bag::[
+    $ion::2000-01-01T00:00Z,
+    $ion::2000-01-01T00:01Z
+  ]
+}
+
+// COLL_* DISTINCT tells elements apart the same way
+{
+  sql: '''
+    [COLL_COUNT(DISTINCT [1, `1`, `a::1.0`, 1.0]), COLL_COUNT(DISTINCT [[1], [`1`], `[1]`]),
+     COLL_SUM(DISTINCT [`1`, 1, 2])]
+  ''',
+  expect: { rows: [1, 1, 3] }
+}
+
 // A subquery's DISTINCT starts again for each row of the query around it
 {
   sql: '''

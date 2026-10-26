@@ -9,9 +9,10 @@ struct Entry {
     count: u64,
 }
 
-/// A multiset of keys (rows of values), told apart by `eqg`: the duplicate elimination
-/// and counting of DISTINCT, DISTINCT aggregates and the set operators. A key is copied
-/// into the table's bank the first time it is added, and lives until the table is reset.
+/// A multiset of keys (rows of `eqg` keys, as `compare::eqg_key` makes them), told apart by
+/// `eqg`: the duplicate elimination and counting of DISTINCT, DISTINCT aggregates and the set
+/// operators. A key is copied into the table's bank the first time it is added, and lives
+/// until the table is reset.
 pub(crate) struct HashTable {
     /// Which bank in the VM the keys live in.
     pub bank_id: usize,
@@ -33,6 +34,11 @@ impl HashTable {
     /// bank with it.
     pub fn reset(&mut self) {
         self.entries.clear();
+    }
+
+    /// Drop every key and the memory that held them, once the query is done.
+    pub fn free(&mut self) {
+        self.entries = FxHashMap::default();
     }
 
     /// Count `key` once more, adding it (as `copy` makes it, in the table's bank) when it is

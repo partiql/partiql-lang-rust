@@ -716,7 +716,8 @@ pub enum Inst {
     },
 
     // === Comparison ===
-    /// Compare two registers for equality (dynamic types). Writes Bool to `dst_reg`.
+    /// Whether two `eqg` keys (GROUP BY's, read from its sorter) are equal. Writes Bool to
+    /// `dst_reg`.
     CompareEq {
         lhs_reg: u16,
         rhs_reg: u16,

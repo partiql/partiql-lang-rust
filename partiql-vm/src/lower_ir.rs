@@ -805,6 +805,10 @@ impl<'a> Lowerer<'a> {
     /// query's rows, or the elements of a value (coerced to a bag as RFC-0007 does).
     fn lower_operand(&mut self, graph: &PlanGraph<'_>, id: OpId, row: SlotId) -> Result<Op> {
         if let BindingsOp::ExprQuery(expr_query) = graph.operator(id)? {
+            // A catalog table streams its rows, as in FROM
+            if let Some(scan) = self.table_operand(&expr_query.expr, row)? {
+                return Ok(scan);
+            }
             let (globals, resolver) = self.lower_globals(&expr_query.expr)?;
             let expr = self.lower_expr(&expr_query.expr, &resolver)?;
             let src = self.alloc_reg()?;
@@ -836,6 +840,41 @@ impl<'a> Lowerer<'a> {
         Ok(Op::Project(Box::new(Project {
             input: lowered.op,
             outputs,
+        })))
+    }
+
+    /// A scan of the catalog table `expr` names, its rows read into `row`, if it names one.
+    fn table_operand(&mut self, expr: &ValueExpr, row: SlotId) -> Result<Option<Op>> {
+        let db_ref = match expr {
+            ValueExpr::DBRef(db_ref) => db_ref.clone(),
+            ValueExpr::VarRef(name, VarRefType::Global) => DBRef {
+                catalog: "default".to_string(),
+                path: vec![name.clone()],
+            },
+            _ => return Ok(None),
+        };
+        let Ok((catalog_id, handle)) = self.resolve_catalog_table(&db_ref) else {
+            return Ok(None);
+        };
+        // A single value is coerced as any other operand's value is
+        if !handle.is_collection() {
+            return Ok(None);
+        }
+        let scan_id = self.alloc_scan_id();
+        let object_id = ObjectId::new(catalog_id, handle.entry_id);
+        self.scan_metadata.insert(
+            scan_id,
+            ScanMetadata {
+                layout: whole_value_layout(),
+                object_id,
+            },
+        );
+        self.scans.insert(scan_id, ScanKind::Bound);
+        Ok(Some(Op::Scan(ScanLoop {
+            cursor: self.add_cursor(scan_id, row)?,
+            open: Open::Bound,
+            window: row..row + 1,
+            whole_row: true,
         })))
     }
 

@@ -9,10 +9,11 @@
 //!   MISSING, or in strict mode is an error.
 //! - With no input, COUNT is 0 and the others are NULL.
 
+use crate::arena::Arena;
 use crate::compare;
 use crate::error::{EngineError, Result};
 use crate::expr::AggFunc;
-use crate::value::ValueRef;
+use crate::value::{variant, ValueRef};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use std::cmp::Ordering;
@@ -114,11 +115,14 @@ pub(crate) fn finish<'a>(
 
 /// A `COLL_*` function over `collection`: NULL for NULL, MISSING for MISSING, and MISSING (or
 /// in strict mode an error) for a value that is no collection.
+///
+/// DISTINCT tells the elements apart by `eqg`, with their keys made in `arena`.
 pub(crate) fn over_collection<'a>(
     func: AggFunc,
     distinct: bool,
     collection: ValueRef<'a>,
     strict: bool,
+    arena: &'a Arena,
 ) -> Result<ValueRef<'a>> {
     let items = match collection {
         ValueRef::List(items) | ValueRef::Bag(items) => items,
@@ -131,16 +135,17 @@ pub(crate) fn over_collection<'a>(
         }
         _ => return Ok(ValueRef::Missing),
     };
-    let distinct_items;
+    // An element that is an Ion value is aggregated as the value it holds
+    let items = items
+        .iter()
+        .map(|item| variant::lower(*item, arena))
+        .collect::<Result<Vec<_>>>()?;
     let items = match distinct {
-        true => {
-            distinct_items = compare::distinct(items);
-            &distinct_items[..]
-        }
+        true => compare::distinct(&items, arena)?,
         false => items,
     };
     let (mut accum, mut count) = (EMPTY, EMPTY);
-    for &item in items {
+    for item in items {
         accum = step(func, accum, item, strict)?;
         count = step(AggFunc::Count, count, item, strict)?;
     }
@@ -207,6 +212,10 @@ fn overflow() -> EngineError {
 mod tests {
     use super::*;
 
+    fn arena() -> &'static Arena {
+        Box::leak(Box::default())
+    }
+
     fn bag(items: &[ValueRef<'static>]) -> ValueRef<'static> {
         ValueRef::Bag(Box::leak(items.to_vec().into_boxed_slice()))
     }
@@ -214,7 +223,7 @@ mod tests {
     fn coll(func: AggFunc, items: &[ValueRef<'static>]) -> String {
         format!(
             "{:?}",
-            over_collection(func, false, bag(items), false).expect("permissive")
+            over_collection(func, false, bag(items), false, arena()).expect("permissive")
         )
     }
 
@@ -231,6 +240,7 @@ mod tests {
             false,
             bag(items),
             false,
+            arena(),
         )
         .unwrap()
         {
@@ -275,14 +285,21 @@ mod tests {
             coll(AggFunc::Any, &[ValueRef::Bool(true), ValueRef::I64(5)]),
             "Missing"
         );
-        let strict = over_collection(AggFunc::Sum, false, bag(&[ValueRef::Str("a")]), true);
+        let strict = over_collection(
+            AggFunc::Sum,
+            false,
+            bag(&[ValueRef::Str("a")]),
+            true,
+            arena(),
+        );
         assert!(strict.is_err());
     }
 
     #[test]
     fn collection_argument() {
-        let f =
-            |v, strict| over_collection(AggFunc::Count, false, v, strict).map(|v| format!("{v:?}"));
+        let f = |v, strict| {
+            over_collection(AggFunc::Count, false, v, strict, arena()).map(|v| format!("{v:?}"))
+        };
         assert_eq!(f(ValueRef::Null, false).unwrap(), "Null");
         assert_eq!(f(ValueRef::Missing, false).unwrap(), "Missing");
         assert_eq!(f(ValueRef::I64(1), false).unwrap(), "Missing");
@@ -293,7 +310,14 @@ mod tests {
     fn distinct() {
         let i = ValueRef::I64;
         let items = bag(&[i(1), i(1), i(3), i(1)]);
-        let avg = over_collection(AggFunc::Avg, true, items, false).unwrap();
+        let avg = over_collection(AggFunc::Avg, true, items, false, arena()).unwrap();
         assert_eq!(format!("{avg:?}"), "Decimal(2)");
+        // Elements are told apart by `eqg`, Ion values as the values they hold
+        let ion = |text: &'static str| ValueRef::Variant(text.as_bytes(), "Ion");
+        let items = bag(&[i(1), ion("1"), ion("a::1.0"), ValueRef::F64(1.0), i(2)]);
+        let count = over_collection(AggFunc::Count, true, items, false, arena()).unwrap();
+        assert_eq!(format!("{count:?}"), "I64(2)");
+        let sum = over_collection(AggFunc::Sum, false, bag(&[ion("1"), i(2)]), false, arena());
+        assert_eq!(format!("{:?}", sum.unwrap()), "I64(3)");
     }
 }

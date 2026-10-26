@@ -41,7 +41,7 @@ impl UdfRegistry for BuiltinFunctions {
             _ => match coll_function(name) {
                 Some((func, distinct)) => {
                     let collection = args.first().copied().unwrap_or(ValueRef::Missing);
-                    aggregate::over_collection(func, distinct, collection, self.strict)
+                    aggregate::over_collection(func, distinct, collection, self.strict, arena)
                 }
                 None => Err(EngineError::UdfNotFound(name.to_string())),
             },
