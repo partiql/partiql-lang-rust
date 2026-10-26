@@ -859,30 +859,40 @@ impl<'vm> QueryIterator<'vm> {
                     let bank = &self.vm.banks[sorter.bank_id];
                     let start = *src_reg as usize;
                     let count = *reg_count as usize;
-                    let (keys, decoded) = (sorter.key_fields(), sorter.decoded_fields());
+                    let (group_keys, decoded) =
+                        (sorter.group_key_fields(), sorter.decoded_fields());
+                    // Safety: sorter bank outlives the sorter records.
+                    // Same contract as the VM's register/arena relationship.
+                    let copy = |value: ValueRef<'_>| unsafe {
+                        std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(
+                            copy_value_ref_to_bank(value, bank),
+                        )
+                    };
                     let mut fields = Vec::with_capacity(count);
+                    let mut keys = Vec::with_capacity(group_keys);
                     for (i, reg) in regs[start..start + count].iter().enumerate() {
-                        // Safety: sorter bank outlives the sorter records.
-                        // Same contract as the VM's register/arena relationship.
-                        // A key is made its `eqg` key, as keys compare by `eqg`; another
-                        // value read as one has its variant decoded (into scratch, then
-                        // copied); one the VM has no type for stays a variant
-                        let value = match (i < keys, i < decoded) {
-                            (true, _) => crate::compare::eqg_key(*reg, &self.vm.banks[1]),
-                            (false, true) => variant::lower(*reg, &self.vm.banks[1]),
-                            (false, false) => Ok(*reg),
+                        // A GROUP BY key is grouped by its `eqg` key (made in scratch, then
+                        // copied); a value read as one has its variant decoded, unless the VM
+                        // has no type for it
+                        if i < group_keys {
+                            match crate::compare::eqg_key(*reg, &self.vm.banks[1]) {
+                                Ok(key) => keys.push(copy(key)),
+                                Err(e) => return Some(Err(e)),
+                            }
+                        }
+                        let value = match i < decoded {
+                            true => match variant::lower(*reg, &self.vm.banks[1]) {
+                                Ok(value) => value,
+                                Err(e) => return Some(Err(e)),
+                            },
+                            false => *reg,
                         };
-                        let value = match value {
-                            Ok(value) => value,
-                            Err(e) => return Some(Err(e)),
-                        };
-                        let copied = copy_value_ref_to_bank(value, bank);
-                        let copied: ValueRef<'static> = unsafe {
-                            std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(copied)
-                        };
-                        fields.push(copied);
+                        fields.push(copy(value));
                     }
-                    sorter.insert(crate::sorter::SorterRecord { fields });
+                    sorter.insert(crate::sorter::SorterRecord {
+                        fields,
+                        group_keys: keys,
+                    });
                 }
 
                 Inst::SorterReset { sorter_id } => {
@@ -1129,16 +1139,17 @@ impl<'vm> QueryIterator<'vm> {
                     regs[*dst as usize] = regs[*src as usize];
                 }
 
-                // === Comparison ===
-                Inst::CompareEq {
-                    lhs_reg,
-                    rhs_reg,
-                    dst_reg,
-                } => {
-                    let lhs = regs[*lhs_reg as usize];
-                    let rhs = regs[*rhs_reg as usize];
-                    regs[*dst_reg as usize] =
-                        ValueRef::Bool(crate::compare::eqg_cmp(&lhs, &rhs).is_eq());
+                Inst::SorterNewGroup { sorter_id, dst } => {
+                    let sorter = match self.vm.sorters.get(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    regs[*dst as usize] = ValueRef::Bool(sorter.new_group());
                 }
 
                 // All scalar instructions delegate to eval_inst

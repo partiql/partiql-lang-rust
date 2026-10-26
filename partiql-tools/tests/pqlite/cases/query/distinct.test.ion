@@ -128,6 +128,19 @@
   ]
 }
 
+// A group's key is its first record's, as written: the attributes and elements of a tuple
+// or bag in their order
+{
+  sql: '''
+    SELECT k AS k, COUNT(*) AS c
+    FROM << {'k': {'b': 1, 'a': <<3, 1>>}}, {'k': {'a': <<1, 3.0>>, 'b': 1}} >> t
+    GROUP BY t.k AS k
+  ''',
+  expect: $bag::[
+    { k: { b: 1, a: $bag::[3, 1] }, c: 2 }
+  ]
+}
+
 // DISTINCT aggregates: each group's distinct inputs, NULL left out; arguments may differ
 {
   sql: '''

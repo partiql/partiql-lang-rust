@@ -622,6 +622,13 @@ pub enum Inst {
         dst_reg: u16,
     },
 
+    /// GROUP BY: write to `dst` whether the current record starts a group (its keys are not
+    /// `eqg` to the previous record's).
+    SorterNewGroup {
+        sorter_id: u16,
+        dst: u16,
+    },
+
     /// Advance to the next record. If exhausted, fall through; otherwise jump to `target`.
     SorterNext {
         sorter_id: u16,
@@ -713,15 +720,6 @@ pub enum Inst {
     Copy {
         dst: u16,
         src: u16,
-    },
-
-    // === Comparison ===
-    /// Whether two `eqg` keys (GROUP BY's, read from its sorter) are equal. Writes Bool to
-    /// `dst_reg`.
-    CompareEq {
-        lhs_reg: u16,
-        rhs_reg: u16,
-        dst_reg: u16,
     },
 }
 
@@ -2084,7 +2082,7 @@ impl Program {
             | Inst::Gosub { .. }
             | Inst::Return { .. }
             | Inst::Copy { .. }
-            | Inst::CompareEq { .. } => {
+            | Inst::SorterNewGroup { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

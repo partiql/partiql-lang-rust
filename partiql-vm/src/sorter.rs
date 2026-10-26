@@ -1,4 +1,4 @@
-use crate::compare::eqg_cmp;
+use crate::compare::{eqg_cmp, eqg_rows};
 use crate::plan::SortKeys;
 use crate::value::ValueRef;
 use std::cmp::Ordering;
@@ -6,6 +6,9 @@ use std::cmp::Ordering;
 /// A record stored in the sorter. Fields are ValueRefs pointing into the sorter's bank.
 pub(crate) struct SorterRecord {
     pub fields: Vec<ValueRef<'static>>,
+    /// GROUP BY: the `eqg` keys of the leading `Group(n)` fields, which the records are sorted
+    /// and grouped by, while the fields keep the values as written. Empty for ORDER BY.
+    pub group_keys: Vec<ValueRef<'static>>,
 }
 
 /// Sort-based grouping and ordering structure. Accumulates records during the insert
@@ -38,11 +41,11 @@ impl Sorter {
         self.position = 0;
     }
 
-    /// How many of a record's leading fields are its keys.
-    pub fn key_fields(&self) -> usize {
+    /// How many of a record's leading fields are GROUP BY keys, compared by their `eqg` keys.
+    pub fn group_key_fields(&self) -> usize {
         match &self.keys {
             SortKeys::Group(keys) => *keys,
-            SortKeys::Order(orders) => orders.len(),
+            SortKeys::Order(_) => 0,
         }
     }
 
@@ -68,11 +71,12 @@ impl Sorter {
             return false;
         }
         match &self.keys {
-            SortKeys::Group(key_count) => {
-                let key_count = *key_count;
+            SortKeys::Group(_) => {
                 self.records.sort_by(|a, b| {
-                    (0..key_count)
-                        .map(|i| eqg_cmp(&a.fields[i], &b.fields[i]))
+                    a.group_keys
+                        .iter()
+                        .zip(&b.group_keys)
+                        .map(|(x, y)| eqg_cmp(x, y))
                         .find(|cmp| cmp.is_ne())
                         .unwrap_or(Ordering::Equal)
                 });
@@ -103,6 +107,18 @@ impl Sorter {
             Some(&self.records[self.position].fields)
         } else {
             None
+        }
+    }
+
+    /// Whether the current record starts a group: it is the first, or its GROUP BY keys are
+    /// not `eqg` to the previous record's.
+    pub fn new_group(&self) -> bool {
+        match self.position.checked_sub(1) {
+            None => true,
+            Some(previous) => !eqg_rows(
+                &self.records[previous].group_keys,
+                &self.records[self.position].group_keys,
+            ),
         }
     }
 

@@ -771,11 +771,11 @@ impl<'q> Emitter<'q> {
     /// A sort-based GROUP BY. It reads all of its input into the sorter, then reads the
     /// records back sorted, calling `row` (as subroutine OUTPUT) once per group:
     /// ```text
-    ///         SorterReset; keys = MISSING; has_data = false; reset the accumulators
+    ///         SorterReset; has_data = false; reset the accumulators
     ///         for each input row: evaluate its record (MISSING keys as NULL); SorterInsert
     ///         SorterSort, empty→done
     ///   read: SorterData
-    ///         if the keys differ from the group's: Gosub OUTPUT; AggReset; copy the keys
+    ///         if SorterNewGroup: Gosub OUTPUT; AggReset; copy the keys
     ///         AggStep each aggregate (a DISTINCT one if HashInsert finds its input new)
     ///         has_data = true
     ///         SorterNext → read
@@ -797,11 +797,6 @@ impl<'q> Emitter<'q> {
             });
         }
         self.asm.push(Inst::SorterReset { sorter_id });
-        // The keys of a previous run point into the reset bank; the first record compares
-        // them. MISSING is no key's value (keys are made NULL), so it starts a group.
-        for k in 0..agg.key_count {
-            self.asm.load_const(agg.keys + k, ValueOwned::Missing)?;
-        }
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         for inst in &reset_accums {
             self.asm.push(inst.clone());
@@ -837,23 +832,9 @@ impl<'q> Emitter<'q> {
             dst_reg: agg.record,
         });
         if agg.key_count > 0 {
-            for k in 0..agg.key_count {
-                self.asm.push(Inst::CompareEq {
-                    lhs_reg: agg.keys + k,
-                    rhs_reg: agg.record + k,
-                    dst_reg: if k == 0 { agg.same_group } else { agg.key_eq },
-                });
-                if k > 0 {
-                    self.asm.push(Inst::AndBool {
-                        dst: agg.same_group,
-                        a: agg.same_group,
-                        b: agg.key_eq,
-                    });
-                }
-            }
-            self.asm.push(Inst::NotBool {
+            self.asm.push(Inst::SorterNewGroup {
+                sorter_id,
                 dst: agg.new_group,
-                src: agg.same_group,
             });
             self.asm.jump_if_not_true(agg.new_group, accumulate);
             self.asm.gosub(agg.ret, output);

@@ -243,11 +243,9 @@ pub(crate) struct Aggregate {
     /// Where each sorted record is read back into.
     pub(crate) record: SlotId,
     pub(crate) key_count: u16,
-    /// The current group's keys.
+    /// The current group's keys, as its first record wrote them.
     pub(crate) keys: SlotId,
     /// Registers comparing a record's keys with the current group's.
-    pub(crate) same_group: SlotId,
-    pub(crate) key_eq: SlotId,
     pub(crate) new_group: SlotId,
     pub(crate) aggs: Vec<GroupAgg>,
     /// Every aggregate's accumulator registers, reset for each group.
@@ -1296,8 +1294,6 @@ impl<'a> Lowerer<'a> {
             record,
             key_count,
             keys: group_keys,
-            same_group: self.alloc_reg()?,
-            key_eq: self.alloc_reg()?,
             new_group: self.alloc_reg()?,
             aggs,
             accums,
