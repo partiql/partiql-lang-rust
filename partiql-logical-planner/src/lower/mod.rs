@@ -303,15 +303,21 @@ impl<'a> Lowerer<'a> {
             None => None,
         };
 
-        let distinct = matches!(select.project.node.setq, Some(SetQuantifier::Distinct))
-            .then_some(BindingsOp::Distinct);
+        // DISTINCT removes duplicates before LIMIT and OFFSET count rows, so it is below them;
+        // it needs the projected rows, while ORDER BY may read what the projection drops
+        let distinct = matches!(select.project.node.setq, Some(SetQuantifier::Distinct));
+        let (limit_before_projection, limit_after_distinct) = match distinct {
+            true => (None, limit_offset),
+            false => (limit_offset, None),
+        };
         let rest = [
             group_by,
             having.map(|expr| BindingsOp::Having(logical::Having { expr })),
             order_by,
-            limit_offset,
+            limit_before_projection,
             Some(projection),
-            distinct,
+            distinct.then_some(BindingsOp::Distinct),
+            limit_after_distinct,
         ];
         for op in rest.into_iter().flatten() {
             ops.push(self.plan.add_operator(op));

@@ -26,8 +26,8 @@ use crate::catalog::CompilationContext;
 use crate::error::{EngineError, Result};
 use crate::expr::{Expr, Inst, Program, ProgramBuilder};
 use crate::lower_ir::{
-    self, Aggregate, Cond, Filter, Join, JoinType, Limit, Op, Open, Output, Project, Query, Root,
-    ScanLoop, Sort, Subquery,
+    self, Aggregate, Cond, Distinct, Filter, Globals, Join, JoinType, Limit, Op, Open, Output,
+    Project, Query, Root, ScanLoop, SetOp, SetOpKind, Sort, Subquery,
 };
 use crate::plan::{CompiledPlan, EvaluationMode};
 use crate::value::ValueOwned;
@@ -61,6 +61,7 @@ impl<'a> PlanCompiler<'a> {
             expr_scan_ids: query.expr_scan_ids,
             table_fn_scans: query.table_fn_scans,
             sorter_metadata: query.sorters,
+            hash_tables: query.hash_tables,
             mode: self.mode,
         })
     }
@@ -250,26 +251,9 @@ impl<'q> Emitter<'q> {
 
     fn emit(mut self) -> Result<Program> {
         match &self.query.root {
-            Root::Expr {
-                tables,
-                cursors,
-                expr,
-                dst,
-            } => {
+            Root::Expr { globals, expr, dst } => {
                 let halt = self.asm.label();
-                for &cursor_id in cursors {
-                    self.asm.push(Inst::OpenCursor { cursor_id });
-                    self.asm.push_to(
-                        Inst::NextRow {
-                            cursor_id,
-                            eof_target: 0,
-                        },
-                        halt,
-                    );
-                }
-                for &id in tables {
-                    self.call_subquery(id as usize)?;
-                }
+                self.emit_globals(globals, halt)?;
                 self.emit_expr(expr, *dst)?;
                 self.asm.push(Inst::EmitRow);
                 self.asm.bind(halt);
@@ -298,7 +282,141 @@ impl<'q> Emitter<'q> {
             Op::Aggregate(aggregate) => self.emit_aggregate(aggregate, row),
             Op::Sort(sort) => self.emit_sort(sort, row),
             Op::Limit(limit) => self.emit_limit(limit, row),
+            Op::Distinct(distinct) => self.emit_distinct(distinct, row),
+            Op::SetOperator(set_op) => self.emit_set_op(set_op, row),
         }
+    }
+
+    /// Read the catalog objects an expression outside FROM names: the one row of each single
+    /// value (or, when one has none, go to `eof`), then the rows of each table.
+    fn emit_globals(&mut self, globals: &Globals, eof: Label) -> Result<()> {
+        for &cursor_id in &globals.cursors {
+            self.asm.push(Inst::OpenCursor { cursor_id });
+            self.asm.push_to(
+                Inst::NextRow {
+                    cursor_id,
+                    eof_target: 0,
+                },
+                eof,
+            );
+            self.asm.push(Inst::CloseCursor { cursor_id });
+        }
+        for &id in &globals.tables {
+            self.call_subquery(id as usize)?;
+        }
+        Ok(())
+    }
+
+    /// SELECT DISTINCT, streaming: a row is produced as soon as it is read, if its key is
+    /// new, so the rows keep their order and LIMIT stops the input early:
+    /// ```text
+    ///         HashReset
+    ///         for each input row:
+    ///             HashInsert key → new
+    ///             if new: <row>
+    /// ```
+    fn emit_distinct(&mut self, distinct: &'q Distinct, row: Row<'_, 'q>) -> Result<()> {
+        let table = distinct.table;
+        self.asm.push(Inst::HashReset { table });
+        self.emit_op(&distinct.input, &mut |e| {
+            let skip = e.asm.label();
+            e.asm.push(Inst::HashInsert {
+                table,
+                key: distinct.key.clone(),
+                new: distinct.new,
+            });
+            e.asm.jump_if_not_true(distinct.new, skip);
+            row(e)?;
+            e.asm.bind(skip);
+            Ok(())
+        })
+    }
+
+    /// A bag operator, calling `row` (as subroutine OUT) for each of its rows. One input is
+    /// read whole into the hash table first (the build side), then the other streams past it
+    /// (the probe side):
+    /// ```text
+    ///   UNION ALL           for l in L: Gosub OUT;  for r in R: Gosub OUT
+    ///   UNION DISTINCT      for v in L, then R: HashInsert v → new; if new: Gosub OUT
+    ///   INTERSECT ALL       for l in L: HashAdd l;  for r in R: HashTake r → found; if found: Gosub OUT
+    ///   INTERSECT DISTINCT  for l in L: HashInsert l;  for r in R: as INTERSECT ALL
+    ///   EXCEPT ALL          for r in R: HashAdd r;  for l in L: HashTake l → found; if not found: Gosub OUT
+    ///   EXCEPT DISTINCT     for r in R: HashInsert r;  for l in L: HashInsert l → new; if new: Gosub OUT
+    /// ```
+    /// INTERSECT DISTINCT's table counts each value once, so the first of the probe side's
+    /// equal rows takes it. EXCEPT DISTINCT's one table removes both the right side's values
+    /// and the left side's duplicates.
+    fn emit_set_op(&mut self, set_op: &'q SetOp, row: Row<'_, 'q>) -> Result<()> {
+        let out = self.emit_subroutine(set_op.ret, row)?;
+        let key = vec![set_op.row];
+        let found = set_op.found;
+        let Some(table) = set_op.table else {
+            for side in [&set_op.left, &set_op.right] {
+                self.emit_op(side, &mut |e| {
+                    e.asm.gosub(set_op.ret, out);
+                    Ok(())
+                })?;
+            }
+            return Ok(());
+        };
+        self.asm.push(Inst::HashReset { table });
+        let insert = Inst::HashInsert {
+            table,
+            key: key.clone(),
+            new: found,
+        };
+        let add = Inst::HashAdd {
+            table,
+            key: key.clone(),
+        };
+        let take = Inst::HashTake {
+            table,
+            key: key.clone(),
+            found,
+        };
+        // (build side, how it is built, probe side, the probe, whether a hit is produced)
+        let (build, build_inst, probe, probe_inst, produce_hit) =
+            match (set_op.kind, set_op.distinct) {
+                (SetOpKind::Union, _) => {
+                    (&set_op.left, insert.clone(), &set_op.right, insert, true)
+                }
+                (SetOpKind::Intersect, false) => (&set_op.left, add, &set_op.right, take, true),
+                (SetOpKind::Intersect, true) => (&set_op.left, insert, &set_op.right, take, true),
+                (SetOpKind::Except, false) => (&set_op.right, add, &set_op.left, take, false),
+                (SetOpKind::Except, true) => {
+                    (&set_op.right, insert.clone(), &set_op.left, insert, true)
+                }
+            };
+        // UNION DISTINCT produces the build side's new rows too
+        let produce_built = matches!(set_op.kind, SetOpKind::Union);
+        self.emit_op(build, &mut |e| {
+            e.asm.push(build_inst.clone());
+            if produce_built {
+                e.emit_if_found(found, true, set_op.ret, out);
+            }
+            Ok(())
+        })?;
+        self.emit_op(probe, &mut |e| {
+            e.asm.push(probe_inst.clone());
+            e.emit_if_found(found, produce_hit, set_op.ret, out);
+            Ok(())
+        })
+    }
+
+    /// Call `out` if register `found` is `hit` (true or not).
+    fn emit_if_found(&mut self, found: SlotId, hit: bool, ret: SlotId, out: Label) {
+        let skip = self.asm.label();
+        if hit {
+            self.asm.jump_if_not_true(found, skip);
+            self.asm.gosub(ret, out);
+        } else {
+            let call = self.asm.label();
+            self.asm.jump_if_not_true(found, call);
+            self.asm.jump(skip);
+            self.asm.bind(call);
+            self.asm.gosub(ret, out);
+        }
+        self.asm.bind(skip);
     }
 
     /// ```text
@@ -310,8 +428,8 @@ impl<'q> Emitter<'q> {
     /// ```
     fn emit_scan(&mut self, scan: &'q ScanLoop, row: Row<'_, 'q>) -> Result<()> {
         let cursor_id = scan.cursor;
-        self.emit_open(&scan.open, cursor_id)?;
         let (head, done) = (self.asm.label(), self.asm.label());
+        self.emit_open(&scan.open, cursor_id, done)?;
         self.asm.bind(head);
         self.asm.push_to(
             Inst::NextRow {
@@ -594,7 +712,13 @@ impl<'q> Emitter<'q> {
                 self.emit_null(&join.left)?;
                 self.emit_null(&join.right)?;
             }
-            Op::Filter(_) | Op::Project(_) | Op::Aggregate(_) | Op::Sort(_) | Op::Limit(_) => {
+            Op::Filter(_)
+            | Op::Project(_)
+            | Op::Aggregate(_)
+            | Op::Sort(_)
+            | Op::Limit(_)
+            | Op::Distinct(_)
+            | Op::SetOperator(_) => {
                 return Err(EngineError::InvalidPlan(
                     "an outer join side that is not a FROM source".to_string(),
                 ))
@@ -603,8 +727,9 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// Bind a scan's cursor to its data, then open it.
-    fn emit_open(&mut self, open: &'q Open, cursor_id: u16) -> Result<()> {
+    /// Bind a scan's cursor to its data, then open it. A catalog object its expression names
+    /// that has no value goes to `empty`, the end of the scan.
+    fn emit_open(&mut self, open: &'q Open, cursor_id: u16, empty: Label) -> Result<()> {
         match open {
             Open::Bound => {}
             Open::TableFn { func_name, args } => {
@@ -620,15 +745,22 @@ impl<'q> Emitter<'q> {
             Open::Expr {
                 src,
                 expr,
+                globals,
+                coercion,
                 assert_collection,
             } => {
+                self.emit_globals(globals, empty)?;
                 self.emit_expr(expr, *src)?;
                 if *assert_collection {
-                    self.asm.push(Inst::AssertCollection { src: *src });
+                    self.asm.push(Inst::AssertCollection {
+                        src: *src,
+                        coercion: *coercion,
+                    });
                 }
                 self.asm.push(Inst::MaterializeCursor {
                     src: *src,
                     cursor_id,
+                    coercion: *coercion,
                 });
             }
         }
@@ -643,27 +775,37 @@ impl<'q> Emitter<'q> {
     ///         for each input row: evaluate its record (MISSING keys as NULL); SorterInsert
     ///         SorterSort, empty→done
     ///   read: SorterData
-    ///         if the keys differ from the group's: Gosub OUTPUT; AggReset
-    ///         copy the keys; AggStep each aggregate; has_data = true
+    ///         if the keys differ from the group's: Gosub OUTPUT; AggReset; copy the keys
+    ///         AggStep each aggregate (a DISTINCT one if HashInsert finds its input new)
+    ///         has_data = true
     ///         SorterNext → read
     ///   last: Gosub OUTPUT             // the last group
     ///   done:
     /// ```
     /// Without keys the input is one group even when empty (`SELECT COUNT(*) FROM <<>>` is
-    /// one row), so an empty sorter jumps to `last` rather than `done`.
+    /// one row), so an empty sorter jumps to `last` rather than `done`. A group's keys are
+    /// those of its first record (`1` and `1.0` are one group).
     fn emit_aggregate(&mut self, agg: &'q Aggregate, row: Row<'_, 'q>) -> Result<()> {
         let sorter_id = agg.sorter;
-        let reset_accums = Inst::AggReset {
+        let mut reset_accums = vec![Inst::AggReset {
             accum_start: agg.accums.start,
             count: agg.accums.len() as u16,
-        };
+        }];
+        for distinct in agg.aggs.iter().filter_map(|a| a.distinct.as_ref()) {
+            reset_accums.push(Inst::HashReset {
+                table: distinct.table,
+            });
+        }
         self.asm.push(Inst::SorterReset { sorter_id });
-        // The keys of a previous run point into the reset bank; the first record compares them
+        // The keys of a previous run point into the reset bank; the first record compares
+        // them. MISSING is no key's value (keys are made NULL), so it starts a group.
         for k in 0..agg.key_count {
             self.asm.load_const(agg.keys + k, ValueOwned::Missing)?;
         }
         self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
-        self.asm.push(reset_accums.clone());
+        for inst in &reset_accums {
+            self.asm.push(inst.clone());
+        }
         self.emit_op(&agg.input, &mut |e| {
             for (dst, expr) in (agg.insert..).zip(&agg.record_exprs) {
                 e.emit_expr(expr, dst)?;
@@ -715,16 +857,27 @@ impl<'q> Emitter<'q> {
             });
             self.asm.jump_if_not_true(agg.new_group, accumulate);
             self.asm.gosub(agg.ret, output);
-            self.asm.push(reset_accums);
+            for inst in reset_accums {
+                self.asm.push(inst);
+            }
+            for k in 0..agg.key_count {
+                self.asm.push(Inst::Copy {
+                    dst: agg.keys + k,
+                    src: agg.record + k,
+                });
+            }
         }
         self.asm.bind(accumulate);
-        for k in 0..agg.key_count {
-            self.asm.push(Inst::Copy {
-                dst: agg.keys + k,
-                src: agg.record + k,
-            });
-        }
         for group_agg in &agg.aggs {
+            let skip = self.asm.label();
+            if let Some(distinct) = &group_agg.distinct {
+                self.asm.push(Inst::HashInsert {
+                    table: distinct.table,
+                    key: vec![group_agg.input],
+                    new: distinct.new,
+                });
+                self.asm.jump_if_not_true(distinct.new, skip);
+            }
             for &(func, accum_reg) in &group_agg.steps {
                 self.asm.push(Inst::AggStep {
                     func,
@@ -732,6 +885,7 @@ impl<'q> Emitter<'q> {
                     input_reg: group_agg.input,
                 });
             }
+            self.asm.bind(skip);
         }
         self.asm.load_const(agg.has_data, ValueOwned::Bool(true))?;
         self.asm.push_to(
@@ -954,5 +1108,11 @@ fn cursors(op: &Op) -> Vec<u16> {
         Op::Aggregate(aggregate) => cursors(&aggregate.input),
         Op::Sort(sort) => cursors(&sort.input),
         Op::Limit(limit) => cursors(&limit.input),
+        Op::Distinct(distinct) => cursors(&distinct.input),
+        Op::SetOperator(set_op) => {
+            let mut ids = cursors(&set_op.left);
+            ids.extend(cursors(&set_op.right));
+            ids
+        }
     }
 }

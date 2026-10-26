@@ -7,7 +7,8 @@ use crate::arena::{Arena, ArenaMark};
 use crate::builtins::BuiltinFunctions;
 use crate::catalog::ExecutionContext;
 use crate::error::{EngineError, Result};
-use crate::expr::{AggFunc, Inst, Program};
+use crate::expr::{AggFunc, Coercion, Inst, Program};
+use crate::hash_table::HashTable;
 use crate::source::RegisterWriter;
 use crate::source::{DataSourceImpl, InlineDataSource, ScanLayout};
 use crate::value::{value_ref_to_owned, variant, RegisterReader, Shape, ValueOwned, ValueRef};
@@ -115,6 +116,9 @@ pub struct CompiledPlan {
     /// Sorter metadata for GROUP BY and ORDER BY. Index = sorter_id. Each entry describes
     /// how the key fields order the records.
     pub(crate) sorter_metadata: Vec<SorterMetadata>,
+    /// How many hash tables the program uses, for DISTINCT and the set operators. Index =
+    /// the `table` of the hash table instructions.
+    pub(crate) hash_tables: usize,
     /// Strict mode: a value an operation can't take is an error, rather than MISSING.
     pub(crate) mode: EvaluationMode,
 }
@@ -158,6 +162,7 @@ impl Clone for CompiledPlan {
             expr_scan_ids: self.expr_scan_ids.clone(),
             table_fn_scans: self.table_fn_scans.clone(),
             sorter_metadata: self.sorter_metadata.clone(),
+            hash_tables: self.hash_tables,
             mode: self.mode,
         }
     }
@@ -292,6 +297,7 @@ impl Default for CompiledPlan {
             expr_scan_ids: Vec::new(),
             table_fn_scans: HashMap::new(),
             sorter_metadata: Vec::new(),
+            hash_tables: 0,
             mode: EvaluationMode::Permissive,
         }
     }
@@ -366,7 +372,8 @@ pub struct PartiQLVM {
     /// subquery, only down to where it stood when the subquery started).
     /// Banks 2..2+cursors = one row bank per cursor, reset at that cursor's NextRow, so an
     /// outer join row stays valid while the inner cursor advances.
-    /// Banks after those = sorter banks (persistent until sorter closes).
+    /// Banks after those = sorter banks (persistent until sorter closes), then hash table
+    /// banks (persistent until the table is reset).
     banks: Vec<Arena>,
     /// Unified register array: [0..slot_count] are output slots, rest are temporaries.
     registers: Vec<ValueRef<'static>>,
@@ -382,6 +389,8 @@ pub struct PartiQLVM {
     table_functions: HashMap<String, Arc<dyn crate::source::TableFunction>>,
     /// Sorters for GROUP BY (indexed by sorter_id from bytecode).
     sorters: Vec<Option<crate::sorter::Sorter>>,
+    /// Hash tables for DISTINCT and the set operators (indexed by table id from bytecode).
+    hash_tables: Vec<HashTable>,
     /// Whether each cursor's data source is open, so closing is idempotent.
     source_open: Vec<bool>,
     /// The scratch bank's floor in each running subquery, innermost last: `NextRow` rewinds
@@ -421,6 +430,11 @@ impl PartiQLVM {
             banks.push(Arena::new(16384));
             sorters.push(Some(crate::sorter::Sorter::new(bank_id, meta.keys.clone())));
         }
+        let mut hash_tables = Vec::with_capacity(compiled.hash_tables);
+        for _ in 0..compiled.hash_tables {
+            hash_tables.push(HashTable::new(banks.len()));
+            banks.push(Arena::new(16384));
+        }
 
         let mut vm = PartiQLVM {
             compiled,
@@ -433,6 +447,7 @@ impl PartiQLVM {
             builtins: BuiltinFunctions::new(strict),
             table_functions: exec_context.table_functions().clone(),
             sorters,
+            hash_tables,
             source_open: Vec::new(),
             scratch_floors: Vec::new(),
         };
@@ -751,29 +766,38 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
-                Inst::AssertCollection { src } => {
+                Inst::AssertCollection { src, coercion } => {
                     let value = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
                         Ok(value) => value,
                         Err(e) => return Some(Err(e)),
                     };
                     if !matches!(value, ValueRef::Bag(_) | ValueRef::List(_)) {
-                        return Some(Err(EngineError::StrictModeViolation(
-                            "FROM clause requires collection value".to_string(),
-                        )));
+                        let message = match coercion {
+                            Coercion::From => "FROM clause requires collection value",
+                            Coercion::SetOp => {
+                                "OUTER UNION, INTERSECT and EXCEPT require collection operands"
+                            }
+                        };
+                        return Some(Err(EngineError::StrictModeViolation(message.to_string())));
                     }
                 }
 
-                Inst::MaterializeCursor { src, cursor_id } => {
+                Inst::MaterializeCursor {
+                    src,
+                    cursor_id,
+                    coercion,
+                } => {
                     // An Ion list literal is scanned element by element
                     let collection = match variant::lower(regs[*src as usize], &self.vm.banks[1]) {
                         Ok(collection) => collection,
                         Err(e) => return Some(Err(e)),
                     };
-                    let values = match collection {
-                        ValueRef::Bag(items) | ValueRef::List(items) => {
+                    let values = match (collection, coercion) {
+                        (ValueRef::Bag(items) | ValueRef::List(items), _) => {
                             items.iter().map(|item| value_ref_to_owned(*item)).collect()
                         }
-                        other => vec![value_ref_to_owned(other)],
+                        (ValueRef::Null | ValueRef::Missing, Coercion::SetOp) => vec![],
+                        (other, _) => vec![value_ref_to_owned(other)],
                     };
                     self.vm.cursors[*cursor_id as usize] =
                         Some(DataSourceImpl::Inline(InlineDataSource::new(values)));
@@ -826,25 +850,24 @@ impl<'vm> QueryIterator<'vm> {
                     let bank = &self.vm.banks[sorter.bank_id];
                     let start = *src_reg as usize;
                     let count = *reg_count as usize;
-                    let decoded = sorter.decoded_fields();
+                    let (keys, decoded) = (sorter.key_fields(), sorter.decoded_fields());
                     let mut fields = Vec::with_capacity(count);
                     for (i, reg) in regs[start..start + count].iter().enumerate() {
                         // Safety: sorter bank outlives the sorter records.
                         // Same contract as the VM's register/arena relationship.
-                        let copied = match (i < decoded, *reg) {
-                            // A variant decodes straight into the bank; one the VM has no
-                            // type for stays a variant, copied like any value
-                            (true, value @ ValueRef::Variant(..)) => {
-                                match variant::lower(value, bank) {
-                                    Ok(ValueRef::Variant(..)) => {
-                                        copy_value_ref_to_bank(value, bank)
-                                    }
-                                    Ok(value) => value,
-                                    Err(e) => return Some(Err(e)),
-                                }
-                            }
-                            (_, value) => copy_value_ref_to_bank(value, bank),
+                        // A value read as one has its variants decoded (into scratch, then
+                        // copied), a key's however nested, as keys compare by `eqg`; one
+                        // the VM has no type for stays a variant, copied like any value
+                        let value = match (i < keys, i < decoded) {
+                            (true, _) => variant::lower_deep(*reg, &self.vm.banks[1]),
+                            (false, true) => variant::lower(*reg, &self.vm.banks[1]),
+                            (false, false) => Ok(*reg),
                         };
+                        let value = match value {
+                            Ok(value) => value,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        let copied = copy_value_ref_to_bank(value, bank);
                         let copied: ValueRef<'static> = unsafe {
                             std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(copied)
                         };
@@ -977,6 +1000,51 @@ impl<'vm> QueryIterator<'vm> {
                     };
                 }
 
+                // === Hash Table Instructions ===
+                Inst::HashReset { table } => match self.vm.hash_tables.get_mut(*table as usize) {
+                    Some(t) => {
+                        t.reset();
+                        self.vm.banks[t.bank_id].reset();
+                    }
+                    None => return Some(Err(unbound_table(*table))),
+                },
+
+                Inst::HashInsert { table, key, new } => {
+                    let Some(t) = self.vm.hash_tables.get_mut(*table as usize) else {
+                        return Some(Err(unbound_table(*table)));
+                    };
+                    let key = match lower_key(regs, key, &self.vm.banks[1]) {
+                        Ok(key) => key,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let bank = &self.vm.banks[t.bank_id];
+                    let inserted = t.insert(&key, || copy_key(&key, bank));
+                    regs[*new as usize] = ValueRef::Bool(inserted);
+                }
+
+                Inst::HashAdd { table, key } => {
+                    let Some(t) = self.vm.hash_tables.get_mut(*table as usize) else {
+                        return Some(Err(unbound_table(*table)));
+                    };
+                    let key = match lower_key(regs, key, &self.vm.banks[1]) {
+                        Ok(key) => key,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let bank = &self.vm.banks[t.bank_id];
+                    t.add(&key, || copy_key(&key, bank));
+                }
+
+                Inst::HashTake { table, key, found } => {
+                    let Some(t) = self.vm.hash_tables.get_mut(*table as usize) else {
+                        return Some(Err(unbound_table(*table)));
+                    };
+                    let key = match lower_key(regs, key, &self.vm.banks[1]) {
+                        Ok(key) => key,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    regs[*found as usize] = ValueRef::Bool(t.take(&key));
+                }
+
                 Inst::ScratchEnter => {
                     let floor = self.vm.banks[1].mark();
                     self.vm.scratch_floors.push(floor);
@@ -1060,8 +1128,7 @@ impl<'vm> QueryIterator<'vm> {
                 } => {
                     let lhs = regs[*lhs_reg as usize];
                     let rhs = regs[*rhs_reg as usize];
-                    regs[*dst_reg as usize] =
-                        ValueRef::Bool(crate::sorter::value_ref_eq(&lhs, &rhs));
+                    regs[*dst_reg as usize] = ValueRef::Bool(crate::compare::eqg(&lhs, &rhs));
                 }
 
                 // All scalar instructions delegate to eval_inst
@@ -1111,6 +1178,34 @@ impl Drop for QueryIterator<'_> {
         }
         self.vm.halted = true;
     }
+}
+
+fn unbound_table(table: u16) -> EngineError {
+    EngineError::IllegalState(format!("hash table {table} not bound"))
+}
+
+/// The values of a hash table key, in registers `regs`, with their variants decoded into
+/// `scratch` so that they compare as the values they hold.
+fn lower_key<'a>(
+    registers: &[ValueRef<'a>],
+    regs: &[u16],
+    scratch: &'a Arena,
+) -> Result<Vec<ValueRef<'a>>> {
+    regs.iter()
+        .map(|&reg| variant::lower_deep(registers[reg as usize], scratch))
+        .collect()
+}
+
+/// A hash table key copied into the table's `bank`.
+fn copy_key(key: &[ValueRef<'_>], bank: &Arena) -> Vec<ValueRef<'static>> {
+    key.iter()
+        .map(|&value| {
+            let copied = copy_value_ref_to_bank(value, bank);
+            // Safety: the table's bank outlives its keys, which are dropped when it is
+            // reset; the same contract as the sorter's records.
+            unsafe { std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(copied) }
+        })
+        .collect()
 }
 
 /// Copy a ValueRef's data into the given arena bank, returning a new ValueRef

@@ -29,6 +29,62 @@ pub(crate) fn lower<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRe
     Ok(decode(&element, arena).unwrap_or(value))
 }
 
+/// `value` with every variant in it decoded into `arena`, however deeply nested, as for
+/// comparing it with `eqg`. A collection is copied only when something in it decodes.
+pub(crate) fn lower_deep<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<ValueRef<'a>> {
+    let value = lower(value, arena)?;
+    let lower_all = |items: &[ValueRef<'a>]| -> Result<Option<&'a [ValueRef<'a>]>> {
+        let lowered = items
+            .iter()
+            .map(|item| lower_deep(*item, arena))
+            .collect::<Result<Vec<_>>>()?;
+        let changed = lowered
+            .iter()
+            .zip(items)
+            .any(|(new, old)| !same_ref(new, old));
+        Ok(changed.then(|| arena.alloc_slice(&lowered)))
+    };
+    Ok(match value {
+        ValueRef::List(items) => lower_all(items)?.map_or(value, ValueRef::List),
+        ValueRef::Bag(items) => lower_all(items)?.map_or(value, ValueRef::Bag),
+        ValueRef::Tuple(tuple) => {
+            let values: Vec<ValueRef<'a>> = tuple.fields.iter().map(|f| f.value).collect();
+            match lower_all(&values)? {
+                None => value,
+                Some(values) => {
+                    let fields: Vec<TupleField<'a>> = tuple
+                        .fields
+                        .iter()
+                        .zip(values)
+                        .map(|(f, &value)| TupleField {
+                            name: f.name,
+                            value,
+                        })
+                        .collect();
+                    ValueRef::Tuple(arena.alloc_tuple_ref(TupleRef {
+                        fields: arena.alloc_slice(&fields),
+                    }))
+                }
+            }
+        }
+        value => value,
+    })
+}
+
+/// Whether `a` is `b` as it was (a collection still at the same address), so that
+/// `lower_deep` copies only what changed.
+fn same_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> bool {
+    match (a, b) {
+        (ValueRef::List(a), ValueRef::List(b)) | (ValueRef::Bag(a), ValueRef::Bag(b)) => {
+            std::ptr::eq(*a, *b)
+        }
+        (ValueRef::Tuple(a), ValueRef::Tuple(b)) => std::ptr::eq(*a, *b),
+        (ValueRef::Variant(a, _), ValueRef::Variant(b, _)) => std::ptr::eq(*a, *b),
+        (ValueRef::Variant(..), _) | (_, ValueRef::Variant(..)) => false,
+        _ => true,
+    }
+}
+
 /// `element` as a VM value, or `None` when the VM has no type for it.
 fn decode<'a>(element: &Element, arena: &'a Arena) -> Option<ValueRef<'a>> {
     if element.is_null() {

@@ -1,0 +1,154 @@
+// SELECT DISTINCT, DISTINCT aggregates, and GROUP BY: values are told apart by `eqg`, under
+// which numbers are equal by value whatever their type, and NULL and MISSING are apart.
+'''
+  CREATE TABLE items;
+  INSERT INTO items SELECT * FROM <<
+    {'k': 'a', 'v': 1}, {'k': 'a', 'v': 1.0}, {'k': 'a', 'v': 2}, {'k': 'a', 'v': NULL},
+    {'k': 'b', 'v': 1}, {'k': 'b', 'v': 1}, {'k': 'b', 'v': 3}
+  >>;
+'''
+
+{
+  sql: '''
+    SELECT DISTINCT t.v
+    FROM items t
+  ''',
+  expect: $bag::[
+    { v: 1 },
+    { v: 2 },
+    { v: null },
+    { v: 3 }
+  ]
+}
+
+// DISTINCT keeps ORDER BY's order, and LIMIT and OFFSET count the distinct rows
+{
+  sql: '''
+    SELECT DISTINCT t.v
+    FROM items t
+    ORDER BY t.v DESC NULLS LAST
+    LIMIT 2 OFFSET 1
+  ''',
+  expect: { rows: [
+    { v: 2 },
+    { v: 1 }
+  ] }
+}
+
+// A whole row: tuples in any attribute order, bags in any element order, and MISSING (no
+// attribute) apart from NULL
+{
+  sql: '''
+    SELECT DISTINCT VALUE x
+    FROM [ {'a': 1, 'b': 2}, {'b': 2, 'a': 1.0}, <<1, 2>>, <<2, 1>>, [1, 2], [2, 1], NULL, MISSING,
+           NULL, {'a': MISSING}, {} ] x
+  ''',
+  expect: $bag::[
+    { a: 1, b: 2 },
+    $bag::[1, 2],
+    [1, 2],
+    [2, 1],
+    null,
+    $missing::null,
+    {}
+  ]
+}
+
+// Attributes of the same name compare as the tuple does, in any order
+{
+  sql: '''
+    SELECT DISTINCT p.x AS n, p.y AS n
+    FROM << {'x': 1, 'y': 2}, {'x': 2, 'y': 1} >> p
+  ''',
+  expect: $bag::[
+    { n: 1, n: 2 }
+  ]
+}
+
+// An Ion value is the value it holds, whatever its annotations; the first of equal rows is
+// the one produced
+{
+  sql: '''
+    SELECT DISTINCT VALUE x
+    FROM [ 1, `1`, `a::1`, `1.0`, [2], `[a::2]` ] x
+  ''',
+  expect: $bag::[
+    1,
+    [2]
+  ]
+}
+
+// A subquery's DISTINCT starts again for each row of the query around it
+{
+  sql: '''
+    SELECT VALUE (SELECT DISTINCT VALUE y FROM o.ys y)
+    FROM [ {'ys': [1, 1, 2]}, {'ys': [2, 2]} ] o
+  ''',
+  expect: $bag::[
+    $bag::[1, 2],
+    $bag::[2]
+  ]
+}
+
+// GROUP BY puts 1 and 1.0 in one group, keyed by the first
+{
+  sql: '''
+    SELECT t.v AS v, COUNT(*) AS n
+    FROM items t
+    WHERE t.k = 'a'
+    GROUP BY t.v
+  ''',
+  expect: $bag::[
+    { v: null, n: 1 },
+    { v: 1, n: 2 },
+    { v: 2, n: 1 }
+  ]
+}
+
+// DISTINCT aggregates: each group's distinct inputs, NULL left out; arguments may differ
+{
+  sql: '''
+    SELECT t.k AS k, COUNT(DISTINCT t.v) AS n, SUM(DISTINCT t.v) AS s, AVG(DISTINCT t.v) AS a,
+           COUNT(DISTINCT t.k) AS keys, COUNT(t.v) AS all_v
+    FROM items t
+    GROUP BY t.k
+  ''',
+  expect: $bag::[
+    { k: "a", n: 2, s: 3, a: 1.50, keys: 1, all_v: 3 },
+    { k: "b", n: 2, s: 4, a: 2., keys: 1, all_v: 3 }
+  ]
+}
+
+// ... and without GROUP BY, one group
+{
+  sql: '''
+    SELECT COUNT(DISTINCT t.v) AS n, SUM(DISTINCT t.v) AS s
+    FROM items t
+  ''',
+  expect: $bag::[
+    { n: 3, s: 6 }
+  ]
+}
+
+// SELECT DISTINCT over GROUP BY's rows
+{
+  sql: '''
+    SELECT DISTINCT COUNT(t.v) AS n
+    FROM items t
+    GROUP BY t.k
+  ''',
+  expect: $bag::[
+    { n: 3 }
+  ]
+}
+
+// A tuple constructor leaves out an attribute whose name is no string or whose value is MISSING
+{
+  sql: '''
+    SELECT VALUE {x.y: 1, 'b': x.z, 'c': 2}
+    FROM << {'y': 5} >> x
+  ''',
+  expect: $bag::[
+    { c: 2 }
+  ]
+}

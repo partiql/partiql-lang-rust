@@ -213,13 +213,15 @@
   ]
 }
 
-// DISTINCT in an aggregate is not supported yet: an error, not a silently wrong result
+// DISTINCT in an aggregate steps it once per distinct input
 {
   sql: '''
     SELECT AVG(DISTINCT x) AS a
     FROM << 1, 1, 2 >> x
   ''',
-  expect: { error: "DISTINCT" }
+  expect: $bag::[
+    { a: 1.50 }
+  ]
 }
 
 // The COLL_ functions share the same rules

@@ -761,7 +761,7 @@ fn strict_limit_offset_counts() {
     }
 }
 
-/// The error a query (over no tables) raises in strict mode, from its first row.
+/// The error a query (over no tables) raises in strict mode.
 fn strict_error(query: &str) -> String {
     let parsed = Parser::default().parse(query).expect("parse failed");
     let catalog = PartiqlCatalog::default().to_shared_catalog();
@@ -773,7 +773,8 @@ fn strict_error(query: &str) -> String {
         .expect("compile failed");
     let mut vm = PartiQLVM::new(compiled, &ExecutionContext::new()).expect("VM creation failed");
     let ExecutionResult::Query(mut iter) = vm.execute().expect("execute failed");
-    let err = iter.next().expect("a row or an error").err();
+    // The error may follow rows (a set operator's right operand fails after its left's rows)
+    let err = iter.find_map(|row| row.err());
     format!("{err:?}")
 }
 
@@ -790,6 +791,24 @@ fn strict_aggregate_inputs() {
     ] {
         let err = strict_error(query);
         assert!(err.contains("TypeError"), "{query}: {err}");
+    }
+}
+
+/// In strict mode, an operand of OUTER UNION, INTERSECT or EXCEPT that is no collection
+/// (NULL and MISSING too) is an error (permissive mode makes it a bag: RFC-0007).
+#[test]
+fn strict_set_operator_operands() {
+    for query in [
+        "1 OUTER UNION << 2 >>",
+        "<< 1 >> OUTER INTERSECT {'a': 1}",
+        "NULL OUTER EXCEPT << 1 >>",
+        "<< 1 >> OUTER UNION ALL MISSING",
+    ] {
+        let err = strict_error(query);
+        assert!(
+            err.contains("require collection operands"),
+            "{query}: {err}"
+        );
     }
 }
 

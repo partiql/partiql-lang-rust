@@ -9,9 +9,9 @@
 //!   MISSING, or in strict mode is an error.
 //! - With no input, COUNT is 0 and the others are NULL.
 
+use crate::compare;
 use crate::error::{EngineError, Result};
 use crate::expr::AggFunc;
-use crate::sorter;
 use crate::value::ValueRef;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -54,7 +54,7 @@ pub(crate) fn step<'a>(
                     AggFunc::Min => Ordering::Less,
                     _ => Ordering::Greater,
                 };
-                match sorter::total_order(&input, &accum) == keep {
+                match compare::total_order(&input, &accum) == keep {
                     true => input,
                     false => accum,
                 }
@@ -134,7 +134,7 @@ pub(crate) fn over_collection<'a>(
     let distinct_items;
     let items = match distinct {
         true => {
-            distinct_items = sorter::distinct(items);
+            distinct_items = compare::distinct(items);
             &distinct_items[..]
         }
         false => items,

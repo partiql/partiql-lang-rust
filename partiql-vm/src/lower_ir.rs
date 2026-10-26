@@ -11,7 +11,7 @@ use crate::arena::SlotId;
 use crate::catalog::CompilationContext;
 use crate::error::{count_u16, EngineError, Result};
 use crate::expr::{
-    lit_to_value, AggFunc, Expr, LogicalExprCompiler, LoweredSubqueries, SlotResolver,
+    lit_to_value, AggFunc, Coercion, Expr, LogicalExprCompiler, LoweredSubqueries, SlotResolver,
 };
 use crate::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::plan::{
@@ -23,12 +23,12 @@ use crate::source::{
 };
 use crate::value::{variant, FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LogicalPlan, OpId, OrderBy, PathComponent,
-    Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder, SubQueryExpr,
-    ValueExpr, VarRefType,
+    BagOp, BagOperator, BindingsOp, CallName, DBRef, GroupBy, JoinKind, LogicalPlan, OpId, OrderBy,
+    PathComponent, Pattern, Project as LogicalProject, Scan, SortSpecNullOrder, SortSpecOrder,
+    SubQueryExpr, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -51,20 +51,30 @@ pub(crate) struct Query {
     pub(crate) sorters: Vec<SorterMetadata>,
     /// Index = the `id` of `Expr::Subquery`.
     pub(crate) subqueries: Vec<Subquery>,
+    /// How many hash tables the operators use.
+    pub(crate) hash_tables: usize,
 }
 
 pub(crate) enum Root {
-    /// A query without FROM: collect the rows of each catalog table it names (each a
-    /// subquery, into the register the name reads), read the one row of each single value
-    /// it names (`cursors`), then evaluate `expr` into `dst`.
+    /// A query without FROM: read the catalog objects it names, then evaluate `expr` into
+    /// `dst`.
     Expr {
-        tables: Vec<u32>,
-        cursors: Vec<u16>,
+        globals: Globals,
         expr: Expr,
         dst: SlotId,
     },
     /// Every row of the operator tree is a result.
     Rows(Op),
+}
+
+/// The catalog objects an expression outside any FROM clause names (a query without FROM, an
+/// operand of a set operator), read into the registers the names read before it runs.
+#[derive(Default)]
+pub(crate) struct Globals {
+    /// Each catalog table's rows, collected by a subquery.
+    pub(crate) tables: Vec<u32>,
+    /// The cursor reading the one row of each single value.
+    pub(crate) cursors: Vec<u16>,
 }
 
 /// A physical operator. Each produces rows into registers; the operator above it runs
@@ -86,6 +96,44 @@ pub(crate) enum Op {
     Sort(Box<Sort>),
     /// The first rows of `input`.
     Limit(Box<Limit>),
+    /// SELECT DISTINCT: the rows of `input` not `eqg` to an earlier one.
+    Distinct(Box<Distinct>),
+    /// OUTER UNION, INTERSECT or EXCEPT of two inputs' rows, each one value.
+    SetOperator(Box<SetOp>),
+}
+
+/// SELECT DISTINCT. Each row of `input` is told apart from the earlier ones by its `key`
+/// registers, which `table` holds.
+pub(crate) struct Distinct {
+    pub(crate) input: Op,
+    pub(crate) table: u16,
+    pub(crate) key: Vec<SlotId>,
+    /// Set when the row's key is new.
+    pub(crate) new: SlotId,
+}
+
+/// A bag operator (RFC-0007). Both inputs write each of their rows, one value, into `row`.
+pub(crate) struct SetOp {
+    pub(crate) kind: SetOpKind,
+    /// DISTINCT rather than ALL.
+    pub(crate) distinct: bool,
+    pub(crate) left: Op,
+    pub(crate) right: Op,
+    pub(crate) row: SlotId,
+    /// The rows seen or counted; none for UNION ALL, which needs none.
+    pub(crate) table: Option<u16>,
+    /// Set when a row is to be produced.
+    pub(crate) found: SlotId,
+    /// What follows the operator runs for the rows of both inputs, so it is a subroutine
+    /// returning through this register.
+    pub(crate) ret: SlotId,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SetOpKind {
+    Union,
+    Intersect,
+    Except,
 }
 
 pub(crate) struct Filter {
@@ -142,10 +190,14 @@ pub(crate) enum Open {
         func_name: String,
         args: Vec<(SlotId, Expr)>,
     },
-    /// A collection computed at runtime: evaluate `expr` into `src`, then read from it.
+    /// A collection computed at runtime: read `globals`, evaluate `expr` into `src`, then
+    /// read from it.
     Expr {
         src: SlotId,
         expr: Expr,
+        globals: Globals,
+        /// How a value that is no collection is read.
+        coercion: Coercion,
         /// Strict mode: fail unless `src` holds a collection.
         assert_collection: bool,
     },
@@ -245,11 +297,20 @@ pub(crate) struct Subquery {
 pub(crate) struct GroupAgg {
     /// The record register holding the aggregate's input.
     pub(crate) input: SlotId,
+    /// DISTINCT: the group's inputs so far, so that only a new one is stepped.
+    pub(crate) distinct: Option<GroupDistinct>,
     /// The accumulators it steps for each record (AVG keeps a sum and a count).
     pub(crate) steps: Vec<(AggFunc, SlotId)>,
     /// Finalizes the accumulators in place, from the first.
     pub(crate) finalize: AggFunc,
     pub(crate) accum: SlotId,
+}
+
+/// The inputs a DISTINCT aggregate has seen in the current group.
+pub(crate) struct GroupDistinct {
+    pub(crate) table: u16,
+    /// Set when the record's input is new.
+    pub(crate) new: SlotId,
 }
 
 /// The deepest a subquery may nest. Lowering and emission recurse once per level (about
@@ -274,6 +335,7 @@ pub(crate) fn lower(
         inline_scans: HashMap::new(),
         sorters: Vec::new(),
         subqueries: Vec::new(),
+        hash_tables: 0,
         scopes: Vec::new(),
     };
     let graph = PlanGraph::new(plan);
@@ -311,6 +373,7 @@ pub(crate) fn lower(
         table_fn_scans,
         sorters: lowerer.sorters,
         subqueries: lowerer.subqueries,
+        hash_tables: lowerer.hash_tables as usize,
     })
 }
 
@@ -358,12 +421,12 @@ impl<'p> PlanGraph<'p> {
         }
     }
 
-    /// Get the (left, right) inputs of a join.
-    fn join_inputs(&self, id: OpId) -> Result<(OpId, OpId)> {
+    /// Get the (left, right) inputs of a join or a bag operator.
+    fn two_inputs(&self, id: OpId) -> Result<(OpId, OpId)> {
         match self.inputs.get(&id).map(|v| v.as_slice()) {
             Some(&[(left, 0), (right, 1)]) => Ok((left, right)),
             _ => Err(EngineError::InvalidPlan(format!(
-                "expected left and right inputs for join {:?}",
+                "expected left and right inputs for {:?}",
                 id
             ))),
         }
@@ -418,6 +481,7 @@ struct Lowerer<'a> {
     /// Index = sorter_id.
     sorters: Vec<SorterMetadata>,
     subqueries: Vec<Subquery>,
+    hash_tables: u16,
     /// While lowering a subquery: the scopes of the queries around it, outermost first.
     scopes: Vec<OuterScope>,
 }
@@ -519,6 +583,14 @@ impl<'a> Lowerer<'a> {
         Ok(self.alloc(1)?.start)
     }
 
+    fn add_hash_table(&mut self) -> Result<u16> {
+        let table = self.hash_tables;
+        self.hash_tables = table
+            .checked_add(1)
+            .ok_or(EngineError::TooLarge("hash tables"))?;
+        Ok(table)
+    }
+
     fn alloc_scan_id(&mut self) -> ScanId {
         let id = ScanId::new(self.next_scan_id);
         self.next_scan_id += 1;
@@ -558,6 +630,9 @@ impl<'a> Lowerer<'a> {
             let (resolver, layout) = self.layout_from(graph, id, ctx)?;
             let op = self.lower_from(&layout, &mut vec![])?;
             return Ok(Lowered::new(op, resolver, None));
+        }
+        if let BindingsOp::BagOp(bag_op) = op {
+            return self.lower_set_op(graph, id, bag_op);
         }
 
         // What the operators above read, before this operator adds its own reads
@@ -633,6 +708,19 @@ impl<'a> Lowerer<'a> {
                 let (aggregate, grouped) = self.lower_group_by(group_by, input, &resolver)?;
                 Lowered::new(Op::Aggregate(Box::new(aggregate)), grouped, shape)
             }
+            BindingsOp::Distinct => {
+                let shape = shape.ok_or_else(|| {
+                    EngineError::InvalidPlan("DISTINCT without a projection".to_string())
+                })?;
+                let (input, key) = self.row_key(input, shape.row_shape())?;
+                let distinct = Distinct {
+                    input,
+                    table: self.add_hash_table()?,
+                    key,
+                    new: self.alloc_reg()?,
+                };
+                Lowered::new(Op::Distinct(Box::new(distinct)), resolver, Some(shape))
+            }
             BindingsOp::OrderBy(order_by) => {
                 let read_above = read_above.unwrap_or_default();
                 let sort = self.lower_order_by(order_by, input, &resolver, &read_above)?;
@@ -656,6 +744,114 @@ impl<'a> Lowerer<'a> {
             });
         }
         Ok(lowered)
+    }
+
+    /// Lower a bag operator. Its rows are values (a projection's row made into one), and it
+    /// reads nothing of its inputs' bindings.
+    fn lower_set_op(&mut self, graph: &PlanGraph<'_>, id: OpId, bag_op: &BagOp) -> Result<Lowered> {
+        let kind = match bag_op.bag_op {
+            BagOperator::OuterUnion => SetOpKind::Union,
+            BagOperator::OuterIntersect => SetOpKind::Intersect,
+            BagOperator::OuterExcept => SetOpKind::Except,
+            // SQL's set operators take operands of compatible columns, by position (RFC-0007),
+            // which needs their static types
+            BagOperator::Union | BagOperator::Intersect | BagOperator::Except => {
+                let name = match bag_op.bag_op {
+                    BagOperator::Union => "UNION",
+                    BagOperator::Intersect => "INTERSECT",
+                    _ => "EXCEPT",
+                };
+                return Err(EngineError::UnsupportedExpr(format!(
+                    "{name} without OUTER (OUTER {name} is supported)"
+                )));
+            }
+            _ => {
+                return Err(EngineError::InvalidPlan(format!(
+                    "unsupported bag operator: {:?}",
+                    bag_op.bag_op
+                )))
+            }
+        };
+        let distinct = bag_op.setq == partiql_logical::SetQuantifier::Distinct;
+        let (left_id, right_id) = graph.two_inputs(id)?;
+        let row = self.alloc_reg()?;
+        let left = self.lower_operand(graph, left_id, row)?;
+        let right = self.lower_operand(graph, right_id, row)?;
+        let table = match (kind, distinct) {
+            (SetOpKind::Union, false) => None,
+            _ => Some(self.add_hash_table()?),
+        };
+        let set_op = SetOp {
+            kind,
+            distinct,
+            left,
+            right,
+            row,
+            table,
+            found: self.alloc_reg()?,
+            ret: self.alloc_reg()?,
+        };
+        Ok(Lowered::new(
+            Op::SetOperator(Box::new(set_op)),
+            ResolverKind::Empty,
+            Some(Shape::Bag(RowShape::Register(
+                row as usize,
+                PhysicalType::Dynamic,
+            ))),
+        ))
+    }
+
+    /// An operand of a bag operator, writing each of its rows, as one value, into `row`: a
+    /// query's rows, or the elements of a value (coerced to a bag as RFC-0007 does).
+    fn lower_operand(&mut self, graph: &PlanGraph<'_>, id: OpId, row: SlotId) -> Result<Op> {
+        if let BindingsOp::ExprQuery(expr_query) = graph.operator(id)? {
+            let (globals, resolver) = self.lower_globals(&expr_query.expr)?;
+            let expr = self.lower_expr(&expr_query.expr, &resolver)?;
+            let src = self.alloc_reg()?;
+            let scan_id = self.whole_value_scan(ScanKind::Expr {
+                src,
+                unbound: false,
+            });
+            return Ok(Op::Scan(ScanLoop {
+                cursor: self.add_cursor(scan_id, row)?,
+                open: Open::Expr {
+                    src,
+                    expr,
+                    globals,
+                    coercion: Coercion::SetOp,
+                    assert_collection: self.mode == EvaluationMode::Strict,
+                },
+                window: row..row + 1,
+                whole_row: true,
+            }));
+        }
+        let lowered = self.lower_op(graph, id, &mut CompileContext::new())?;
+        let shape = lowered.shape.ok_or_else(|| {
+            EngineError::InvalidPlan("a set operator's operand without a projection".to_string())
+        })?;
+        let outputs = vec![Output::Eval {
+            dst: row,
+            expr: row_value(shape.row_shape()),
+        }];
+        Ok(Op::Project(Box::new(Project {
+            input: lowered.op,
+            outputs,
+        })))
+    }
+
+    /// The registers that tell a projection's rows apart: those of its values when its
+    /// attribute names are fixed and distinct (so rows are equal exactly when they are), else
+    /// the row made into one value (by a projection added to `input`).
+    fn row_key(&mut self, input: Op, row: &RowShape) -> Result<(Op, Vec<SlotId>)> {
+        if let Some(regs) = fixed_row_registers(row) {
+            return Ok((input, regs));
+        }
+        let dst = self.alloc_reg()?;
+        let outputs = vec![Output::Eval {
+            dst,
+            expr: row_value(row),
+        }];
+        Ok((Op::Project(Box::new(Project { input, outputs })), vec![dst]))
     }
 
     /// Lay out a FROM subtree: compile its scans, give each a cursor and a window of
@@ -682,7 +878,7 @@ impl<'a> Lowerer<'a> {
                 Ok((ResolverKind::Pipeline(binding), Layout::Scan(slots)))
             }
             BindingsOp::Join(join) => {
-                let (left_id, right_id) = graph.join_inputs(id)?;
+                let (left_id, right_id) = graph.two_inputs(id)?;
                 {
                     let mut extractor = ExprFieldExtractor::new(ctx);
                     if let Some(on) = &join.on {
@@ -797,6 +993,8 @@ impl<'a> Lowerer<'a> {
                     true => Expr::Literal(ValueOwned::Missing),
                     false => self.lower_expr(scan_expr, resolver)?,
                 },
+                globals: Globals::default(),
+                coercion: Coercion::From,
                 assert_collection: self.mode == EvaluationMode::Strict,
             },
         })
@@ -988,16 +1186,6 @@ impl<'a> Lowerer<'a> {
             record_exprs.push(self.lower_expr(expr, resolver)?);
         }
         for agg in &group_by.aggregate_exprs {
-            // DISTINCT changes nothing for MIN, MAX, ANY and EVERY, which a duplicate can't
-            // move. TODO: DISTINCT COUNT, SUM and AVG, with the sorter's duplicate elimination
-            use partiql_logical::AggFunc as F;
-            let duplicates_count = matches!(agg.func, F::AggCount | F::AggSum | F::AggAvg);
-            if agg.setq == partiql_logical::SetQuantifier::Distinct && duplicates_count {
-                return Err(EngineError::UnsupportedExpr(format!(
-                    "{:?}(DISTINCT ...)",
-                    agg.func
-                )));
-            }
             record_exprs.push(self.lower_expr(&agg.expr, resolver)?);
         }
         let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
@@ -1012,6 +1200,17 @@ impl<'a> Lowerer<'a> {
         let mut aggs = Vec::with_capacity(group_by.aggregate_exprs.len());
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
             let input = record + key_count + i as u16;
+            // DISTINCT changes nothing for MIN, MAX, ANY and EVERY, which a duplicate can't move
+            use partiql_logical::AggFunc as F;
+            let duplicates_count = matches!(agg.func, F::AggCount | F::AggSum | F::AggAvg);
+            let distinct =
+                match agg.setq == partiql_logical::SetQuantifier::Distinct && duplicates_count {
+                    true => Some(GroupDistinct {
+                        table: self.add_hash_table()?,
+                        new: self.alloc_reg()?,
+                    }),
+                    false => None,
+                };
             let accum = self.alloc_reg()?;
             let (steps, finalize) = match &agg.func {
                 // AVG keeps a sum and a count
@@ -1026,6 +1225,7 @@ impl<'a> Lowerer<'a> {
             };
             aggs.push(GroupAgg {
                 input,
+                distinct,
                 steps,
                 finalize,
                 accum,
@@ -1106,15 +1306,24 @@ impl<'a> Lowerer<'a> {
         })
     }
 
-    /// Lower a query without FROM. Catalog objects the expression names are read through
-    /// implicit scans, one register each.
+    /// Lower a query without FROM.
     fn lower_expr_query(
         &mut self,
         expr_query: &partiql_logical::ExprQuery,
     ) -> Result<(Root, Shape)> {
+        let (globals, resolver) = self.lower_globals(&expr_query.expr)?;
+        let expr = self.lower_expr(&expr_query.expr, &resolver)?;
+        let dst = self.alloc_reg()?;
+        let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
+        Ok((Root::Expr { globals, expr, dst }, shape))
+    }
+
+    /// The catalog objects `expr` (outside any FROM clause) names, each read through an
+    /// implicit scan into a register of its own, and the resolver for its names.
+    fn lower_globals(&mut self, expr: &ValueExpr) -> Result<(Globals, ResolverKind)> {
         let mut slots = FxHashMap::default();
-        let (mut tables, mut cursors) = (vec![], vec![]);
-        for db_ref in collect_db_refs(&expr_query.expr) {
+        let mut globals = Globals::default();
+        for db_ref in collect_db_refs(expr) {
             let Some(name) = db_ref.path.first().and_then(binding_name_string) else {
                 continue;
             };
@@ -1139,7 +1348,7 @@ impl<'a> Lowerer<'a> {
                 .insert(scan_id, ScanMetadata { layout, object_id });
             self.scans.insert(scan_id, ScanKind::Bound);
             if !reader_factory.is_collection() {
-                cursors.push(self.add_cursor(scan_id, slot)?);
+                globals.cursors.push(self.add_cursor(scan_id, slot)?);
                 slots.insert(name, slot);
                 continue;
             }
@@ -1156,7 +1365,7 @@ impl<'a> Lowerer<'a> {
             self.sorters.push(SorterMetadata {
                 keys: SortKeys::Group(0),
             });
-            tables.push(
+            globals.tables.push(
                 u32::try_from(self.subqueries.len())
                     .map_err(|_| EngineError::TooLarge("subqueries"))?,
             );
@@ -1180,18 +1389,7 @@ impl<'a> Lowerer<'a> {
         } else {
             ResolverKind::Global(GlobalSlotResolver { slots })
         };
-        let expr = self.lower_expr(&expr_query.expr, &resolver)?;
-        let dst = self.alloc_reg()?;
-        let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
-        Ok((
-            Root::Expr {
-                tables,
-                cursors,
-                expr,
-                dst,
-            },
-            shape,
-        ))
+        Ok((globals, resolver))
     }
 
     // -----------------------------------------------------------------------
@@ -1424,6 +1622,48 @@ fn unbound_object_id() -> ObjectId {
         partiql_common::catalog::CatalogId::from(u64::MAX),
         partiql_common::catalog::EntryId::from(u64::MAX),
     ))
+}
+
+/// The registers of a row's values, in order, when its attribute names are fixed and
+/// distinct, or it is one value.
+fn fixed_row_registers(row: &RowShape) -> Option<Vec<SlotId>> {
+    match row {
+        RowShape::Register(reg, _) => Some(vec![*reg as SlotId]),
+        RowShape::Struct(fields) => {
+            let mut names = FxHashSet::default();
+            let mut regs = Vec::with_capacity(fields.len());
+            for field in fields {
+                match (&field.name, &field.value) {
+                    (FieldName::Static(name), RowShape::Register(reg, _))
+                        if names.insert(name.as_str()) =>
+                    {
+                        regs.push(*reg as SlotId)
+                    }
+                    _ => return None,
+                }
+            }
+            Some(regs)
+        }
+    }
+}
+
+/// An expression making a row into one value: its value, or the tuple of its attributes
+/// (leaving out those whose value is MISSING, as the row would).
+fn row_value(row: &RowShape) -> Expr {
+    match row {
+        RowShape::Register(reg, _) => Expr::SlotRef(*reg as SlotId),
+        RowShape::Struct(fields) => {
+            let attrs = fields
+                .iter()
+                .map(|field| match &field.name {
+                    FieldName::Static(name) => Expr::Literal(ValueOwned::String(name.clone())),
+                    FieldName::Register(reg) => Expr::SlotRef(*reg as SlotId),
+                })
+                .collect();
+            let values = fields.iter().map(|field| row_value(&field.value)).collect();
+            Expr::Tuple { attrs, values }
+        }
+    }
 }
 
 /// Record the fields of FROM bindings that `op` reads.
@@ -1867,7 +2107,7 @@ fn from_source_exprs<'p>(graph: &PlanGraph<'p>, id: OpId) -> Result<Vec<&'p Valu
             expr => vec![expr],
         }),
         BindingsOp::Join(join) => {
-            let (left, right) = graph.join_inputs(id)?;
+            let (left, right) = graph.two_inputs(id)?;
             let mut exprs = from_source_exprs(graph, left)?;
             exprs.extend(from_source_exprs(graph, right)?);
             exprs.extend(join.on.as_ref());
