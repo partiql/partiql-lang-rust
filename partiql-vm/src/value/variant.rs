@@ -69,7 +69,7 @@ pub(crate) fn lower_deep<'a>(value: ValueRef<'a>, arena: &'a Arena) -> Result<Va
 }
 
 /// Whether `value` is or holds a variant.
-fn holds_variant(value: &ValueRef<'_>) -> bool {
+pub(crate) fn holds_variant(value: &ValueRef<'_>) -> bool {
     match value {
         ValueRef::Variant(..) => true,
         ValueRef::List(items) | ValueRef::Bag(items) => items.iter().any(holds_variant),

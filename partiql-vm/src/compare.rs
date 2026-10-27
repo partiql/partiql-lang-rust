@@ -168,6 +168,24 @@ impl<'a> EqOperand<'a> {
     }
 }
 
+/// The name of a value's type, for errors.
+pub(crate) fn type_name(value: &ValueRef<'_>) -> &'static str {
+    match value {
+        ValueRef::Missing => "MISSING",
+        ValueRef::Null => "NULL",
+        ValueRef::Bool(_) => "bool",
+        ValueRef::I64(_) => "int",
+        ValueRef::F64(_) => "float",
+        ValueRef::Decimal(_) => "decimal",
+        ValueRef::Str(_) => "string",
+        ValueRef::Bytes(_) => "blob",
+        ValueRef::List(_) => "list",
+        ValueRef::Bag(_) => "bag",
+        ValueRef::Tuple(_) => "tuple",
+        ValueRef::Variant(..) => "Ion value",
+    }
+}
+
 /// Whether `=` compares `value` by its `eqg` key.
 fn has_key(value: &ValueRef<'_>) -> bool {
     matches!(
@@ -183,13 +201,15 @@ pub(crate) enum Order {
     /// Either is NULL (and neither MISSING).
     Null,
     /// Values that are ordered: numbers by value exactly whatever their type, strings by code
-    /// point, booleans (false first), blobs by byte, and two lists, bags or tuples by PartiQL's
-    /// total order (as ORDER BY sorts them, as in the legacy evaluator).
+    /// point, booleans (false first), blobs by byte, and two lists, bags or tuples by their `eqg`
+    /// keys, so that `<=` is `<` or `=` however nested (NULL and MISSING apart, NaN equal to
+    /// NaN and before every other number).
     Ordered(Ordering),
     /// A NaN: no order holds.
     Unordered,
     /// Values of types that don't compare (`1 < 'a'`): MISSING, or an error in strict mode.
-    /// An Ion value the VM has no type for (a timestamp) is one, until it has a type for it.
+    /// An Ion value the VM has no type for (a timestamp), or a collection holding one, is one
+    /// too, until the VM has a type for it.
     Incomparable,
 }
 
@@ -206,9 +226,11 @@ pub(crate) fn order<'a>(a: ValueRef<'a>, b: ValueRef<'a>, scratch: &'a Arena) ->
         (ValueRef::List(_), ValueRef::List(_))
         | (ValueRef::Bag(_), ValueRef::Bag(_))
         | (ValueRef::Tuple(_), ValueRef::Tuple(_)) => {
-            let a = variant::lower_deep(a, scratch)?;
-            let b = variant::lower_deep(b, scratch)?;
-            Order::Ordered(total_order(&a, &b))
+            let (a, b) = (eqg_key(a, scratch)?, eqg_key(b, scratch)?);
+            match variant::holds_variant(&a) || variant::holds_variant(&b) {
+                true => Order::Incomparable,
+                false => Order::Ordered(eqg_cmp(&a, &b)),
+            }
         }
         (a, b) => match number_cmp(&a, &b) {
             Some(Some(order)) => Order::Ordered(order),

@@ -63,6 +63,15 @@
   expect: { rows: [true, false, false, true, true, true, true, true, true] }
 }
 
+// Collections order by their `eqg` keys, so <= is < or = nested too: NULL and MISSING are apart
+// (MISSING first); one holding an Ion value the VM has no type for (a timestamp) doesn't compare
+{
+  sql: '''
+    [[NULL] = [MISSING], [NULL] <= [MISSING], [MISSING] < [NULL], [`2000-01-01T00:00Z`] <= [`2001-01-01T00:00Z`]]
+  ''',
+  expect: { rows: [false, false, true, $missing::null] }
+}
+
 // Values of types that don't compare give MISSING (an error in strict mode); BETWEEN is the AND
 // of two comparisons, and AND of two MISSINGs is NULL
 {

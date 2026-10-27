@@ -1317,8 +1317,9 @@ impl Program {
                         compare::Order::Unordered => ValueRef::Bool(false),
                         compare::Order::Incomparable if *strict => {
                             return Err(EngineError::TypeError(format!(
-                                "{op:?} of values that don't compare: {:?} and {:?}",
-                                regs[*a as usize], regs[*b as usize]
+                                "{op:?} of values that don't compare: {} and {}",
+                                compare::type_name(&regs[*a as usize]),
+                                compare::type_name(&regs[*b as usize])
                             )))
                         }
                         compare::Order::Incomparable => ValueRef::Missing,
