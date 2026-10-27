@@ -1,0 +1,115 @@
+// GROUP AS: in each group, the bag of its input rows, each a tuple of the FROM variables.
+'''
+  CREATE TABLE sales;
+  INSERT INTO sales SELECT * FROM <<
+    {'rep': 'Bob', 'amt': 10}, {'rep': 'Bob', 'amt': 20}, {'rep': 'Meg', 'amt': 30}
+  >>;
+'''
+
+{
+  sql: '''
+    SELECT s.rep AS rep, g
+    FROM sales s
+    GROUP BY s.rep GROUP AS g
+  ''',
+  expect: $bag::[
+    { rep: "Bob", g: $bag::[ { s: { rep: "Bob", amt: 10 } }, { s: { rep: "Bob", amt: 20 } } ] },
+    { rep: "Meg", g: $bag::[ { s: { rep: "Meg", amt: 30 } } ] }
+  ]
+}
+
+// Every FROM variable, whatever the query reads of it, and rows with keys `eqg` to the group's
+{
+  sql: '''
+    SELECT k, g
+    FROM << {'k': 1, 'x': 'a'}, {'k': 1.0, 'x': 'b'} >> t, << 10, 20 >> u
+    GROUP BY t.k AS k GROUP AS g
+  ''',
+  expect: $bag::[
+    { k: 1, g: $bag::[
+      { t: { k: 1, x: "a" }, u: 10 }, { t: { k: 1, x: "a" }, u: 20 },
+      { t: { k: 1.0, x: "b" }, u: 10 }, { t: { k: 1.0, x: "b" }, u: 20 }
+    ] }
+  ]
+}
+
+// The group variable is a FROM source of a subquery, run again for each group
+{
+  sql: '''
+    SELECT VALUE { 'rep': rep, 'amts': (SELECT VALUE v.s.amt FROM g AS v) }
+    FROM sales s
+    GROUP BY s.rep AS rep GROUP AS g
+  ''',
+  expect: $bag::[
+    { rep: "Bob", amts: $bag::[10, 20] },
+    { rep: "Meg", amts: $bag::[30] }
+  ]
+}
+
+// ... alongside aggregates, HAVING, ORDER BY and LIMIT
+{
+  sql: '''
+    SELECT rep, COUNT(DISTINCT s.amt) AS n, COLL_COUNT(g) AS rows
+    FROM sales s
+    GROUP BY s.rep AS rep GROUP AS g
+    HAVING COUNT(*) > 0
+    ORDER BY rep DESC
+    LIMIT 1
+  ''',
+  expect: { rows: [
+    { rep: "Meg", n: 1, rows: 1 }
+  ] }
+}
+
+// A group variable is a value like any other, here a key
+{
+  sql: '''
+    SELECT gg, COUNT(*) AS n
+    FROM (SELECT g FROM << {'a': 1, 'b': 2}, {'a': 2, 'b': 2} >> t GROUP BY t.b AS b GROUP AS g) AS q
+    GROUP BY q.g AS gg
+  ''',
+  expect: $bag::[
+    { gg: $bag::[ { t: { a: 1, b: 2 } }, { t: { a: 2, b: 2 } } ], n: 1 }
+  ]
+}
+
+// A subquery's groups are its own
+{
+  sql: '''
+    SELECT VALUE (SELECT a, g FROM o.xs x GROUP BY x AS a GROUP AS g)
+    FROM << {'xs': [1, 1, 2]}, {'xs': [3]} >> o
+  ''',
+  expect: $bag::[
+    $bag::[ { a: 1, g: $bag::[ { x: 1 }, { x: 1 } ] }, { a: 2, g: $bag::[ { x: 2 } ] } ],
+    $bag::[ { a: 3, g: $bag::[ { x: 3 } ] } ]
+  ]
+}
+
+{
+  sql: '''
+    SELECT a, g
+    FROM << >> t
+    GROUP BY t.a AS a GROUP AS g
+  ''',
+  expect: $bag::[]
+}
+
+// GROUP AS holds every FROM variable, so one bound by AT (not supported yet) is an error, not
+// left out
+{
+  sql: '''
+    SELECT k, g
+    FROM [ {'k': 1} ] AS t AT i
+    GROUP BY t.k AS k GROUP AS g
+  ''',
+  expect: { error: "AT variable" }
+}
+
+{
+  sql: '''
+    SELECT g
+    FROM << {'k': 1} >> t
+    GROUP BY t.k AS g GROUP AS g
+  ''',
+  expect: { error: "names a GROUP BY key" }
+}

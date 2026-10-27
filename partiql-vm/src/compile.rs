@@ -1052,13 +1052,20 @@ impl<'q> Emitter<'q> {
     }
 
     /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group (unless there are
-    /// no keys), finalize the aggregates, then `row`.
+    /// no keys), collect the GROUP AS bag, finalize the aggregates, then `row`.
     fn emit_group_output(&mut self, agg: &'q Aggregate, row: Row<'_, 'q>) -> Result<Label> {
         let output = self.asm.label();
         let caller = self.asm.begin_routine(output);
         let ret = self.asm.label();
         if agg.key_count > 0 {
             self.asm.jump_if_not_true(agg.has_data, ret);
+        }
+        if let Some(group_as) = &agg.group_as {
+            self.asm.push(Inst::SorterGroupBag {
+                sorter_id: agg.sorter,
+                field: group_as.field,
+                dst: group_as.dst,
+            });
         }
         for group_agg in &agg.aggs {
             self.asm.push(Inst::AggFinal {

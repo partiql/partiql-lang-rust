@@ -245,9 +245,11 @@ pub(crate) struct Aggregate {
     pub(crate) key_count: u16,
     /// The current group's keys, as its first record wrote them.
     pub(crate) keys: SlotId,
-    /// Registers comparing a record's keys with the current group's.
+    /// Set when a record starts a group.
     pub(crate) new_group: SlotId,
     pub(crate) aggs: Vec<GroupAgg>,
+    /// GROUP AS: the group's input rows, made into a bag for each group.
+    pub(crate) group_as: Option<GroupAs>,
     /// Every aggregate's accumulator registers, reset for each group.
     pub(crate) accums: Range<SlotId>,
     /// Set once the current group has a record.
@@ -302,6 +304,13 @@ pub(crate) struct GroupAgg {
     /// Finalizes the accumulators in place, from the first.
     pub(crate) finalize: AggFunc,
     pub(crate) accum: SlotId,
+}
+
+/// GROUP AS: each record's last field is its input row's FROM variables, as a tuple
+/// (`{t: <t's row>, ...}`); each group's are made into a bag in `dst`.
+pub(crate) struct GroupAs {
+    pub(crate) field: u16,
+    pub(crate) dst: SlotId,
 }
 
 /// The inputs a DISTINCT aggregate has seen in the current group.
@@ -1205,8 +1214,8 @@ impl<'a> Lowerer<'a> {
         Ok((outputs, dst))
     }
 
-    /// Lower GROUP BY over `input`, and the resolver for what follows (group keys and
-    /// aggregates by name).
+    /// Lower GROUP BY over `input`, and the resolver for what follows (group keys, aggregates
+    /// and the GROUP AS variable by name).
     fn lower_group_by(
         &mut self,
         group_by: &GroupBy,
@@ -1215,7 +1224,8 @@ impl<'a> Lowerer<'a> {
     ) -> Result<(Aggregate, ResolverKind)> {
         let keys: Vec<(&String, &ValueExpr)> = group_by.exprs.iter().collect();
         // Every index into the record fits a register number once the record is allocated
-        let record_len = keys.len() + group_by.aggregate_exprs.len();
+        let group_as_len = usize::from(group_by.group_as_alias.is_some());
+        let record_len = keys.len() + group_by.aggregate_exprs.len() + group_as_len;
         let key_count = count_u16(keys.len(), "GROUP BY keys")?;
 
         let mut record_exprs = Vec::with_capacity(record_len);
@@ -1224,6 +1234,9 @@ impl<'a> Lowerer<'a> {
         }
         for agg in &group_by.aggregate_exprs {
             record_exprs.push(self.lower_expr(&agg.expr, resolver)?);
+        }
+        if group_by.group_as_alias.is_some() {
+            record_exprs.push(group_as_row(resolver)?);
         }
         let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
         self.sorters.push(SorterMetadata {
@@ -1269,8 +1282,16 @@ impl<'a> Lowerer<'a> {
             });
         }
         let accums = accums_start..self.next_reg;
+        let group_as = match &group_by.group_as_alias {
+            Some(_) => Some(GroupAs {
+                field: count_u16(record_len - 1, "GROUP BY record fields")?,
+                dst: self.alloc_reg()?,
+            }),
+            None => None,
+        };
 
-        // Group keys and aggregates, by name, for HAVING and the SELECT list
+        // Group keys, aggregates and the GROUP AS variable, by name, for HAVING and the
+        // SELECT list
         let mut column_slots = FxHashMap::default();
         for (i, (name, _)) in keys.iter().enumerate() {
             column_slots.insert((*name).clone(), group_keys + i as u16);
@@ -1278,9 +1299,18 @@ impl<'a> Lowerer<'a> {
         for (agg, lowered) in group_by.aggregate_exprs.iter().zip(&aggs) {
             column_slots.insert(agg.name.clone(), lowered.accum);
         }
+        if let (Some(name), Some(group_as)) = (&group_by.group_as_alias, &group_as) {
+            if keys.iter().any(|(key, _)| key.eq_ignore_ascii_case(name)) {
+                return Err(EngineError::InvalidPlan(format!(
+                    "GROUP AS {name} names a GROUP BY key too"
+                )));
+            }
+            column_slots.insert(name.clone(), group_as.dst);
+        }
         let grouped = ResolverKind::Pipeline(PipelineSlotResolver {
             base_row_slot: None,
             scan_alias: String::new(),
+            at_alias: None,
             table_name: None,
             column_slots,
             group_output: true,
@@ -1296,6 +1326,7 @@ impl<'a> Lowerer<'a> {
             keys: group_keys,
             new_group: self.alloc_reg()?,
             aggs,
+            group_as,
             accums,
             has_data: self.alloc_reg()?,
             ret: self.alloc_reg()?,
@@ -1605,6 +1636,7 @@ fn pushdown(
     let mut binding = PipelineSlotResolver {
         base_row_slot: None,
         scan_alias: scan.as_key.clone(),
+        at_alias: scan.at_key.clone(),
         table_name,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1635,6 +1667,7 @@ fn whole_row_binding(scan: &Scan) -> PipelineSlotResolver {
     PipelineSlotResolver {
         base_row_slot: Some(0),
         scan_alias: scan.as_key.clone(),
+        at_alias: scan.at_key.clone(),
         table_name: None,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1657,6 +1690,37 @@ fn unbound_object_id() -> ObjectId {
         partiql_common::catalog::CatalogId::from(u64::MAX),
         partiql_common::catalog::EntryId::from(u64::MAX),
     ))
+}
+
+/// GROUP AS's tuple of an input row: each FROM variable's value, named by the variable.
+fn group_as_row(resolver: &ResolverKind) -> Result<Expr> {
+    let bindings = match resolver {
+        ResolverKind::Pipeline(binding) => std::slice::from_ref(binding),
+        ResolverKind::Multi(bindings) => bindings.as_slice(),
+        ResolverKind::Global(_) | ResolverKind::Empty => &[],
+    };
+    let (mut attrs, mut values) = (vec![], vec![]);
+    for binding in bindings {
+        // GROUP AS holds every FROM variable, so one the VM does not bind is an error rather
+        // than left out
+        if let Some(at) = &binding.at_alias {
+            return Err(EngineError::UnsupportedExpr(format!(
+                "GROUP AS over the AT variable {at}"
+            )));
+        }
+        // GROUP AS reads every variable's whole value (`extract_fields`)
+        let row = binding.base_row_slot.ok_or_else(|| {
+            EngineError::InvalidPlan(format!(
+                "GROUP AS without the whole row of {}",
+                binding.scan_alias
+            ))
+        })?;
+        attrs.push(Expr::Literal(ValueOwned::String(
+            binding.scan_alias.clone(),
+        )));
+        values.push(Expr::SlotRef(row));
+    }
+    Ok(Expr::Tuple { attrs, values })
 }
 
 /// The registers of a row's values, in order, when its attribute names are fixed and
@@ -1718,6 +1782,9 @@ fn extract_fields(op: &BindingsOp, ctx: &mut CompileContext) {
         }
         BindingsOp::ProjectValue(pv) => extractor.extract(&pv.expr),
         BindingsOp::GroupBy(group_by) => {
+            if group_by.group_as_alias.is_some() {
+                extractor.request_all_whole_values();
+            }
             for expr in group_by.exprs.values() {
                 extractor.extract(expr);
             }
@@ -2031,6 +2098,8 @@ impl SlotResolver for GlobalSlotResolver {
 struct PipelineSlotResolver {
     base_row_slot: Option<SlotId>,
     scan_alias: String,
+    /// The scan's `AT` variable, which the VM does not bind yet.
+    at_alias: Option<String>,
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
     /// GROUP BY's output instead: its keys and aggregates by name, with no alias.
@@ -2415,6 +2484,7 @@ mod tests {
         ResolverKind::Pipeline(PipelineSlotResolver {
             base_row_slot: whole_row,
             scan_alias: alias.to_string(),
+            at_alias: None,
             table_name: None,
             column_slots: fields.iter().map(|&(f, s)| (f.to_string(), s)).collect(),
             group_output: false,
