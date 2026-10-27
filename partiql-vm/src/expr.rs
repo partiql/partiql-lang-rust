@@ -1,4 +1,5 @@
 use crate::arena::{Arena, SlotId};
+use crate::compare;
 use crate::error::{count_u16, EngineError, Result};
 use crate::value::{value_get_field_ref, variant, ValueOwned, ValueRef};
 use partiql_logical::{
@@ -8,6 +9,7 @@ use partiql_value::BindingsName;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use rustc_hash::FxHashMap;
+use std::cmp::Ordering;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -20,8 +22,9 @@ pub enum Expr {
     Mod(Box<Expr>, Box<Expr>),
     Exp(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
-    Gt(Box<Expr>, Box<Expr>),
-    Lt(Box<Expr>, Box<Expr>),
+    /// `<>`: the negation of `=`, NULL and MISSING passed on.
+    Neq(Box<Expr>, Box<Expr>),
+    Compare(Comparison, Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -88,8 +91,8 @@ impl Expr {
             | Expr::Mod(a, b)
             | Expr::Exp(a, b)
             | Expr::Eq(a, b)
-            | Expr::Gt(a, b)
-            | Expr::Lt(a, b)
+            | Expr::Neq(a, b)
+            | Expr::Compare(_, a, b)
             | Expr::And(a, b)
             | Expr::Or(a, b)
             | Expr::Concat(a, b)
@@ -227,37 +230,12 @@ pub enum Inst {
         b: u16,
         b_cast: u16,
     },
-    EqI64 {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    EqF64 {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    EqDecimal {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    EqBool {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    EqStr {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
+    /// PartiQL's `=` of any two values (`compare::eq`), or `<>` when `negate`.
     EqDynamic {
         dst: u16,
         a: u16,
-        a_cast: u16,
         b: u16,
-        b_cast: u16,
+        negate: bool,
     },
     // --- Mul ---
     MulI64 {
@@ -319,61 +297,16 @@ pub enum Inst {
         b_cast: u16,
     },
     // --- Gt ---
-    GtI64 {
+    /// `a < b`, `a <= b`, `a > b` or `a >= b` of any two values (`compare::order`). Values of
+    /// types that don't compare give MISSING, or in `strict` mode an error.
+    CompareDynamic {
         dst: u16,
         a: u16,
         b: u16,
-    },
-    GtF64 {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    GtDecimal {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    GtStr {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    GtDynamic {
-        dst: u16,
-        a: u16,
-        a_cast: u16,
-        b: u16,
-        b_cast: u16,
+        op: Comparison,
+        strict: bool,
     },
     // --- Lt ---
-    LtI64 {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    LtF64 {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    LtDecimal {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    LtStr {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
-    LtDynamic {
-        dst: u16,
-        a: u16,
-        a_cast: u16,
-        b: u16,
-        b_cast: u16,
-    },
     // --- Concat ---
     ConcatStr {
         dst: u16,
@@ -732,6 +665,27 @@ pub enum Inst {
     },
 }
 
+/// An ordering comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Comparison {
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+}
+
+impl Comparison {
+    /// Whether the comparison holds of two values in `order`.
+    fn holds(self, order: Ordering) -> bool {
+        match self {
+            Comparison::Lt => order.is_lt(),
+            Comparison::LtEq => order.is_le(),
+            Comparison::Gt => order.is_gt(),
+            Comparison::GtEq => order.is_ge(),
+        }
+    }
+}
+
 /// What a collection a cursor scans is for, which decides how a value that is no collection
 /// is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -792,18 +746,6 @@ impl Inst {
         Inst::ModDecimal { dst, a, b }
     }
 
-    fn new_eq_i64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::EqI64 { dst, a, b }
-    }
-
-    fn new_eq_f64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::EqF64 { dst, a, b }
-    }
-
-    fn new_eq_decimal(dst: u16, a: u16, b: u16) -> Self {
-        Inst::EqDecimal { dst, a, b }
-    }
-
     // --- Mul constructors ---
     fn new_mul_i64(dst: u16, a: u16, b: u16) -> Self {
         Inst::MulI64 { dst, a, b }
@@ -832,32 +774,8 @@ impl Inst {
     }
 
     // --- Gt constructors ---
-    fn new_gt_i64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::GtI64 { dst, a, b }
-    }
-    fn new_gt_f64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::GtF64 { dst, a, b }
-    }
-    fn new_gt_decimal(dst: u16, a: u16, b: u16) -> Self {
-        Inst::GtDecimal { dst, a, b }
-    }
-    fn new_gt_str(dst: u16, a: u16, b: u16) -> Self {
-        Inst::GtStr { dst, a, b }
-    }
 
     // --- Lt constructors ---
-    fn new_lt_i64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::LtI64 { dst, a, b }
-    }
-    fn new_lt_f64(dst: u16, a: u16, b: u16) -> Self {
-        Inst::LtF64 { dst, a, b }
-    }
-    fn new_lt_decimal(dst: u16, a: u16, b: u16) -> Self {
-        Inst::LtDecimal { dst, a, b }
-    }
-    fn new_lt_str(dst: u16, a: u16, b: u16) -> Self {
-        Inst::LtStr { dst, a, b }
-    }
 }
 
 pub struct Program {
@@ -1026,259 +944,6 @@ impl Program {
         }
         Ok(())
     }
-
-    /// Evaluate dynamic equality comparison with type coercion.
-    ///
-    /// Semantics:
-    /// - If either operand is Null or Missing, the result is Null.
-    /// - Numeric types (I64, F64, Decimal) are coerced to a common type before comparison.
-    /// - Same-type non-numeric comparisons (Bool==Bool, Str==Str) are handled directly.
-    /// - Type mismatches between incompatible types return false.
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn eval_eq_dynamic<'a>(
-        &self,
-        dst: u16,
-        lhs: u16,
-        rhs: u16,
-        lhs_cast: u16,
-        rhs_cast: u16,
-        arena: &'a Arena,
-        regs: &mut [ValueRef<'a>],
-        udf: Option<&'a dyn UdfRegistry>,
-    ) -> Result<()> {
-        let av = regs[lhs as usize];
-        let bv = regs[rhs as usize];
-
-        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
-        if is_null_or_missing(av) || is_null_or_missing(bv) {
-            if is_missing(av) || is_missing(bv) {
-                regs[dst as usize] = ValueRef::Missing;
-            } else {
-                regs[dst as usize] = ValueRef::Null;
-            }
-            return Ok(());
-        }
-
-        match (av, bv) {
-            // Numeric same-type
-            (ValueRef::I64(_), ValueRef::I64(_)) => {
-                self.eval_inst(&Inst::new_eq_i64(dst, lhs, rhs), arena, regs, udf)?
-            }
-            (ValueRef::F64(_), ValueRef::F64(_)) => {
-                self.eval_inst(&Inst::new_eq_f64(dst, lhs, rhs), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::Decimal(_)) => {
-                self.eval_inst(&Inst::new_eq_decimal(dst, lhs, rhs), arena, regs, udf)?
-            }
-
-            // Numeric cross-type: I64 vs F64
-            (ValueRef::I64(_), ValueRef::F64(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_f64(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-            (ValueRef::F64(_), ValueRef::I64(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_f64(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-
-            // Numeric cross-type: I64 vs Decimal
-            (ValueRef::I64(_), ValueRef::Decimal(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::Decimal,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_decimal(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::I64(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::Decimal,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_decimal(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-
-            // Numeric cross-type: F64 vs Decimal — cast Decimal to F64
-            (ValueRef::F64(_), ValueRef::Decimal(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_f64(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::F64(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&Inst::new_eq_f64(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-
-            // Non-numeric same-type
-            (ValueRef::Bool(_), ValueRef::Bool(_)) => self.eval_inst(
-                &Inst::EqBool {
-                    dst,
-                    a: lhs,
-                    b: rhs,
-                },
-                arena,
-                regs,
-                udf,
-            )?,
-            (ValueRef::Str(_), ValueRef::Str(_)) => self.eval_inst(
-                &Inst::EqStr {
-                    dst,
-                    a: lhs,
-                    b: rhs,
-                },
-                arena,
-                regs,
-                udf,
-            )?,
-
-            // Type mismatch between incompatible types → false
-            (_, _) => {
-                regs[dst as usize] = ValueRef::Bool(false);
-            }
-        }
-        Ok(())
-    }
-
-    /// Evaluate a dynamic binary comparison (Gt or Lt) with numeric type coercion.
-    ///
-    /// Semantics:
-    /// - If either operand is Null or Missing, the result is Null.
-    /// - Numeric types (I64, F64, Decimal) are coerced to a common type before comparison.
-    /// - Same-type string comparisons are handled directly.
-    /// - Type mismatches between incompatible types return Null.
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn eval_binary_comparison_dynamic<'a>(
-        &self,
-        dst: u16,
-        lhs: u16,
-        rhs: u16,
-        lhs_cast: u16,
-        rhs_cast: u16,
-        fn_i64: fn(u16, u16, u16) -> Inst,
-        fn_f64: fn(u16, u16, u16) -> Inst,
-        fn_decimal: fn(u16, u16, u16) -> Inst,
-        fn_str: fn(u16, u16, u16) -> Inst,
-        arena: &'a Arena,
-        regs: &mut [ValueRef<'a>],
-        udf: Option<&'a dyn UdfRegistry>,
-    ) -> Result<()> {
-        let av = regs[lhs as usize];
-        let bv = regs[rhs as usize];
-
-        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
-        if is_null_or_missing(av) || is_null_or_missing(bv) {
-            if is_missing(av) || is_missing(bv) {
-                regs[dst as usize] = ValueRef::Missing;
-            } else {
-                regs[dst as usize] = ValueRef::Null;
-            }
-            return Ok(());
-        }
-
-        match (av, bv) {
-            // Numeric same-type
-            (ValueRef::I64(_), ValueRef::I64(_)) => {
-                self.eval_inst(&fn_i64(dst, lhs, rhs), arena, regs, udf)?
-            }
-            (ValueRef::F64(_), ValueRef::F64(_)) => {
-                self.eval_inst(&fn_f64(dst, lhs, rhs), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::Decimal(_)) => {
-                self.eval_inst(&fn_decimal(dst, lhs, rhs), arena, regs, udf)?
-            }
-            // Numeric cross-type: I64 vs F64
-            (ValueRef::I64(_), ValueRef::F64(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_f64(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-            (ValueRef::F64(_), ValueRef::I64(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_f64(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-            // Numeric cross-type: I64 vs Decimal
-            (ValueRef::I64(_), ValueRef::Decimal(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::Decimal,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_decimal(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::I64(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::Decimal,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_decimal(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-            // Numeric cross-type: F64 vs Decimal — cast Decimal to F64
-            (ValueRef::F64(_), ValueRef::Decimal(_)) => {
-                let cast = Inst::Cast {
-                    dst: rhs_cast,
-                    from: rhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_f64(dst, lhs, rhs_cast), arena, regs, udf)?
-            }
-            (ValueRef::Decimal(_), ValueRef::F64(_)) => {
-                let cast = Inst::Cast {
-                    dst: lhs_cast,
-                    from: lhs,
-                    to: CastTarget::F64,
-                };
-                self.eval_inst(&cast, arena, regs, udf)?;
-                self.eval_inst(&fn_f64(dst, lhs_cast, rhs), arena, regs, udf)?
-            }
-            // String comparison
-            (ValueRef::Str(_), ValueRef::Str(_)) => {
-                self.eval_inst(&fn_str(dst, lhs, rhs), arena, regs, udf)?
-            }
-            // Incompatible types
-            (_, _) => {
-                regs[dst as usize] = ValueRef::Null;
-            }
-        }
-        Ok(())
-    }
-
     /// Evaluate dynamic exponentiation with type coercion to f64.
     #[inline]
     #[allow(clippy::too_many_arguments)]
@@ -1540,43 +1205,12 @@ impl Program {
                     udf,
                 )?;
             }
-            Inst::EqI64 { dst, a, b } => {
-                let av = regs[*a as usize].as_i64()?;
-                let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::Bool(av == bv);
-            }
-            Inst::EqF64 { dst, a, b } => {
-                let av = regs[*a as usize].as_f64()?;
-                let bv = regs[*b as usize].as_f64()?;
-                regs[*dst as usize] = ValueRef::Bool(av == bv);
-            }
-            Inst::EqDecimal { dst, a, b } => {
-                let av = regs[*a as usize].as_decimal()?;
-                let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Bool(av == bv);
-            }
-            Inst::EqBool { dst, a, b } => {
-                let av = regs[*a as usize].as_bool()?;
-                let bv = regs[*b as usize].as_bool()?;
-                regs[*dst as usize] = ValueRef::Bool(av == bv);
-            }
-            Inst::EqStr { dst, a, b } => {
-                let av = regs[*a as usize];
-                let bv = regs[*b as usize];
-                let result = match (av, bv) {
-                    (ValueRef::Str(a), ValueRef::Str(b)) => a == b,
-                    _ => false,
-                };
-                regs[*dst as usize] = ValueRef::Bool(result);
-            }
-            Inst::EqDynamic {
-                dst,
-                a,
-                b,
-                a_cast,
-                b_cast,
-            } => {
-                self.eval_eq_dynamic(*dst, *a, *b, *a_cast, *b_cast, arena, regs, udf)?;
+            Inst::EqDynamic { dst, a, b, negate } => {
+                regs[*dst as usize] =
+                    match compare::eq(regs[*a as usize], regs[*b as usize], arena)? {
+                        ValueRef::Bool(eq) => ValueRef::Bool(eq != *negate),
+                        absent => absent,
+                    };
             }
             // --- Mul ---
             Inst::MulI64 { dst, a, b } => {
@@ -1668,94 +1302,28 @@ impl Program {
                 self.eval_exp_dynamic(*dst, *a, *b, *a_cast, *b_cast, arena, regs, udf)?;
             }
             // --- Gt ---
-            Inst::GtI64 { dst, a, b } => {
-                let av = regs[*a as usize].as_i64()?;
-                let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::Bool(av > bv);
-            }
-            Inst::GtF64 { dst, a, b } => {
-                let av = regs[*a as usize].as_f64()?;
-                let bv = regs[*b as usize].as_f64()?;
-                regs[*dst as usize] = ValueRef::Bool(av > bv);
-            }
-            Inst::GtDecimal { dst, a, b } => {
-                let av = regs[*a as usize].as_decimal()?;
-                let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Bool(av > bv);
-            }
-            Inst::GtStr { dst, a, b } => {
-                let result = match (regs[*a as usize], regs[*b as usize]) {
-                    (ValueRef::Str(a), ValueRef::Str(b)) => a > b,
-                    _ => false,
-                };
-                regs[*dst as usize] = ValueRef::Bool(result);
-            }
-            Inst::GtDynamic {
+            Inst::CompareDynamic {
                 dst,
                 a,
                 b,
-                a_cast,
-                b_cast,
+                op,
+                strict,
             } => {
-                self.eval_binary_comparison_dynamic(
-                    *dst,
-                    *a,
-                    *b,
-                    *a_cast,
-                    *b_cast,
-                    Inst::new_gt_i64,
-                    Inst::new_gt_f64,
-                    Inst::new_gt_decimal,
-                    Inst::new_gt_str,
-                    arena,
-                    regs,
-                    udf,
-                )?;
-            }
-            // --- Lt ---
-            Inst::LtI64 { dst, a, b } => {
-                let av = regs[*a as usize].as_i64()?;
-                let bv = regs[*b as usize].as_i64()?;
-                regs[*dst as usize] = ValueRef::Bool(av < bv);
-            }
-            Inst::LtF64 { dst, a, b } => {
-                let av = regs[*a as usize].as_f64()?;
-                let bv = regs[*b as usize].as_f64()?;
-                regs[*dst as usize] = ValueRef::Bool(av < bv);
-            }
-            Inst::LtDecimal { dst, a, b } => {
-                let av = regs[*a as usize].as_decimal()?;
-                let bv = regs[*b as usize].as_decimal()?;
-                regs[*dst as usize] = ValueRef::Bool(av < bv);
-            }
-            Inst::LtStr { dst, a, b } => {
-                let result = match (regs[*a as usize], regs[*b as usize]) {
-                    (ValueRef::Str(a), ValueRef::Str(b)) => a < b,
-                    _ => false,
-                };
-                regs[*dst as usize] = ValueRef::Bool(result);
-            }
-            Inst::LtDynamic {
-                dst,
-                a,
-                b,
-                a_cast,
-                b_cast,
-            } => {
-                self.eval_binary_comparison_dynamic(
-                    *dst,
-                    *a,
-                    *b,
-                    *a_cast,
-                    *b_cast,
-                    Inst::new_lt_i64,
-                    Inst::new_lt_f64,
-                    Inst::new_lt_decimal,
-                    Inst::new_lt_str,
-                    arena,
-                    regs,
-                    udf,
-                )?;
+                regs[*dst as usize] =
+                    match compare::order(regs[*a as usize], regs[*b as usize], arena)? {
+                        compare::Order::Missing => ValueRef::Missing,
+                        compare::Order::Null => ValueRef::Null,
+                        compare::Order::Ordered(order) => ValueRef::Bool(op.holds(order)),
+                        compare::Order::Unordered => ValueRef::Bool(false),
+                        compare::Order::Incomparable if *strict => {
+                            return Err(EngineError::TypeError(format!(
+                                "{op:?} of values that don't compare: {} and {}",
+                                compare::type_name(&regs[*a as usize]),
+                                compare::type_name(&regs[*b as usize])
+                            )))
+                        }
+                        compare::Order::Incomparable => ValueRef::Missing,
+                    };
             }
             // --- Concat ---
             Inst::ConcatStr { dst, a, b } => {
@@ -1811,25 +1379,33 @@ impl Program {
                 if matches!(val, ValueRef::Null | ValueRef::Missing) {
                     regs[*dst as usize] = ValueRef::Null;
                 } else {
-                    match coll {
+                    regs[*dst as usize] = match coll {
+                        // True if an element `=` the value; else NULL if a comparison was
+                        // NULL or MISSING (an element was absent: it might have been equal);
+                        // else false (spec section 8)
                         ValueRef::List(items) | ValueRef::Bag(items) => {
-                            let mut found = false;
+                            let val = compare::EqOperand::new(val, arena)?;
+                            let mut result = ValueRef::Bool(false);
                             for item in items.iter() {
-                                if value_ref_eq(val, variant::lower(*item, arena)?) {
-                                    found = true;
-                                    break;
+                                match val.eq(*item, arena)? {
+                                    ValueRef::Bool(true) => {
+                                        result = ValueRef::Bool(true);
+                                        break;
+                                    }
+                                    ValueRef::Null | ValueRef::Missing => result = ValueRef::Null,
+                                    _ => {}
                                 }
                             }
-                            regs[*dst as usize] = ValueRef::Bool(found);
+                            result
                         }
-                        ValueRef::Null | ValueRef::Missing => {
-                            regs[*dst as usize] = ValueRef::Null;
-                        }
-                        _ => {
-                            // Single value comparison: val IN non-collection
-                            regs[*dst as usize] = ValueRef::Bool(value_ref_eq(val, coll));
-                        }
-                    }
+                        ValueRef::Null | ValueRef::Missing => ValueRef::Null,
+                        // A value that is no collection: whether the value `=` it. The parser
+                        // gives `x IN (1)` and `x IN 1` the same tree, so this is both
+                        other => match compare::eq(val, other, arena)? {
+                            ValueRef::Missing => ValueRef::Null,
+                            result => result,
+                        },
+                    };
                 }
             }
             // Three-valued logic, as `partiql_value`'s `BinaryAnd`/`BinaryOr`/`Not`: NULL and
@@ -2158,6 +1734,8 @@ pub struct ProgramBuilder {
     /// Set while the emitter compiles an expression whose subqueries it has just run, so
     /// that reading a subquery's register before it ran fails to compile.
     pub(crate) subqueries_run: bool,
+    /// Strict mode: an operator given values it can't take fails, rather than giving MISSING.
+    pub(crate) strict: bool,
 }
 
 impl ProgramBuilder {
@@ -2171,6 +1749,7 @@ impl ProgramBuilder {
             reg_count: slot_count,
             slot_count,
             subqueries_run: false,
+            strict: false,
         }
     }
 
@@ -2340,14 +1919,23 @@ impl ExprCompiler<'_> {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg()?;
-                let l_cast = self.builder.alloc_reg()?;
-                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::EqDynamic {
                     dst,
                     a: l,
                     b: r,
-                    a_cast: l_cast,
-                    b_cast: r_cast,
+                    negate: false,
+                });
+                Ok(dst)
+            }
+            Expr::Neq(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::EqDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    negate: true,
                 });
                 Ok(dst)
             }
@@ -2527,33 +2115,16 @@ impl ExprCompiler<'_> {
                 });
                 Ok(dst)
             }
-            Expr::Gt(left, right) => {
+            Expr::Compare(op, left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg()?;
-                let l_cast = self.builder.alloc_reg()?;
-                let r_cast = self.builder.alloc_reg()?;
-                self.builder.insts.push(Inst::GtDynamic {
+                self.builder.insts.push(Inst::CompareDynamic {
                     dst,
                     a: l,
                     b: r,
-                    a_cast: l_cast,
-                    b_cast: r_cast,
-                });
-                Ok(dst)
-            }
-            Expr::Lt(left, right) => {
-                let l = self.compile_expr(left)?;
-                let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg()?;
-                let l_cast = self.builder.alloc_reg()?;
-                let r_cast = self.builder.alloc_reg()?;
-                self.builder.insts.push(Inst::LtDynamic {
-                    dst,
-                    a: l,
-                    b: r,
-                    a_cast: l_cast,
-                    b_cast: r_cast,
+                    op: *op,
+                    strict: self.builder.strict,
                 });
                 Ok(dst)
             }
@@ -2641,14 +2212,8 @@ impl ExprCompiler<'_> {
                     self.compile_expr(hi)?,
                 );
                 let reg = |r| Box::new(Expr::SlotRef(r));
-                let at_least = Expr::Or(
-                    Expr::Gt(reg(value), reg(lo)).into(),
-                    Expr::Eq(reg(value), reg(lo)).into(),
-                );
-                let at_most = Expr::Or(
-                    Expr::Lt(reg(value), reg(hi)).into(),
-                    Expr::Eq(reg(value), reg(hi)).into(),
-                );
+                let at_least = Expr::Compare(Comparison::GtEq, reg(value), reg(lo));
+                let at_most = Expr::Compare(Comparison::LtEq, reg(value), reg(hi));
                 self.compile_expr(&Expr::And(at_least.into(), at_most.into()))
             }
             Expr::CollToScalar(expr) => {
@@ -2784,36 +2349,17 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     partiql_logical::BinaryOp::Add => Ok(Expr::Add(left.into(), right.into())),
                     partiql_logical::BinaryOp::Sub => Ok(Expr::Sub(left.into(), right.into())),
                     partiql_logical::BinaryOp::Mod => Ok(Expr::Mod(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Neq => {
-                        Ok(Expr::Not(Box::new(Expr::Eq(left.into(), right.into()))))
-                    }
+                    partiql_logical::BinaryOp::Neq => Ok(Expr::Neq(left.into(), right.into())),
                     partiql_logical::BinaryOp::Eq => Ok(Expr::Eq(left.into(), right.into())),
                     partiql_logical::BinaryOp::And => Ok(Expr::And(left.into(), right.into())),
                     partiql_logical::BinaryOp::Or => Ok(Expr::Or(left.into(), right.into())),
                     partiql_logical::BinaryOp::Concat => {
                         Ok(Expr::Concat(left.into(), right.into()))
                     }
-                    partiql_logical::BinaryOp::Gt => Ok(Expr::Gt(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Gteq => {
-                        // Gteq(l, r) => Or(Gt(l, r), Eq(l', r'))
-                        // We clone left/right since they're used twice
-                        let left_clone = left.clone();
-                        let right_clone = right.clone();
-                        Ok(Expr::Or(
-                            Box::new(Expr::Gt(left.into(), right.into())),
-                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
-                        ))
-                    }
-                    partiql_logical::BinaryOp::Lt => Ok(Expr::Lt(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Lteq => {
-                        // Lteq(l, r) => Or(Lt(l, r), Eq(l', r'))
-                        let left_clone = left.clone();
-                        let right_clone = right.clone();
-                        Ok(Expr::Or(
-                            Box::new(Expr::Lt(left.into(), right.into())),
-                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
-                        ))
-                    }
+                    partiql_logical::BinaryOp::Gt => Ok(compare(Comparison::Gt, left, right)),
+                    partiql_logical::BinaryOp::Gteq => Ok(compare(Comparison::GtEq, left, right)),
+                    partiql_logical::BinaryOp::Lt => Ok(compare(Comparison::Lt, left, right)),
+                    partiql_logical::BinaryOp::Lteq => Ok(compare(Comparison::LtEq, left, right)),
                     partiql_logical::BinaryOp::Mul => Ok(Expr::Mul(left.into(), right.into())),
                     partiql_logical::BinaryOp::Div => Ok(Expr::Div(left.into(), right.into())),
                     partiql_logical::BinaryOp::Exp => Ok(Expr::Exp(left.into(), right.into())),
@@ -3070,8 +2616,7 @@ impl ValueOperands {
             | Inst::DivDynamic { dst, a, b, .. }
             | Inst::ExpDynamic { dst, a, b, .. }
             | Inst::EqDynamic { dst, a, b, .. }
-            | Inst::GtDynamic { dst, a, b, .. }
-            | Inst::LtDynamic { dst, a, b, .. }
+            | Inst::CompareDynamic { dst, a, b, .. }
             | Inst::ConcatDynamic { dst, a, b }
             | Inst::AndBool { dst, a, b }
             | Inst::OrBool { dst, a, b } => ops(Some(dst), &[a, b]),
@@ -3194,27 +2739,7 @@ fn resolve_alias_info<R: SlotResolver>(
     }
 }
 
-/// Shallow structural equality for ValueRef values.
-///
-/// Used by the `IN` operator to check membership in collections.
-/// Returns `false` for Null/Missing comparisons (following SQL semantics).
-fn value_ref_eq(a: ValueRef<'_>, b: ValueRef<'_>) -> bool {
-    match (a, b) {
-        (ValueRef::Null, ValueRef::Null) => false,
-        (ValueRef::Missing, _) | (_, ValueRef::Missing) => false,
-        (ValueRef::Null, _) | (_, ValueRef::Null) => false,
-        (ValueRef::Bool(a), ValueRef::Bool(b)) => a == b,
-        (ValueRef::I64(a), ValueRef::I64(b)) => a == b,
-        (ValueRef::F64(a), ValueRef::F64(b)) => a == b,
-        (ValueRef::Decimal(a), ValueRef::Decimal(b)) => a == b,
-        (ValueRef::I64(a), ValueRef::F64(b)) => (a as f64) == b,
-        (ValueRef::F64(a), ValueRef::I64(b)) => a == (b as f64),
-        (ValueRef::I64(a), ValueRef::Decimal(b)) => Decimal::new(a, 0) == b,
-        (ValueRef::Decimal(a), ValueRef::I64(b)) => a == Decimal::new(b, 0),
-        (ValueRef::F64(a), ValueRef::Decimal(b)) => a == b.to_f64().unwrap_or(f64::NAN),
-        (ValueRef::Decimal(a), ValueRef::F64(b)) => a.to_f64().unwrap_or(f64::NAN) == b,
-        (ValueRef::Str(a), ValueRef::Str(b)) => a == b,
-        (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a == b,
-        _ => false,
-    }
+/// The comparison `op` of two lowered operands.
+fn compare(op: Comparison, left: Expr, right: Expr) -> Expr {
+    Expr::Compare(op, left.into(), right.into())
 }

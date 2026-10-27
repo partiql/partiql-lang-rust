@@ -50,7 +50,7 @@ impl<'a> PlanCompiler<'a> {
     /// Compile a logical plan into a flat bytecode `CompiledPlan`.
     pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
         let query = lower_ir::lower(self.compilation_context, self.mode, plan)?;
-        let program = Emitter::new(&query).emit()?;
+        let program = Emitter::new(&query, self.mode).emit()?;
         Ok(CompiledPlan {
             program,
             cursors: query.cursors,
@@ -241,10 +241,12 @@ struct Emitter<'q> {
 }
 
 impl<'q> Emitter<'q> {
-    fn new(query: &'q Query) -> Self {
+    fn new(query: &'q Query, mode: EvaluationMode) -> Self {
+        let mut builder = ProgramBuilder::new(query.reg_count);
+        builder.strict = mode == EvaluationMode::Strict;
         Emitter {
             query,
-            asm: Asm::new(ProgramBuilder::new(query.reg_count)),
+            asm: Asm::new(builder),
             subqueries: vec![None; query.subqueries.len()],
         }
     }

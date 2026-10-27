@@ -794,6 +794,16 @@ fn strict_aggregate_inputs() {
     }
 }
 
+/// In strict mode, comparing values of types that don't compare is an error (permissive mode
+/// gives MISSING).
+#[test]
+fn strict_comparison_of_incomparable_types() {
+    for query in ["1 < 'a'", "[1] >= 1", "'a' BETWEEN 1 AND 2"] {
+        let err = strict_error(query);
+        assert!(err.contains("don't compare"), "{query}: {err}");
+    }
+}
+
 /// In strict mode, an operand of OUTER UNION, INTERSECT or EXCEPT that is no collection
 /// (NULL and MISSING too) is an error (permissive mode makes it a bag: RFC-0007).
 #[test]

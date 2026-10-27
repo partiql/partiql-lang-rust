@@ -110,6 +110,148 @@ fn is_key_scalar(value: &ValueRef<'_>) -> bool {
     )
 }
 
+/// PartiQL's `=` (spec section 7.1): MISSING if either side is MISSING, else NULL if either is
+/// NULL; numbers are equal by value whatever their type (exactly: `0.1e0` is not `0.1`), and NaN
+/// equals nothing; lists, bags and tuples are equal when their contents are `eqg` (so a NULL in
+/// one equals a NULL in the other, NaN equals NaN, and the result is never NULL); values of
+/// different types are not equal. Ion variants are compared as the values they hold, keys made
+/// in `scratch`.
+pub(crate) fn eq<'a>(a: ValueRef<'a>, b: ValueRef<'a>, scratch: &'a Arena) -> Result<ValueRef<'a>> {
+    EqOperand::new(a, scratch)?.eq(b, scratch)
+}
+
+/// The left side of `=`, decoded and (for a collection or tuple) keyed once, to compare with
+/// many values (`IN`).
+pub(crate) struct EqOperand<'a> {
+    value: ValueRef<'a>,
+    /// The `eqg` key of a list, bag, tuple or undecoded variant.
+    key: Option<ValueRef<'a>>,
+}
+
+impl<'a> EqOperand<'a> {
+    pub(crate) fn new(value: ValueRef<'a>, scratch: &'a Arena) -> Result<Self> {
+        let value = variant::lower(value, scratch)?;
+        let key = match has_key(&value) {
+            true => Some(eqg_key(value, scratch)?),
+            false => None,
+        };
+        Ok(EqOperand { value, key })
+    }
+
+    /// `self = other`.
+    pub(crate) fn eq(&self, other: ValueRef<'a>, scratch: &'a Arena) -> Result<ValueRef<'a>> {
+        let other = variant::lower(other, scratch)?;
+        Ok(match (self.value, other) {
+            (ValueRef::Missing, _) | (_, ValueRef::Missing) => ValueRef::Missing,
+            (ValueRef::Null, _) | (_, ValueRef::Null) => ValueRef::Null,
+            (ValueRef::Bool(a), ValueRef::Bool(b)) => ValueRef::Bool(a == b),
+            (ValueRef::Str(a), ValueRef::Str(b)) => ValueRef::Bool(a == b),
+            (ValueRef::Bytes(a), ValueRef::Bytes(b)) => ValueRef::Bool(a == b),
+            // A list's or bag's key has its elements, so lengths that differ settle it
+            (ValueRef::List(a), ValueRef::List(b)) | (ValueRef::Bag(a), ValueRef::Bag(b))
+                if a.len() != b.len() =>
+            {
+                ValueRef::Bool(false)
+            }
+            (ValueRef::List(_), ValueRef::List(_))
+            | (ValueRef::Bag(_), ValueRef::Bag(_))
+            | (ValueRef::Tuple(_), ValueRef::Tuple(_))
+            | (ValueRef::Variant(..), ValueRef::Variant(..)) => {
+                let key = self.key.expect("a collection's key");
+                ValueRef::Bool(eqg_cmp(&key, &eqg_key(other, scratch)?).is_eq())
+            }
+            (a, b) => match number_cmp(&a, &b) {
+                Some(order) => ValueRef::Bool(order == Some(Ordering::Equal)),
+                None => ValueRef::Bool(false),
+            },
+        })
+    }
+}
+
+/// The name of a value's type, for errors.
+pub(crate) fn type_name(value: &ValueRef<'_>) -> &'static str {
+    match value {
+        ValueRef::Missing => "MISSING",
+        ValueRef::Null => "NULL",
+        ValueRef::Bool(_) => "bool",
+        ValueRef::I64(_) => "int",
+        ValueRef::F64(_) => "float",
+        ValueRef::Decimal(_) => "decimal",
+        ValueRef::Str(_) => "string",
+        ValueRef::Bytes(_) => "blob",
+        ValueRef::List(_) => "list",
+        ValueRef::Bag(_) => "bag",
+        ValueRef::Tuple(_) => "tuple",
+        ValueRef::Variant(..) => "Ion value",
+    }
+}
+
+/// Whether `=` compares `value` by its `eqg` key.
+fn has_key(value: &ValueRef<'_>) -> bool {
+    matches!(
+        value,
+        ValueRef::List(_) | ValueRef::Bag(_) | ValueRef::Tuple(_) | ValueRef::Variant(..)
+    )
+}
+
+/// How `<`, `<=`, `>` and `>=` see two values (spec section 7.1).
+pub(crate) enum Order {
+    /// Either is MISSING.
+    Missing,
+    /// Either is NULL (and neither MISSING).
+    Null,
+    /// Values that are ordered: numbers by value exactly whatever their type, strings by code
+    /// point, booleans (false first), blobs by byte, and two lists, bags or tuples by their `eqg`
+    /// keys, so that `<=` is `<` or `=` however nested (NULL and MISSING apart, NaN equal to
+    /// NaN and before every other number).
+    Ordered(Ordering),
+    /// A NaN: no order holds.
+    Unordered,
+    /// Values of types that don't compare (`1 < 'a'`): MISSING, or an error in strict mode.
+    /// An Ion value the VM has no type for (a timestamp), or a collection holding one, is one
+    /// too, until the VM has a type for it.
+    Incomparable,
+}
+
+/// The order of `a` and `b`, as `<` and the like see it. Ion variants are compared as the
+/// values they hold, decoded in `scratch`.
+pub(crate) fn order<'a>(a: ValueRef<'a>, b: ValueRef<'a>, scratch: &'a Arena) -> Result<Order> {
+    let (a, b) = (variant::lower(a, scratch)?, variant::lower(b, scratch)?);
+    Ok(match (a, b) {
+        (ValueRef::Missing, _) | (_, ValueRef::Missing) => Order::Missing,
+        (ValueRef::Null, _) | (_, ValueRef::Null) => Order::Null,
+        (ValueRef::Bool(a), ValueRef::Bool(b)) => Order::Ordered(a.cmp(&b)),
+        (ValueRef::Str(a), ValueRef::Str(b)) => Order::Ordered(a.cmp(b)),
+        (ValueRef::Bytes(a), ValueRef::Bytes(b)) => Order::Ordered(a.cmp(b)),
+        (ValueRef::List(_), ValueRef::List(_))
+        | (ValueRef::Bag(_), ValueRef::Bag(_))
+        | (ValueRef::Tuple(_), ValueRef::Tuple(_)) => {
+            let (a, b) = (eqg_key(a, scratch)?, eqg_key(b, scratch)?);
+            match variant::holds_variant(&a) || variant::holds_variant(&b) {
+                true => Order::Incomparable,
+                false => Order::Ordered(eqg_cmp(&a, &b)),
+            }
+        }
+        (a, b) => match number_cmp(&a, &b) {
+            Some(Some(order)) => Order::Ordered(order),
+            Some(None) => Order::Unordered,
+            None => Order::Incomparable,
+        },
+    })
+}
+
+/// Two numbers compared by value, exactly, whatever their types: `None` unless both are
+/// numbers, and `Some(None)` when either is NaN, which is unordered (not equal, less or
+/// greater than anything) as `=`, `<` and `>` see it.
+pub(crate) fn number_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Option<Option<Ordering>> {
+    let (a, b) = (Number::of(a)?, Number::of(b)?);
+    let is_nan = |n: Number| matches!(n, Number::Float(f) if f.is_nan());
+    Some(match is_nan(a) || is_nan(b) {
+        true => None,
+        false => Some(a.cmp(b)),
+    })
+}
+
 /// `eqg` as a total order of keys (`eqg_key`): the order GROUP BY sorts its keys in, equal
 /// exactly when the values are `eqg`. Unlike `=`, NULL equals NULL and MISSING equals MISSING
 /// (but not each other); numbers are equal by value whatever their type (`1`, `1.0` and
@@ -749,6 +891,41 @@ mod tests {
             ion("[2000-01-01T00:00Z]"),
         );
         apart(ion("2000-01-01T00:00Z"), ion("2000-01-01T00:01Z"));
+    }
+
+    /// `=` of collections and tuples agrees with `eqg` of them, over every pair of values; at
+    /// the top NULL and MISSING propagate, and NaN equals nothing.
+    #[test]
+    fn eq_of_collections_is_eqg() {
+        let arena = Arena::default();
+        let v = values(&arena);
+        for a in &v {
+            for b in &v {
+                let result = eq(*a, *b, &arena).unwrap();
+                let expected = match (a, b) {
+                    (ValueRef::Missing, _) | (_, ValueRef::Missing) => ValueRef::Missing,
+                    (ValueRef::Null, _) | (_, ValueRef::Null) => ValueRef::Null,
+                    _ if [a, b]
+                        .iter()
+                        .any(|v| matches!(v, ValueRef::F64(f) if f.is_nan())) =>
+                    {
+                        ValueRef::Bool(false)
+                    }
+                    _ => ValueRef::Bool(
+                        super::eqg_cmp(
+                            &eqg_key(*a, &arena).unwrap(),
+                            &eqg_key(*b, &arena).unwrap(),
+                        )
+                        .is_eq(),
+                    ),
+                };
+                assert_eq!(
+                    format!("{result:?}"),
+                    format!("{expected:?}"),
+                    "{a:?} = {b:?}"
+                );
+            }
+        }
     }
 
     #[test]

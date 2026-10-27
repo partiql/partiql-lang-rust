@@ -1,0 +1,117 @@
+// `=` (spec section 7.1): NULL and MISSING propagate at the top; lists, bags and tuples are
+// equal when their contents are, nested values compared with `eqg`.
+
+{
+  sql: '''
+    [<<100>> = <<100>>, [1, 2] = [1, 2], {'a': 1} = {'a': 1}, [1, 2] = [2, 1], <<1, 2>> = <<2, 1>>]
+  ''',
+  expect: { rows: [true, true, true, false, true] }
+}
+
+// Numbers are equal by value whatever their type, nested too; tuples compare as multisets of
+// attributes, in any order
+{
+  sql: '''
+    [[1, 2e0, `hello`] = [1.0, 2, `hello`], {'a': 1, 'a': 10.0, 'b': 2e0} = {'a': 1.0, 'a': 10, 'b': 2},
+     {'a': [0, 1], 'b': 2} = {'b': 2, 'a': [0, 1]}, {'a': 1, 'b': 2} = {'a': 1}, [1.0, 2] = [1.0, 2, 3]]
+  ''',
+  expect: { rows: [true, true, true, false, false] }
+}
+
+// Inside a collection NULL equals NULL and MISSING equals MISSING, so the result is never NULL;
+// at the top they propagate; values of different types are not equal
+{
+  sql: '''
+    [[NULL] = [NULL], [MISSING] = [MISSING], [NULL] = [MISSING], [1] = <<1>>, NULL = [1],
+     {} = {'a': MISSING}, 1 = 'a', [`a::1`] = [1]]
+  ''',
+  expect: { rows: [true, true, false, false, null, true, false, true] }
+}
+
+{
+  sql: '''
+    MISSING = [1]
+  ''',
+  expect: { rows: $missing::null }
+}
+
+// Numbers compare exactly: the float 0.1 is 0.1000000000000000055…, above the decimal 0.1;
+// NaN is equal to, less and greater than nothing
+{
+  sql: '''
+    [`0.1e0` = 0.1, `0.1e0` > 0.1, `0.1e0` >= 0.1, `0.1e0` < 0.1, `0.5e0` = 0.5,
+     9007199254740993 > `9007199254740992e0`, `nan` = `nan`, `nan` > 1, `nan` < 1, `nan` >= `nan`]
+  ''',
+  expect: { rows: [false, true, true, false, true, true, false, false, false, false] }
+}
+
+// Nested, NaN equals NaN, as `eqg` (and GROUP BY) has it; the legacy evaluator keeps it unequal
+{
+  sql: '''
+    [[`nan`] = [`nan`], {'a': `nan`} = {'a': `nan`}, NULLIF([`nan`], [`nan`])]
+  ''',
+  expect: { rows: [true, true, null] }
+}
+
+// <, <=, >, >= and BETWEEN order numbers, strings, booleans and blobs, and lists, bags and
+// tuples (as ORDER BY does); <= is < or =, without evaluating its operands twice
+{
+  sql: '''
+    [[1] >= [1], [1] >= [2], [1] <= [0], {'a': 1} >= {'a': 1}, [1] BETWEEN [1] AND [1],
+     true > false, true >= true, 'b' BETWEEN 'a' AND 'c', 2 BETWEEN 1.5 AND `2e0`]
+  ''',
+  expect: { rows: [true, false, false, true, true, true, true, true, true] }
+}
+
+// Collections order by their `eqg` keys, so <= is < or = nested too: NULL and MISSING are apart
+// (MISSING first); one holding an Ion value the VM has no type for (a timestamp) doesn't compare
+{
+  sql: '''
+    [[NULL] = [MISSING], [NULL] <= [MISSING], [MISSING] < [NULL], [`2000-01-01T00:00Z`] <= [`2001-01-01T00:00Z`]]
+  ''',
+  expect: { rows: [false, false, true, $missing::null] }
+}
+
+// Values of types that don't compare give MISSING (an error in strict mode); BETWEEN is the AND
+// of two comparisons, and AND of two MISSINGs is NULL
+{
+  sql: '''
+    [1 < 'a', 1 >= 'a', 'a' BETWEEN 1 AND 2]
+  ''',
+  expect: { rows: [$missing::null, $missing::null, null] }
+}
+
+// <> is the negation of =, NULL and MISSING passed on
+{
+  sql: '''
+    [NULL <> 1, 1 <> 1.0, [1] <> [2], (MISSING <> 1) IS MISSING]
+  ''',
+  expect: { rows: [null, false, true, true] }
+}
+
+// NULLIF and WHERE use the same `=`
+{
+  sql: '''
+    [NULLIF({}, {}), NULLIF([1], [2]), NULLIF(<<1, 2>>, <<2, 1.0>>)]
+  ''',
+  expect: { rows: [null, [1], null] }
+}
+
+{
+  sql: '''
+    SELECT VALUE t.id
+    FROM << {'id': 1, 'a': [1, 2]}, {'id': 2, 'a': [2, 1]} >> t
+    WHERE t.a = [1, 2.0]
+  ''',
+  expect: $bag::[1]
+}
+
+// IN: true if an element is equal; else NULL if one was NULL or MISSING (it might have been);
+// else false
+{
+  sql: '''
+    [[1, 2] IN [[1, 2]], 1 IN [2, NULL], 1 IN [1, NULL], 1 IN [2, MISSING], NULL IN [1], 1 IN [2, 3],
+     1.0 IN <<1>>]
+  ''',
+  expect: { rows: [true, null, true, null, null, false, true] }
+}
