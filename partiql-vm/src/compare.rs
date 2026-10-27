@@ -65,7 +65,7 @@ fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {
 
 /// A value as `eqg` compares it: its key. Values are `eqg` exactly when their keys compare
 /// equal under `eqg_cmp`, which reads keys element by element. A key has:
-/// - its Ion variants decoded, annotations dropped; one the VM has no type for (a timestamp)
+/// - its Ion variants decoded, annotations dropped; one the VM has no type for (a value the VM has no type for)
 ///   as the canonical text of its Ion value, so that `2000-01-01T00:00Z` and
 ///   ` 2000-01-01T00:00+00:00` are one key;
 /// - each bag's elements sorted, and each tuple's attributes sorted by name then value, leaving

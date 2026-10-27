@@ -145,10 +145,26 @@ fn timestamp(ts: &ion_rs::Timestamp) -> Option<Timestamp> {
     let precision = ts.fractional_seconds_scale().unwrap_or(0).clamp(0, 6) as u8;
     let (hour, minute, second) = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
     let time = Time::from_hms_micro(hour, minute, second, 0, offset, precision)?;
-    // Rounded half up; a carry moves the timestamp on (as does a leap second's, whose
-    // fraction is a second or more)
-    let micros = (i64::from(ts.nanoseconds()) + 500) / 1_000;
-    Timestamp::from_local(date, time, offset, precision)?.plus_micros(micros)
+    // A carry moves the timestamp on (as does a leap second's, whose fraction is a second)
+    Timestamp::from_local(date, time, offset, precision)?.plus_nanos(fraction_nanos(ts)?)
+}
+
+/// An Ion timestamp's fraction of a second, in nanoseconds (truncated past them).
+fn fraction_nanos(ts: &ion_rs::Timestamp) -> Option<u32> {
+    if ts.fractional_seconds_scale().unwrap_or(0) <= 9 {
+        return Some(ts.nanoseconds());
+    }
+    // ion-rs 1.0.0-rc.11 scales a fraction of more than 9 digits wrongly (fixed in rc.12; the
+    // pin is #655's), so read its digits from the timestamp's text instead
+    let text = ts.to_string();
+    let digits: String = text
+        .split_once('.')?
+        .1
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .take(9)
+        .collect();
+    format!("{digits:0<9}").parse().ok()
 }
 
 /// An Ion literal's value, decoded when the VM has a type for it.
@@ -262,6 +278,15 @@ mod tests {
         // Rounding carries into the next second, minute and day
         let (date, time) = timestamp("1999-12-31T23:59:59.9999996Z").local();
         assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
+        // More fractional digits than nanoseconds hold
+        assert_eq!(
+            timestamp("2000-01-01T00:00:00.123456789012Z").micros(),
+            timestamp("2000-01-01T00:00:00.123457Z").micros()
+        );
+        assert_eq!(
+            timestamp("2000-01-01T00:00:00.0000004999999Z").micros(),
+            timestamp("2000-01-01T00:00:00Z").micros()
+        );
         // An unknown offset, or a date alone, is a timestamp without a time zone
         assert_eq!(timestamp("2000-01-01T00:00-00:00").offset().get(), None);
         let (date, time) = timestamp("2000T").local();

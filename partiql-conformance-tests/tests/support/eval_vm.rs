@@ -260,10 +260,15 @@ fn write_value_to_slot(
             Some(DateTimeValue::Date(d)) => writer.write_date(slot, d),
             Some(DateTimeValue::Time(t)) => writer.write_time(slot, t),
             Some(DateTimeValue::Timestamp(t)) => writer.write_timestamp(slot, t),
-            None => writer.write_null(slot),
+            None => Err(unsupported_datetime(dt)),
         },
         _ => writer.write_null(slot),
     }
+}
+
+/// A datetime the VM can't hold (an offset with seconds, a year past ±9999).
+fn unsupported_datetime(dt: &partiql_value::DateTime) -> EngineError {
+    EngineError::TypeError(format!("a datetime the VM can't hold: {dt:?}"))
 }
 
 fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm::Result<()> {
@@ -304,7 +309,7 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
             Some(DateTimeValue::Date(d)) => vw.put_date(d),
             Some(DateTimeValue::Time(t)) => vw.put_time(t),
             Some(DateTimeValue::Timestamp(t)) => vw.put_timestamp(t),
-            None => vw.put_null(),
+            None => Err(unsupported_datetime(dt)),
         },
         _ => vw.put_null(),
     }

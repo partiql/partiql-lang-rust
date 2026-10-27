@@ -673,9 +673,13 @@ unsafe fn decode_scalar_payload<'a>(
             let b_ext: &'a [u8] = unsafe { extend_bytes_to_arena_lifetime(slice) };
             Scalar::Bytes(b_ext)
         }
-        TAG_DATE => Scalar::Date(partiql_vm::value::Date::from_days(i32::from_le_bytes(
-            take_array::<4>(bytes, cursor)?,
-        ))),
+        TAG_DATE => {
+            let days = i32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            Scalar::Date(
+                partiql_vm::value::Date::from_days(days)
+                    .ok_or_else(|| DeserializeError::Unsupported(format!("invalid date {days}")))?,
+            )
+        }
         TAG_TIME => {
             let (micros, offset, precision) = take_micros_offset_precision(bytes, cursor)?;
             Scalar::Time(
