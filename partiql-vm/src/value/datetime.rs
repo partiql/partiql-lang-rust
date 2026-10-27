@@ -166,6 +166,9 @@ impl Time {
         offset: Offset,
         precision: u8,
     ) -> Option<Time> {
+        if nanos >= 1_000_000_000 {
+            return None;
+        }
         Time::from_hms_micro(hour, minute, second, 0, offset, precision)?.plus_nanos(nanos)
     }
 
@@ -286,6 +289,9 @@ impl Timestamp {
         offset: Offset,
         precision: u8,
     ) -> Option<Timestamp> {
+        if nanos >= 2_000_000_000 {
+            return None;
+        }
         let time = Time::from_hms_micro(hour, minute, second, 0, offset, precision)?;
         Timestamp::from_local(date, time, offset, precision)?.plus_nanos(nanos)
     }
@@ -474,6 +480,17 @@ mod tests {
         assert_eq!(format!("{:?}", Offset::minutes(-489).unwrap()), "-08:09");
         assert_eq!(format!("{:?}", Offset::minutes(90).unwrap()), "+01:30");
         assert!(Offset::minutes(i32::MIN).is_none());
+    }
+
+    #[test]
+    fn fractions_are_less_than_a_second() {
+        assert!(Time::from_hms_nano(0, 0, 0, u32::MAX, Offset::NONE, 6).is_none());
+        assert!(Time::from_hms_nano(0, 0, 0, 1_000_000_000, Offset::NONE, 6).is_none());
+        let date = Date::from_ymd(2000, 1, 1).unwrap();
+        // A leap second's fraction is a second or more
+        let leap = Timestamp::from_local_nano(date, (23, 59, 59), 1_500_000_000, Offset::NONE, 6);
+        assert_eq!(leap.unwrap().local().1.hms_micro(), (0, 0, 0, 500_000));
+        assert!(Timestamp::from_local_nano(date, (0, 0, 0), u32::MAX, Offset::NONE, 6).is_none());
     }
 
     #[test]

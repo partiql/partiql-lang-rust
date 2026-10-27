@@ -312,9 +312,26 @@ enum VmDateTime {
     Timestamp(partiql_vm::value::Timestamp),
 }
 
+/// A timestamp whose fraction rounds to microseconds, but not past year 9999, `partiql_value`'s
+/// last, so that the value converts back.
+fn until_9999(
+    date: partiql_vm::value::Date,
+    hms: (u8, u8, u8),
+    nanos: u32,
+    offset: partiql_vm::value::Offset,
+    precision: u8,
+) -> Option<partiql_vm::value::Timestamp> {
+    use partiql_vm::value::Timestamp;
+    let rounded = Timestamp::from_local_nano(date, hms, nanos, offset, precision)?;
+    match rounded.local().0.ymd().0 > 9999 {
+        true => Timestamp::from_local_nano(date, hms, nanos / 1_000 * 1_000, offset, precision),
+        false => Some(rounded),
+    }
+}
+
 fn datetime_to_vm(value: &partiql_value::DateTime) -> Option<VmDateTime> {
     use partiql_value::DateTime as D;
-    use partiql_vm::value::{Date, Offset, Time, Timestamp, MAX_PRECISION};
+    use partiql_vm::value::{Date, Offset, Time, MAX_PRECISION};
     let precision = |nanos: u32| if nanos == 0 { 0 } else { MAX_PRECISION };
     Some(match value {
         D::Date(d) => VmDateTime::Date(Date::from_ymd(d.year(), u8::from(d.month()), d.day())?),
@@ -339,7 +356,7 @@ fn datetime_to_vm(value: &partiql_value::DateTime) -> Option<VmDateTime> {
         D::Timestamp(ts) => {
             let date = Date::from_ymd(ts.year(), u8::from(ts.month()), ts.day())?;
             let nanos = ts.nanosecond();
-            VmDateTime::Timestamp(Timestamp::from_local_nano(
+            VmDateTime::Timestamp(until_9999(
                 date,
                 (ts.hour(), ts.minute(), ts.second()),
                 nanos,
@@ -355,7 +372,7 @@ fn datetime_to_vm(value: &partiql_value::DateTime) -> Option<VmDateTime> {
             let offset = Offset::minutes(i32::from(o.whole_minutes()))?;
             let date = Date::from_ymd(ts.year(), u8::from(ts.month()), ts.day())?;
             let nanos = ts.nanosecond();
-            VmDateTime::Timestamp(Timestamp::from_local_nano(
+            VmDateTime::Timestamp(until_9999(
                 date,
                 (ts.hour(), ts.minute(), ts.second()),
                 nanos,

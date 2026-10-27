@@ -144,8 +144,14 @@ fn timestamp(ts: &ion_rs::Timestamp) -> Option<Timestamp> {
     };
     let precision = ts.fractional_seconds_scale().unwrap_or(0).clamp(0, 6) as u8;
     let hms = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
-    // A carry moves the timestamp on (as does a leap second's, whose fraction is a second)
-    Timestamp::from_local_nano(date, hms, fraction_nanos(ts)?, offset, precision)
+    // A carry moves the timestamp on (as does a leap second's, whose fraction is a second),
+    // but not past year 9999, Ion's last, so that the value can be written as Ion again
+    let nanos = fraction_nanos(ts)?;
+    let rounded = Timestamp::from_local_nano(date, hms, nanos, offset, precision)?;
+    match rounded.local().0.ymd().0 > 9999 {
+        true => Timestamp::from_local_nano(date, hms, nanos / 1_000 * 1_000, offset, precision),
+        false => Some(rounded),
+    }
 }
 
 /// An Ion timestamp's fraction of a second, in nanoseconds (truncated past them).
@@ -291,6 +297,12 @@ mod tests {
         let (date, time) = timestamp("2000T").local();
         assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
         assert_eq!(timestamp("2000T").offset().get(), None);
+        // ... and rounding stops at Ion's last year
+        let (date, time) = timestamp("9999-12-31T23:59:59.9999999Z").local();
+        assert_eq!(
+            (date.ymd(), time.hms_micro()),
+            ((9999, 12, 31), (23, 59, 59, 999_999))
+        );
     }
 
     #[test]
