@@ -1,0 +1,162 @@
+// OUTER UNION, OUTER INTERSECT and OUTER EXCEPT (RFC-0007), ALL and DISTINCT. Their results
+// are bags; values are told apart by `eqg`.
+'''
+  CREATE TABLE t1;
+  INSERT INTO t1 SELECT * FROM << {'a': 1, 'tbl': 1}, {'a': 2, 'tbl': 1}, {'a': 3, 'tbl': 1} >>;
+  CREATE TABLE t2;
+  INSERT INTO t2 SELECT * FROM << {'a': 2, 'tbl': 2}, {'a': 3, 'tbl': 2}, {'a': 4, 'tbl': 2} >>;
+'''
+
+{
+  sql: '''
+    << 1, 2, 2, 3, 3, 3 >> OUTER UNION ALL << 1, 2, 3, 3 >>
+  ''',
+  expect: $bag::[1, 2, 2, 3, 3, 3, 1, 2, 3, 3]
+}
+
+{
+  sql: '''
+    << 1, 2, 2, 3, 3, 3 >> OUTER UNION << 1, 2.0, 3, 3, 4 >>
+  ''',
+  expect: $bag::[1, 2, 3, 4]
+}
+
+{
+  sql: '''
+    << 1, 2, 2, 3, 3, 3 >> OUTER INTERSECT ALL << 1, 2, 3, 3, 4 >>
+  ''',
+  expect: $bag::[1, 2, 3, 3]
+}
+
+{
+  sql: '''
+    << 1, 2, 2, 3, 3, 3 >> OUTER INTERSECT << 1, 2, 3, 3, 4 >>
+  ''',
+  expect: $bag::[1, 2, 3]
+}
+
+{
+  sql: '''
+    << 1, 1, 1, 2, 3 >> OUTER EXCEPT ALL << 1, 3.0 >>
+  ''',
+  expect: $bag::[1, 1, 2]
+}
+
+{
+  sql: '''
+    << 1, 1, 1, 2, 3 >> OUTER EXCEPT << 1, 3 >>
+  ''',
+  expect: $bag::[2]
+}
+
+// A value that is no collection is a bag of itself; NULL and MISSING are empty bags; a list's
+// order is dropped
+{
+  sql: '''
+    1 OUTER UNION {'b': 2}
+  ''',
+  expect: $bag::[1, { b: 2 }]
+}
+
+{
+  sql: '''
+    NULL OUTER UNION MISSING
+  ''',
+  expect: $bag::[]
+}
+
+{
+  sql: '''
+    [1, 1] OUTER UNION ALL [2]
+  ''',
+  expect: $bag::[1, 1, 2]
+}
+
+{
+  sql: '''
+    << NULL, MISSING, NULL >> OUTER INTERSECT ALL << NULL, NULL, MISSING, MISSING >>
+  ''',
+  expect: $bag::[null, null, $missing::null]
+}
+
+// Operands of different shapes; ORDER BY and LIMIT on an operand apply to it
+{
+  sql: '''
+    (SELECT a FROM t1 ORDER BY a LIMIT 2) OUTER UNION ALL (SELECT tbl AS b FROM t2 WHERE a = 4)
+  ''',
+  expect: $bag::[
+    { a: 1 },
+    { a: 2 },
+    { b: 2 }
+  ]
+}
+
+{
+  sql: '''
+    (SELECT a FROM t1) OUTER INTERSECT ALL (SELECT a FROM t2)
+  ''',
+  expect: $bag::[
+    { a: 2 },
+    { a: 3 }
+  ]
+}
+
+{
+  sql: '''
+    (SELECT a FROM t1) OUTER EXCEPT (SELECT a FROM t2)
+  ''',
+  expect: $bag::[
+    { a: 1 }
+  ]
+}
+
+// ORDER BY and LIMIT after the operator apply to its rows
+{
+  sql: '''
+    (SELECT a, tbl FROM t1) OUTER UNION ALL (SELECT a, tbl FROM t2) ORDER BY a DESC LIMIT 2
+  ''',
+  expect: { rows: [
+    { a: 4, tbl: 2 },
+    { a: 3, tbl: 1 }
+  ] }
+}
+
+// Tables named as operands are their rows
+{
+  sql: '''
+    t1 OUTER EXCEPT (SELECT * FROM t1 WHERE a > 1)
+  ''',
+  expect: $bag::[
+    { a: 1, tbl: 1 }
+  ]
+}
+
+// Operators nest, and are a FROM source or a subquery like any query
+{
+  sql: '''
+    SELECT VALUE x * 10
+    FROM ((<< 1, 2 >> OUTER UNION << 3 >>) OUTER EXCEPT << 2 >>) x
+  ''',
+  expect: $bag::[10, 30]
+}
+
+// ... starting again for each row of the query around it
+{
+  sql: '''
+    SELECT o.id AS id,
+           (SELECT VALUE y FROM o.ys y OUTER INTERSECT ALL SELECT VALUE z FROM << 2, 3 >> z) AS n
+    FROM [ {'id': 1, 'ys': [1, 2]}, {'id': 2, 'ys': [3, 3]} ] o
+  ''',
+  expect: $bag::[
+    { id: 1, n: $bag::[2] },
+    { id: 2, n: $bag::[3] }
+  ]
+}
+
+// SQL's UNION, INTERSECT and EXCEPT need compatible columns, which needs static types
+{
+  sql: '''
+    << 1 >> UNION << 2 >>
+  ''',
+  expect: { error: "UNION without OUTER" }
+}

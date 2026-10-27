@@ -452,9 +452,12 @@ pub enum Inst {
         pattern: u16,
         escape: u16,
     },
+    /// Bind cursor `cursor_id` to the elements of the collection in `src`, or to the value
+    /// as `coercion` reads one that is no collection.
     MaterializeCursor {
         src: u16,
         cursor_id: u16,
+        coercion: Coercion,
     },
     /// Create a table function cursor from evaluated arguments in registers.
     ///
@@ -524,6 +527,7 @@ pub enum Inst {
     /// Handled in the VM dispatch loop (relational instruction).
     AssertCollection {
         src: u16,
+        coercion: Coercion,
     },
 
     // === Relational Instructions (SFW bytecode) ===
@@ -618,6 +622,13 @@ pub enum Inst {
         dst_reg: u16,
     },
 
+    /// GROUP BY: write to `dst` whether the current record starts a group (its keys are not
+    /// `eqg` to the previous record's).
+    SorterNewGroup {
+        sorter_id: u16,
+        dst: u16,
+    },
+
     /// Advance to the next record. If exhausted, fall through; otherwise jump to `target`.
     SorterNext {
         sorter_id: u16,
@@ -640,6 +651,34 @@ pub enum Inst {
         dst: u16,
         fields: Option<Vec<u16>>,
         list: bool,
+    },
+
+    // === Hash Table Instructions (DISTINCT, set operators) ===
+    /// Drop the table's keys from a previous run and free its bank.
+    HashReset {
+        table: u16,
+    },
+
+    /// Add the key in registers `key` to the table unless it holds one `eqg` to it. Writes
+    /// whether it was new to `new`.
+    HashInsert {
+        table: u16,
+        key: Vec<u16>,
+        new: u16,
+    },
+
+    /// Count the key in registers `key` once more, adding it if new.
+    HashAdd {
+        table: u16,
+        key: Vec<u16>,
+    },
+
+    /// If the table counts the key in registers `key`, count it once less. Writes whether it
+    /// did to `found`.
+    HashTake {
+        table: u16,
+        key: Vec<u16>,
+        found: u16,
     },
 
     // === Aggregation Instructions ===
@@ -682,14 +721,17 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+}
 
-    // === Comparison ===
-    /// Compare two registers for equality (dynamic types). Writes Bool to `dst_reg`.
-    CompareEq {
-        lhs_reg: u16,
-        rhs_reg: u16,
-        dst_reg: u16,
-    },
+/// What a collection a cursor scans is for, which decides how a value that is no collection
+/// is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coercion {
+    /// A FROM source: a value that is no collection is its one row.
+    From,
+    /// An operand of OUTER UNION, INTERSECT or EXCEPT (RFC-0007): NULL and MISSING are no
+    /// rows, and any other value that is no collection is its one row.
+    SetOp,
 }
 
 /// Aggregate function type used by AggStep and AggFinal instructions.
@@ -1928,18 +1970,16 @@ impl Program {
                 attr_regs,
                 value_regs,
             } => {
-                // Zero-copy tuple construction!
-                // Build iterator of (name ValueRef, value ValueRef) pairs
-                // Attribute names MUST be ValueRef::Str
-                let fields =
-                    attr_regs
-                        .iter()
-                        .zip(value_regs.iter())
-                        .map(|(attr_reg, value_reg)| {
-                            (regs[*attr_reg as usize], regs[*value_reg as usize])
-                        });
-
-                // Single arena allocation for entire tuple structure
+                // As in the legacy evaluator, an attribute whose name is no string, or whose
+                // value is MISSING, is left out
+                let mut fields = Vec::with_capacity(attr_regs.len());
+                for (attr_reg, value_reg) in attr_regs.iter().zip(value_regs) {
+                    let name = variant::lower(regs[*attr_reg as usize], arena)?;
+                    let value = regs[*value_reg as usize];
+                    if matches!(name, ValueRef::Str(_)) && !matches!(value, ValueRef::Missing) {
+                        fields.push((name, value));
+                    }
+                }
                 let tuple_ref = arena.alloc_tuple(fields);
                 regs[*dst as usize] = ValueRef::Tuple(tuple_ref);
             }
@@ -2030,6 +2070,10 @@ impl Program {
             | Inst::SorterData { .. }
             | Inst::SorterNext { .. }
             | Inst::SorterCollect { .. }
+            | Inst::HashReset { .. }
+            | Inst::HashInsert { .. }
+            | Inst::HashAdd { .. }
+            | Inst::HashTake { .. }
             | Inst::ScratchEnter
             | Inst::ScratchLeave
             | Inst::AggStep { .. }
@@ -2038,7 +2082,7 @@ impl Program {
             | Inst::Gosub { .. }
             | Inst::Return { .. }
             | Inst::Copy { .. }
-            | Inst::CompareEq { .. } => {
+            | Inst::SorterNewGroup { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

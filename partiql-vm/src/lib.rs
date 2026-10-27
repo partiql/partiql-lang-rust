@@ -5,10 +5,12 @@ mod aggregate;
 mod arena;
 mod builtins;
 mod catalog;
+mod compare;
 mod compile;
 mod error;
 mod expr;
 mod field_resolver;
+mod hash_table;
 mod lower_ir;
 mod plan;
 #[allow(dead_code)]

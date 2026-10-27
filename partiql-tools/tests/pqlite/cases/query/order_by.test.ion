@@ -241,3 +241,17 @@
   ''',
   expect: []
 }
+
+// An Ion value nested in a key sorts as the value it holds (a number before a list)
+{
+  sql: '''
+    SELECT VALUE x
+    FROM << [[2]], [[`1`]], [`a::3`] >> x
+    ORDER BY x
+  ''',
+  expect: { rows: [
+    [$ion::a::3],
+    [[$ion::1]],
+    [[2]]
+  ] }
+}
