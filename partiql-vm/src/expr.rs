@@ -622,6 +622,15 @@ pub enum Inst {
         dst_reg: u16,
     },
 
+    /// GROUP AS: make field `field` of the records of the group that just ended (from its
+    /// first record up to the current one, or to the end once the sorter is exhausted) into a
+    /// bag in `dst`, in input order. It lives in the sorter's bank, as `SorterData`'s values do.
+    SorterGroupBag {
+        sorter_id: u16,
+        field: u16,
+        dst: u16,
+    },
+
     /// GROUP BY: write to `dst` whether the current record starts a group (its keys are not
     /// `eqg` to the previous record's).
     SorterNewGroup {
@@ -2082,7 +2091,8 @@ impl Program {
             | Inst::Gosub { .. }
             | Inst::Return { .. }
             | Inst::Copy { .. }
-            | Inst::SorterNewGroup { .. } => {
+            | Inst::SorterNewGroup { .. }
+            | Inst::SorterGroupBag { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

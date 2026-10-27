@@ -131,6 +131,25 @@ impl Sorter {
         }
     }
 
+    /// Field `field` of each record of the group that just ended, in input order: the run of
+    /// records with equal GROUP BY keys that ends before the current record (or at the end,
+    /// once the sorter is exhausted).
+    pub fn group_field(&self, field: usize) -> Vec<ValueRef<'static>> {
+        let end = self.position.min(self.records.len());
+        let Some(last) = end.checked_sub(1) else {
+            return vec![];
+        };
+        let keys = &self.records[last].group_keys;
+        let mut start = last;
+        while start > 0 && eqg_rows(&self.records[start - 1].group_keys, keys) {
+            start -= 1;
+        }
+        self.records[start..end]
+            .iter()
+            .map(|record| record.fields[field])
+            .collect()
+    }
+
     /// Advance to the next record. Returns true if there is a next record.
     pub fn advance(&mut self) -> bool {
         self.position += 1;

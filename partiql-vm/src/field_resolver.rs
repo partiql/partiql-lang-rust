@@ -117,6 +117,11 @@ impl<'a> ExprFieldExtractor<'a> {
         ExprFieldExtractor { ctx }
     }
 
+    /// Request the whole value of every scan (GROUP AS reads every FROM variable).
+    pub fn request_all_whole_values(&mut self) {
+        self.ctx.request_all_whole_values();
+    }
+
     /// Extract field requests from an expression.
     pub fn extract(&mut self, expr: &ValueExpr) {
         self.walk(expr);

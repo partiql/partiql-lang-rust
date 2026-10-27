@@ -1144,6 +1144,31 @@ impl<'vm> QueryIterator<'vm> {
                     regs[*dst as usize] = regs[*src as usize];
                 }
 
+                Inst::SorterGroupBag {
+                    sorter_id,
+                    field,
+                    dst,
+                } => {
+                    let sorter = match self.vm.sorters.get(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    let values = sorter.group_field(*field as usize);
+                    let bank = &self.vm.banks[sorter.bank_id];
+                    // Safety: the values and the bag live in the sorter bank until its next
+                    // reset, the same contract as `SorterData`.
+                    regs[*dst as usize] = unsafe {
+                        std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(ValueRef::Bag(
+                            bank.alloc_slice(&values),
+                        ))
+                    };
+                }
+
                 Inst::SorterNewGroup { sorter_id, dst } => {
                     let sorter = match self.vm.sorters.get(*sorter_id as usize) {
                         Some(Some(s)) => s,
