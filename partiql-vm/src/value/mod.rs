@@ -10,7 +10,7 @@ mod internal;
 pub(crate) mod variant;
 
 // Public exports
-pub use datetime::{Date, DateTimeValue, Offset, Time, Timestamp, MAX_PRECISION};
+pub use datetime::{Date, Offset, Time, Timestamp, MAX_PRECISION};
 pub use register_reader::RegisterReader;
 pub use shape::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
 pub(crate) use value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};

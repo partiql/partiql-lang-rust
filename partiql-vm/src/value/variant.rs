@@ -4,7 +4,7 @@
 use crate::arena::Arena;
 use crate::error::{EngineError, Result};
 use crate::value::{
-    value_ref_to_owned, Date, Offset, Time, Timestamp, TupleField, TupleRef, ValueOwned, ValueRef,
+    value_ref_to_owned, Date, Offset, Timestamp, TupleField, TupleRef, ValueOwned, ValueRef,
 };
 use ion_rs::{Element, IonType};
 use rust_decimal::Decimal;
@@ -143,10 +143,9 @@ fn timestamp(ts: &ion_rs::Timestamp) -> Option<Timestamp> {
         None => Offset::NONE,
     };
     let precision = ts.fractional_seconds_scale().unwrap_or(0).clamp(0, 6) as u8;
-    let (hour, minute, second) = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
-    let time = Time::from_hms_micro(hour, minute, second, 0, offset, precision)?;
+    let hms = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
     // A carry moves the timestamp on (as does a leap second's, whose fraction is a second)
-    Timestamp::from_local(date, time, offset, precision)?.plus_nanos(fraction_nanos(ts)?)
+    Timestamp::from_local_nano(date, hms, fraction_nanos(ts)?, offset, precision)
 }
 
 /// An Ion timestamp's fraction of a second, in nanoseconds (truncated past them).

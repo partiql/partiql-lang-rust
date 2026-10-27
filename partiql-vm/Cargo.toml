@@ -34,8 +34,6 @@ rustc-hash = "2"
 delegate = "0.13"
 # Decodes Ion literals (variants); the same pin as partiql-extension-ion
 ion-rs = "=1.0.0-rc.11"
-# Reads partiql-value's datetimes (its types), when data enters the VM
-time = "0.3"
 
 [dev-dependencies]
 ion-rs_old = { version = "0.18", package = "ion-rs" }

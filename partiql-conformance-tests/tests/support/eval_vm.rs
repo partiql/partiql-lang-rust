@@ -11,9 +11,7 @@ use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
     RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
 };
-use partiql_vm::value::{
-    DateTimeValue, FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView,
-};
+use partiql_vm::value::{FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView};
 use partiql_vm::{
     CompilationCatalog, CompilationContext, EngineError, ExecutionCatalog, ExecutionContext,
     ExecutionResult, PartiQLVM, PlanCompiler,
@@ -57,6 +55,51 @@ fn row_to_value(row: &RegisterReader<'_>, shape: &Shape) -> Value {
             }
         }
     }
+}
+
+/// A VM datetime as `partiql_value` has it, if it can: the `time` crate it is built on holds
+/// the years -9999 to 9999.
+fn date_to_value(date: partiql_vm::value::Date) -> Option<partiql_value::DateTime> {
+    let (year, month, day) = date.ymd();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999)
+        .contains(&year)
+        .then(|| partiql_value::DateTime::from_ymd(year, month, day))
+}
+
+fn time_to_value(time: partiql_vm::value::Time) -> partiql_value::DateTime {
+    let (hour, minute, second, micros) = time.hms_micro();
+    let (tz_hours, tz_minutes) = match time.offset().get() {
+        Some(m) => (Some((m / 60) as i8), Some((m % 60) as i8)),
+        None => (None, None),
+    };
+    partiql_value::DateTime::from_hms_nano_tz(
+        hour,
+        minute,
+        second,
+        micros * 1_000,
+        tz_hours,
+        tz_minutes,
+    )
+}
+
+fn timestamp_to_value(ts: partiql_vm::value::Timestamp) -> Option<partiql_value::DateTime> {
+    let (date, time) = ts.local();
+    let (year, month, day) = date.ymd();
+    let (hour, minute, second, micros) = time.hms_micro();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999).contains(&year).then(|| {
+        partiql_value::DateTime::from_ymdhms_nano_offset_minutes(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            micros * 1_000,
+            ts.offset().get().map(i32::from),
+        )
+    })
 }
 
 fn view_to_value(view: &mut ValueView<'_>) -> Value {
@@ -111,16 +154,11 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             Value::Bag(Box::new(Bag::from(items)))
         }
         ValueType::Date => Value::DateTime(Box::new(
-            view.get_date()
-                .unwrap()
-                .to_value()
-                .expect("a date partiql-value holds"),
+            date_to_value(view.get_date().unwrap()).expect("a date partiql-value holds"),
         )),
-        ValueType::Time => Value::DateTime(Box::new(view.get_time().unwrap().to_value())),
+        ValueType::Time => Value::DateTime(Box::new(time_to_value(view.get_time().unwrap()))),
         ValueType::Timestamp => Value::DateTime(Box::new(
-            view.get_timestamp()
-                .unwrap()
-                .to_value()
+            timestamp_to_value(view.get_timestamp().unwrap())
                 .expect("a timestamp partiql-value holds"),
         )),
         ValueType::Variant => {
@@ -256,17 +294,80 @@ fn write_value_to_slot(
             vw.step_out()?;
             vw.finish()
         }
-        Value::DateTime(dt) => match DateTimeValue::from_value(dt) {
-            Some(DateTimeValue::Date(d)) => writer.write_date(slot, d),
-            Some(DateTimeValue::Time(t)) => writer.write_time(slot, t),
-            Some(DateTimeValue::Timestamp(t)) => writer.write_timestamp(slot, t),
+        Value::DateTime(dt) => match datetime_to_vm(dt) {
+            Some(VmDateTime::Date(d)) => writer.write_date(slot, d),
+            Some(VmDateTime::Time(t)) => writer.write_time(slot, t),
+            Some(VmDateTime::Timestamp(t)) => writer.write_timestamp(slot, t),
             None => Err(unsupported_datetime(dt)),
         },
         _ => writer.write_null(slot),
     }
 }
 
-/// A datetime the VM can't hold (an offset with seconds, a year past ±9999).
+/// A `partiql_value` datetime written into the VM, its fraction of a second rounded to
+/// microseconds; `None` for one the VM can't hold (an offset with seconds).
+enum VmDateTime {
+    Date(partiql_vm::value::Date),
+    Time(partiql_vm::value::Time),
+    Timestamp(partiql_vm::value::Timestamp),
+}
+
+fn datetime_to_vm(value: &partiql_value::DateTime) -> Option<VmDateTime> {
+    use partiql_value::DateTime as D;
+    use partiql_vm::value::{Date, Offset, Time, Timestamp, MAX_PRECISION};
+    let precision = |nanos: u32| if nanos == 0 { 0 } else { MAX_PRECISION };
+    Some(match value {
+        D::Date(d) => VmDateTime::Date(Date::from_ymd(d.year(), u8::from(d.month()), d.day())?),
+        D::Time(t) | D::TimeWithTz(t, _) => {
+            let offset = match value {
+                D::TimeWithTz(_, o) if o.seconds_past_minute() == 0 => {
+                    Offset::minutes(i32::from(o.whole_minutes()))?
+                }
+                D::TimeWithTz(..) => return None,
+                _ => Offset::NONE,
+            };
+            let nanos = t.nanosecond();
+            VmDateTime::Time(Time::from_hms_nano(
+                t.hour(),
+                t.minute(),
+                t.second(),
+                nanos,
+                offset,
+                precision(nanos),
+            )?)
+        }
+        D::Timestamp(ts) => {
+            let date = Date::from_ymd(ts.year(), u8::from(ts.month()), ts.day())?;
+            let nanos = ts.nanosecond();
+            VmDateTime::Timestamp(Timestamp::from_local_nano(
+                date,
+                (ts.hour(), ts.minute(), ts.second()),
+                nanos,
+                Offset::NONE,
+                precision(nanos),
+            )?)
+        }
+        D::TimestampWithTz(ts) => {
+            let o = ts.offset();
+            if o.seconds_past_minute() != 0 {
+                return None;
+            }
+            let offset = Offset::minutes(i32::from(o.whole_minutes()))?;
+            let date = Date::from_ymd(ts.year(), u8::from(ts.month()), ts.day())?;
+            let nanos = ts.nanosecond();
+            VmDateTime::Timestamp(Timestamp::from_local_nano(
+                date,
+                (ts.hour(), ts.minute(), ts.second()),
+                nanos,
+                offset,
+                precision(nanos),
+            )?)
+        }
+        _ => return None,
+    })
+}
+
+/// A datetime the VM can't hold (an offset with seconds).
 fn unsupported_datetime(dt: &partiql_value::DateTime) -> EngineError {
     EngineError::TypeError(format!("a datetime the VM can't hold: {dt:?}"))
 }
@@ -305,10 +406,10 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
             }
             vw.step_out()
         }
-        Value::DateTime(dt) => match DateTimeValue::from_value(dt) {
-            Some(DateTimeValue::Date(d)) => vw.put_date(d),
-            Some(DateTimeValue::Time(t)) => vw.put_time(t),
-            Some(DateTimeValue::Timestamp(t)) => vw.put_timestamp(t),
+        Value::DateTime(dt) => match datetime_to_vm(dt) {
+            Some(VmDateTime::Date(d)) => vw.put_date(d),
+            Some(VmDateTime::Time(t)) => vw.put_time(t),
+            Some(VmDateTime::Timestamp(t)) => vw.put_timestamp(t),
             None => Err(unsupported_datetime(dt)),
         },
         _ => vw.put_null(),

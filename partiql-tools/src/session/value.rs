@@ -108,15 +108,17 @@ fn value_view_to_value(
         ValueType::Date => {
             let date = view.get_date().map_err(scalar_err)?;
             Value::DateTime(Box::new(
-                date.to_value().ok_or_else(|| out_of_range(&date))?,
+                date_to_value(date).ok_or_else(|| out_of_range(&date))?,
             ))
         }
-        ValueType::Time => {
-            Value::DateTime(Box::new(view.get_time().map_err(scalar_err)?.to_value()))
-        }
+        ValueType::Time => Value::DateTime(Box::new(time_to_value(
+            view.get_time().map_err(scalar_err)?,
+        ))),
         ValueType::Timestamp => {
             let ts = view.get_timestamp().map_err(scalar_err)?;
-            Value::DateTime(Box::new(ts.to_value().ok_or_else(|| out_of_range(&ts))?))
+            Value::DateTime(Box::new(
+                timestamp_to_value(ts).ok_or_else(|| out_of_range(&ts))?,
+            ))
         }
         ValueType::Variant => {
             use partiql_extension_ion::boxed_ion::BoxedIonType;
@@ -130,7 +132,53 @@ fn value_view_to_value(
     })
 }
 
-/// A datetime past the years -9999 to 9999 that output (through `partiql_value`) holds.
+/// A VM datetime as `partiql_value` has it, if it can: the `time` crate it is built on holds
+/// the years -9999 to 9999.
+fn date_to_value(date: partiql_vm::value::Date) -> Option<partiql_value::DateTime> {
+    let (year, month, day) = date.ymd();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999)
+        .contains(&year)
+        .then(|| partiql_value::DateTime::from_ymd(year, month, day))
+}
+
+fn time_to_value(time: partiql_vm::value::Time) -> partiql_value::DateTime {
+    let (hour, minute, second, micros) = time.hms_micro();
+    let (tz_hours, tz_minutes) = match time.offset().get() {
+        Some(m) => (Some((m / 60) as i8), Some((m % 60) as i8)),
+        None => (None, None),
+    };
+    partiql_value::DateTime::from_hms_nano_tz(
+        hour,
+        minute,
+        second,
+        micros * 1_000,
+        tz_hours,
+        tz_minutes,
+    )
+}
+
+fn timestamp_to_value(ts: partiql_vm::value::Timestamp) -> Option<partiql_value::DateTime> {
+    let (date, time) = ts.local();
+    let (year, month, day) = date.ymd();
+    let (hour, minute, second, micros) = time.hms_micro();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999).contains(&year).then(|| {
+        partiql_value::DateTime::from_ymdhms_nano_offset_minutes(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            micros * 1_000,
+            ts.offset().get().map(i32::from),
+        )
+    })
+}
+
+/// A datetime past the years -9999 to 9999 that output (through `partiql_value`) holds: Ion,
+/// SQL and the `time` crate stop there, though the VM's values go further.
 fn out_of_range(value: &dyn std::fmt::Debug) -> RowConvertError {
     RowConvertError(format!("datetime out of range for output: {value:?}"))
 }

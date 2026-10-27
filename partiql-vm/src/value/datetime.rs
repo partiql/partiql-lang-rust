@@ -3,21 +3,21 @@
 //! comparing two is comparing integers, and a column of them is an array of integers (Arrow's
 //! `Date32`, `Time64(us)` and `Timestamp(us)`, with the offsets, which Arrow keeps per column,
 //! an array of their own). Calendar fields are computed from them when read. Each is `Copy` and
-//! at most 16 bytes; dates and timestamps are bounded to the years -9999 to 9999, so that no
-//! arithmetic on them overflows.
+//! at most 16 bytes. Dates and timestamps are bounded to what microseconds in an `i64` hold
+//! with a day to spare (about 292,000 years either side of 1970, as in PostgreSQL, DuckDB and
+//! Arrow), so that no arithmetic on them overflows.
 
 use std::cmp::Ordering;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
 
-/// The years a date or timestamp may have, local: those `partiql_value` (and SQL, and more)
-/// holds. Bounding them keeps the arithmetic on any value, stored ones too, from overflowing.
-const MIN_YEAR: i32 = -9999;
-const MAX_YEAR: i32 = 9999;
-/// The first and last days of those years, since 1970-01-01.
-const MIN_DAYS: i64 = -4_371_587;
-const MAX_DAYS: i64 = 2_932_896;
+/// The days since 1970-01-01 a date or timestamp may have, local: as many as microseconds in an
+/// `i64` hold, less two, so that a timestamp's last microsecond and its UTC instant (its local
+/// time less an offset under a day) fit too. Years -290,308 to 294,247 (-290,308-12-24 to 294,247-01-08). Bounding them keeps the
+/// arithmetic on any value, stored ones too, from overflowing.
+const MAX_DAYS: i64 = i64::MAX / MICROS_PER_DAY - 2;
+const MIN_DAYS: i64 = -MAX_DAYS;
 
 /// The most fractional digits of a second a value holds.
 pub const MAX_PRECISION: u8 = 6;
@@ -84,19 +84,19 @@ impl std::fmt::Debug for Offset {
 pub struct Date(i32);
 
 impl Date {
-    /// The date of a year (-9999 to 9999), month (1–12) and day (1–31), if it is one.
+    /// The date of a year, month (1–12) and day (1–31), if it is one (in the years -290,308
+    /// to 294,247).
     pub fn from_ymd(year: i32, month: u8, day: u8) -> Option<Date> {
-        if !(MIN_YEAR..=MAX_YEAR).contains(&year)
-            || !(1..=12).contains(&month)
-            || day == 0
-            || day > days_in_month(year, month)
-        {
+        if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month) {
             return None;
         }
-        Some(Date(days_from_civil(year, month, day) as i32))
+        // Any `i32` year's days fit an `i64`
+        i32::try_from(days_from_civil(year, month, day))
+            .ok()
+            .and_then(Date::from_days)
     }
 
-    /// The date `days` after 1970-01-01, if it is one (in the years -9999 to 9999).
+    /// The date `days` after 1970-01-01, if it is one (in the years -290,308 to 294,247).
     pub fn from_days(days: i32) -> Option<Date> {
         (MIN_DAYS..=MAX_DAYS)
             .contains(&i64::from(days))
@@ -154,6 +154,19 @@ impl Time {
             offset,
             precision,
         })
+    }
+
+    /// The time `hour:minute:second` and `nanos` nanoseconds, if it is one: the nanoseconds
+    /// rounded half up to microseconds, truncated instead where the carry would pass midnight.
+    pub fn from_hms_nano(
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanos: u32,
+        offset: Offset,
+        precision: u8,
+    ) -> Option<Time> {
+        Time::from_hms_micro(hour, minute, second, 0, offset, precision)?.plus_nanos(nanos)
     }
 
     /// The time `nanos` nanoseconds (less than a second) later, rounded half up to
@@ -230,7 +243,7 @@ impl Timestamp {
         // A date's days are bounded, so this doesn't overflow
         let local = i64::from(date.days()) * MICROS_PER_DAY + time.micros;
         Timestamp::new(
-            local - offset.micros(),
+            local.checked_sub(offset.micros())?,
             offset,
             precision.min(MAX_PRECISION),
         )
@@ -262,10 +275,25 @@ impl Timestamp {
         )
     }
 
+    /// The timestamp of a local date, a time of day to the second and `nanos` nanoseconds
+    /// (less than a second, or two for a leap second), and its `offset`, if it is one: the
+    /// nanoseconds rounded half up to microseconds, truncated instead where the carry would
+    /// leave the range a timestamp may have.
+    pub fn from_local_nano(
+        date: Date,
+        (hour, minute, second): (u8, u8, u8),
+        nanos: u32,
+        offset: Offset,
+        precision: u8,
+    ) -> Option<Timestamp> {
+        let time = Time::from_hms_micro(hour, minute, second, 0, offset, precision)?;
+        Timestamp::from_local(date, time, offset, precision)?.plus_nanos(nanos)
+    }
+
     /// The timestamp `nanos` nanoseconds (less than a second, or two for a leap second) later,
     /// rounded half up to microseconds; truncated instead where the carry would leave the
-    /// years a timestamp may have.
-    pub(crate) fn plus_nanos(self, nanos: u32) -> Option<Timestamp> {
+    /// range a timestamp may have.
+    fn plus_nanos(self, nanos: u32) -> Option<Timestamp> {
         let (rounded, truncated) = (i64::from(nanos.div_ceil(1_000)), i64::from(nanos / 1_000));
         let rounded = match nanos % 1_000 >= 500 {
             true => rounded,
@@ -314,121 +342,6 @@ impl Timestamp {
     /// What the timestamp is, as `compare` sees it: equal for equal timestamps.
     pub(crate) fn key(self) -> (bool, i64) {
         (self.offset.get().is_some(), self.micros)
-    }
-}
-
-/// A date, time or timestamp, as `partiql_value` has them, for data read into the VM.
-#[derive(Clone, Copy, Debug)]
-pub enum DateTimeValue {
-    Date(Date),
-    Time(Time),
-    Timestamp(Timestamp),
-}
-
-impl DateTimeValue {
-    /// The VM value of a `partiql_value` datetime, its fraction of a second rounded to
-    /// microseconds; `None` for one the VM can't hold.
-    pub fn from_value(value: &partiql_value::DateTime) -> Option<DateTimeValue> {
-        use partiql_value::DateTime as D;
-        let date = |d: &time::Date| Date::from_ymd(d.year(), u8::from(d.month()), d.day());
-        // An offset of seconds the VM can't hold
-        let offset = |o: &time::UtcOffset| match o.seconds_past_minute() {
-            0 => Offset::minutes(i32::from(o.whole_minutes())),
-            _ => None,
-        };
-        // The time of day to the second, and its nanoseconds
-        let time = |t: &time::Time, offset: Offset| {
-            let precision = if t.nanosecond() == 0 {
-                0
-            } else {
-                MAX_PRECISION
-            };
-            let time =
-                Time::from_hms_micro(t.hour(), t.minute(), t.second(), 0, offset, precision)?;
-            Some((time, t.nanosecond()))
-        };
-        Some(match value {
-            D::Date(d) => DateTimeValue::Date(date(d)?),
-            D::Time(t) => {
-                let (time, nanos) = time(t, Offset::NONE)?;
-                DateTimeValue::Time(time.plus_nanos(nanos)?)
-            }
-            D::TimeWithTz(t, o) => {
-                let (time, nanos) = time(t, offset(o)?)?;
-                DateTimeValue::Time(time.plus_nanos(nanos)?)
-            }
-            D::Timestamp(ts) => {
-                let (t, nanos) = time(&ts.time(), Offset::NONE)?;
-                let ts = Timestamp::from_local(date(&ts.date())?, t, Offset::NONE, t.precision)?;
-                DateTimeValue::Timestamp(ts.plus_nanos(nanos)?)
-            }
-            D::TimestampWithTz(ts) => {
-                let offset = offset(&ts.offset())?;
-                let (t, nanos) = time(&ts.time(), offset)?;
-                let ts = Timestamp::from_local(date(&ts.date())?, t, offset, t.precision)?;
-                DateTimeValue::Timestamp(ts.plus_nanos(nanos)?)
-            }
-            _ => return None,
-        })
-    }
-}
-
-/// The years `partiql_value` (through the `time` crate) holds.
-fn legacy_year(year: i32) -> bool {
-    (-9999..=9999).contains(&year)
-}
-
-fn legacy_offset(offset: Offset) -> Option<i32> {
-    offset.get().map(i32::from)
-}
-
-impl Date {
-    /// The date as `partiql_value` has it, if it can (years -9999 to 9999).
-    pub fn to_value(self) -> Option<partiql_value::DateTime> {
-        let (year, month, day) = self.ymd();
-        let month = std::num::NonZeroU8::new(month)?;
-        legacy_year(year).then(|| partiql_value::DateTime::from_ymd(year, month, day))
-    }
-}
-
-impl Time {
-    /// The time as `partiql_value` has it.
-    pub fn to_value(self) -> partiql_value::DateTime {
-        let (hour, minute, second, micros) = self.hms_micro();
-        let (tz_hours, tz_minutes) = match self.offset.get() {
-            Some(m) => (Some((m / 60) as i8), Some((m % 60) as i8)),
-            None => (None, None),
-        };
-        partiql_value::DateTime::from_hms_nano_tz(
-            hour,
-            minute,
-            second,
-            micros * 1_000,
-            tz_hours,
-            tz_minutes,
-        )
-    }
-}
-
-impl Timestamp {
-    /// The timestamp as `partiql_value` has it, if it can (years -9999 to 9999).
-    pub fn to_value(self) -> Option<partiql_value::DateTime> {
-        let (date, time) = self.local();
-        let (year, month, day) = date.ymd();
-        let (hour, minute, second, micros) = time.hms_micro();
-        let month = std::num::NonZeroU8::new(month)?;
-        legacy_year(year).then(|| {
-            partiql_value::DateTime::from_ymdhms_nano_offset_minutes(
-                year,
-                month,
-                day,
-                hour,
-                minute,
-                second,
-                micros * 1_000,
-                legacy_offset(self.offset),
-            )
-        })
     }
 }
 
@@ -514,21 +427,35 @@ mod tests {
     }
 
     #[test]
-    fn values_are_bounded_to_the_years_9999_either_way() {
-        assert_eq!(days_from_civil(MIN_YEAR, 1, 1), MIN_DAYS);
-        assert_eq!(days_from_civil(MAX_YEAR, 12, 31), MAX_DAYS);
-        assert!(Date::from_ymd(10_000, 1, 1).is_none());
+    fn values_are_bounded_to_what_microseconds_hold() {
+        assert_eq!(
+            Date::from_days(MAX_DAYS as i32).unwrap().ymd(),
+            (294_247, 1, 8)
+        );
+        assert_eq!(
+            Date::from_days(MIN_DAYS as i32).unwrap().ymd(),
+            (-290_308, 12, 24)
+        );
+        assert!(Date::from_ymd(294_247, 1, 9).is_none());
+        assert!(Date::from_ymd(100_000, 1, 1).is_some());
         assert!(Date::from_days(i32::MAX).is_none());
+        // The last day's last microsecond, in any offset, has a UTC instant
+        let last = Date::from_days(MAX_DAYS as i32).unwrap();
+        let first = Date::from_days(MIN_DAYS as i32).unwrap();
+        for minutes in [-1439, 0, 1439] {
+            let offset = Offset::minutes(minutes).unwrap();
+            let ts = Timestamp::from_local_nano(last, (23, 59, 59), 999_999_000, offset, 6);
+            assert!(ts.is_some(), "{minutes}");
+            let ts = Timestamp::from_local_nano(first, (0, 0, 0), 0, offset, 0);
+            assert_eq!(ts.unwrap().local().0, first);
+        }
         // Stored values out of range, whose local time would overflow
         let hour = Offset::minutes(60).unwrap();
         assert!(Timestamp::from_parts(i64::MAX, hour, 0).is_none());
         assert!(Timestamp::from_parts(i64::MIN, Offset::minutes(-60).unwrap(), 0).is_none());
         // Rounding past the last instant truncates instead
-        let last = Date::from_ymd(MAX_YEAR, 12, 31).unwrap();
-        let time = Time::from_hms_micro(23, 59, 59, 0, Offset::NONE, 6).unwrap();
-        let ts = Timestamp::from_local(last, time, Offset::NONE, 6).unwrap();
-        let (_, time) = ts.plus_nanos(999_999_600).unwrap().local();
-        assert_eq!(time.hms_micro(), (23, 59, 59, 999_999));
+        let ts = Timestamp::from_local_nano(last, (23, 59, 59), 999_999_600, Offset::NONE, 6);
+        assert_eq!(ts.unwrap().local().1.hms_micro(), (23, 59, 59, 999_999));
         // ... as it does past midnight for a time
         let time = Time::from_hms_micro(23, 59, 59, 0, Offset::NONE, 6).unwrap();
         assert_eq!(

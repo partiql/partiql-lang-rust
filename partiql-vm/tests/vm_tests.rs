@@ -308,6 +308,51 @@ fn row_to_value(row: &RegisterReader<'_>, shape: &Shape) -> Value {
     }
 }
 
+/// A VM datetime as `partiql_value` has it, if it can: the `time` crate it is built on holds
+/// the years -9999 to 9999.
+fn date_to_value(date: partiql_vm::value::Date) -> Option<partiql_value::DateTime> {
+    let (year, month, day) = date.ymd();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999)
+        .contains(&year)
+        .then(|| partiql_value::DateTime::from_ymd(year, month, day))
+}
+
+fn time_to_value(time: partiql_vm::value::Time) -> partiql_value::DateTime {
+    let (hour, minute, second, micros) = time.hms_micro();
+    let (tz_hours, tz_minutes) = match time.offset().get() {
+        Some(m) => (Some((m / 60) as i8), Some((m % 60) as i8)),
+        None => (None, None),
+    };
+    partiql_value::DateTime::from_hms_nano_tz(
+        hour,
+        minute,
+        second,
+        micros * 1_000,
+        tz_hours,
+        tz_minutes,
+    )
+}
+
+fn timestamp_to_value(ts: partiql_vm::value::Timestamp) -> Option<partiql_value::DateTime> {
+    let (date, time) = ts.local();
+    let (year, month, day) = date.ymd();
+    let (hour, minute, second, micros) = time.hms_micro();
+    let month = std::num::NonZeroU8::new(month)?;
+    (-9999..=9999).contains(&year).then(|| {
+        partiql_value::DateTime::from_ymdhms_nano_offset_minutes(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            micros * 1_000,
+            ts.offset().get().map(i32::from),
+        )
+    })
+}
+
 fn view_to_value(view: &mut ValueView<'_>) -> Value {
     match view.get_type() {
         ValueType::Missing => Value::Missing,
@@ -360,16 +405,11 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             Value::Bag(Box::new(Bag::from(items)))
         }
         ValueType::Date => Value::DateTime(Box::new(
-            view.get_date()
-                .unwrap()
-                .to_value()
-                .expect("a date partiql-value holds"),
+            date_to_value(view.get_date().unwrap()).expect("a date partiql-value holds"),
         )),
-        ValueType::Time => Value::DateTime(Box::new(view.get_time().unwrap().to_value())),
+        ValueType::Time => Value::DateTime(Box::new(time_to_value(view.get_time().unwrap()))),
         ValueType::Timestamp => Value::DateTime(Box::new(
-            view.get_timestamp()
-                .unwrap()
-                .to_value()
+            timestamp_to_value(view.get_timestamp().unwrap())
                 .expect("a timestamp partiql-value holds"),
         )),
         ValueType::Variant => {
