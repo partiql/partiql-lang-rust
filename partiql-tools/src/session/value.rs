@@ -105,6 +105,19 @@ fn value_view_to_value(
         ValueType::Tuple => Value::Tuple(Box::new(walk_struct(view)?)),
         ValueType::List => Value::List(Box::new(walk_sequence(view)?.into())),
         ValueType::Bag => Value::Bag(Box::new(walk_sequence(view)?.into())),
+        ValueType::Date => {
+            let date = view.get_date().map_err(scalar_err)?;
+            Value::DateTime(Box::new(
+                date.to_value().ok_or_else(|| out_of_range(&date))?,
+            ))
+        }
+        ValueType::Time => {
+            Value::DateTime(Box::new(view.get_time().map_err(scalar_err)?.to_value()))
+        }
+        ValueType::Timestamp => {
+            let ts = view.get_timestamp().map_err(scalar_err)?;
+            Value::DateTime(Box::new(ts.to_value().ok_or_else(|| out_of_range(&ts))?))
+        }
         ValueType::Variant => {
             use partiql_extension_ion::boxed_ion::BoxedIonType;
             use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
@@ -115,6 +128,11 @@ fn value_view_to_value(
             Value::from(variant)
         }
     })
+}
+
+/// A datetime past the years -9999 to 9999 that output (through `partiql_value`) holds.
+fn out_of_range(value: &dyn std::fmt::Debug) -> RowConvertError {
+    RowConvertError(format!("datetime out of range for output: {value:?}"))
 }
 
 fn scalar_err<E: std::fmt::Debug>(e: E) -> RowConvertError {

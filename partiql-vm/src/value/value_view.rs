@@ -15,6 +15,9 @@ pub enum ValueType {
     Tuple,
     List,
     Bag,
+    Date,
+    Time,
+    Timestamp,
     Variant,
 }
 
@@ -98,6 +101,9 @@ impl<'a> ValueView<'a> {
             ValueRef::Tuple(_) => ValueType::Tuple,
             ValueRef::List(_) => ValueType::List,
             ValueRef::Bag(_) => ValueType::Bag,
+            ValueRef::Date(_) => ValueType::Date,
+            ValueRef::Time(_) => ValueType::Time,
+            ValueRef::Timestamp(_) => ValueType::Timestamp,
             ValueRef::Variant(_, _) => ValueType::Variant,
         }
     }
@@ -176,6 +182,39 @@ impl<'a> ValueView<'a> {
             ValueRef::Bytes(b) => Ok(b),
             _ => Err(EngineError::TypeError(format!(
                 "expected Bytes, got {:?}",
+                self.get_type()
+            ))),
+        }
+    }
+
+    /// Get a `DATE`
+    pub fn get_date(&self) -> Result<super::Date> {
+        match self.current {
+            ValueRef::Date(d) => Ok(d),
+            _ => Err(EngineError::TypeError(format!(
+                "expected Date, got {:?}",
+                self.get_type()
+            ))),
+        }
+    }
+
+    /// Get a `TIME [WITH TIME ZONE]`
+    pub fn get_time(&self) -> Result<super::Time> {
+        match self.current {
+            ValueRef::Time(t) => Ok(t),
+            _ => Err(EngineError::TypeError(format!(
+                "expected Time, got {:?}",
+                self.get_type()
+            ))),
+        }
+    }
+
+    /// Get a `TIMESTAMP [WITH TIME ZONE]`
+    pub fn get_timestamp(&self) -> Result<super::Timestamp> {
+        match self.current {
+            ValueRef::Timestamp(t) => Ok(t),
+            _ => Err(EngineError::TypeError(format!(
+                "expected Timestamp, got {:?}",
                 self.get_type()
             ))),
         }

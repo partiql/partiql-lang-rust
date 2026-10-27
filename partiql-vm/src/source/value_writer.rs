@@ -97,6 +97,24 @@ impl<'w, 'a> RegisterWriter<'w, 'a> {
         self.write_to_slot(slot, ValueRef::Decimal(value))
     }
 
+    /// Write a `DATE` to the specified slot
+    #[inline]
+    pub fn write_date(&mut self, slot: SlotId, value: crate::value::Date) -> Result<()> {
+        self.write_to_slot(slot, ValueRef::Date(value))
+    }
+
+    /// Write a `TIME [WITH TIME ZONE]` to the specified slot
+    #[inline]
+    pub fn write_time(&mut self, slot: SlotId, value: crate::value::Time) -> Result<()> {
+        self.write_to_slot(slot, ValueRef::Time(value))
+    }
+
+    /// Write a `TIMESTAMP [WITH TIME ZONE]` to the specified slot
+    #[inline]
+    pub fn write_timestamp(&mut self, slot: SlotId, value: crate::value::Timestamp) -> Result<()> {
+        self.write_to_slot(slot, ValueRef::Timestamp(value))
+    }
+
     /// Internal helper for slot-targeted writes with bounds checking
     #[inline]
     fn write_to_slot(&mut self, slot: SlotId, value: ValueRef<'a>) -> Result<()> {
@@ -319,6 +337,24 @@ impl<'w, 'a> ValueWriter<'w, 'a> {
     #[inline]
     pub fn put_decimal(&mut self, value: rust_decimal::Decimal) -> Result<()> {
         self.put_scalar(ValueRef::Decimal(value))
+    }
+
+    /// Put a `DATE`
+    #[inline]
+    pub fn put_date(&mut self, value: crate::value::Date) -> Result<()> {
+        self.put_scalar(ValueRef::Date(value))
+    }
+
+    /// Put a `TIME [WITH TIME ZONE]`
+    #[inline]
+    pub fn put_time(&mut self, value: crate::value::Time) -> Result<()> {
+        self.put_scalar(ValueRef::Time(value))
+    }
+
+    /// Put a `TIMESTAMP [WITH TIME ZONE]`
+    #[inline]
+    pub fn put_timestamp(&mut self, value: crate::value::Timestamp) -> Result<()> {
+        self.put_scalar(ValueRef::Timestamp(value))
     }
 
     // =========================================================================

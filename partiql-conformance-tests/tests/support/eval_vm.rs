@@ -11,7 +11,9 @@ use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
     RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
 };
-use partiql_vm::value::{FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView};
+use partiql_vm::value::{
+    DateTimeValue, FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView,
+};
 use partiql_vm::{
     CompilationCatalog, CompilationContext, EngineError, ExecutionCatalog, ExecutionContext,
     ExecutionResult, PartiQLVM, PlanCompiler,
@@ -108,6 +110,19 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             }
             Value::Bag(Box::new(Bag::from(items)))
         }
+        ValueType::Date => Value::DateTime(Box::new(
+            view.get_date()
+                .unwrap()
+                .to_value()
+                .expect("a date partiql-value holds"),
+        )),
+        ValueType::Time => Value::DateTime(Box::new(view.get_time().unwrap().to_value())),
+        ValueType::Timestamp => Value::DateTime(Box::new(
+            view.get_timestamp()
+                .unwrap()
+                .to_value()
+                .expect("a timestamp partiql-value holds"),
+        )),
         ValueType::Variant => {
             use partiql_extension_ion::boxed_ion::BoxedIonType;
             use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
@@ -241,6 +256,12 @@ fn write_value_to_slot(
             vw.step_out()?;
             vw.finish()
         }
+        Value::DateTime(dt) => match DateTimeValue::from_value(dt) {
+            Some(DateTimeValue::Date(d)) => writer.write_date(slot, d),
+            Some(DateTimeValue::Time(t)) => writer.write_time(slot, t),
+            Some(DateTimeValue::Timestamp(t)) => writer.write_timestamp(slot, t),
+            None => writer.write_null(slot),
+        },
         _ => writer.write_null(slot),
     }
 }
@@ -279,6 +300,12 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
             }
             vw.step_out()
         }
+        Value::DateTime(dt) => match DateTimeValue::from_value(dt) {
+            Some(DateTimeValue::Date(d)) => vw.put_date(d),
+            Some(DateTimeValue::Time(t)) => vw.put_time(t),
+            Some(DateTimeValue::Timestamp(t)) => vw.put_timestamp(t),
+            None => vw.put_null(),
+        },
         _ => vw.put_null(),
     }
 }

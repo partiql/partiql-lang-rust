@@ -45,6 +45,10 @@ fn order_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>, nulls_low: bool) -> Ordering {
         (ValueRef::Bool(a), ValueRef::Bool(b)) => a.cmp(b),
         (ValueRef::Str(a), ValueRef::Str(b)) => a.cmp(b),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a.cmp(b),
+        // Times and timestamps without a time zone first, then those with, in UTC
+        (ValueRef::Date(a), ValueRef::Date(b)) => a.cmp(b),
+        (ValueRef::Time(a), ValueRef::Time(b)) => a.key().cmp(&b.key()),
+        (ValueRef::Timestamp(a), ValueRef::Timestamp(b)) => a.key().cmp(&b.key()),
         (ValueRef::List(_) | ValueRef::Tuple(_) | ValueRef::Bag(_), _) if same_type(a, b) => {
             // Nested values sort with the same NULL order; bags and tuples are put in a
             // canonical order first, which puts NULLs low
@@ -147,6 +151,14 @@ impl<'a> EqOperand<'a> {
             (ValueRef::Bool(a), ValueRef::Bool(b)) => ValueRef::Bool(a == b),
             (ValueRef::Str(a), ValueRef::Str(b)) => ValueRef::Bool(a == b),
             (ValueRef::Bytes(a), ValueRef::Bytes(b)) => ValueRef::Bool(a == b),
+            // A time or timestamp with a time zone equals one without none
+            (ValueRef::Date(a), ValueRef::Date(b)) => ValueRef::Bool(a == b),
+            (ValueRef::Time(a), ValueRef::Time(b)) => {
+                ValueRef::Bool(a.compare(b) == Some(Ordering::Equal))
+            }
+            (ValueRef::Timestamp(a), ValueRef::Timestamp(b)) => {
+                ValueRef::Bool(a.compare(b) == Some(Ordering::Equal))
+            }
             // A list's or bag's key has its elements, so lengths that differ settle it
             (ValueRef::List(a), ValueRef::List(b)) | (ValueRef::Bag(a), ValueRef::Bag(b))
                 if a.len() != b.len() =>
@@ -179,6 +191,9 @@ pub(crate) fn type_name(value: &ValueRef<'_>) -> &'static str {
         ValueRef::Decimal(_) => "decimal",
         ValueRef::Str(_) => "string",
         ValueRef::Bytes(_) => "blob",
+        ValueRef::Date(_) => "date",
+        ValueRef::Time(_) => "time",
+        ValueRef::Timestamp(_) => "timestamp",
         ValueRef::List(_) => "list",
         ValueRef::Bag(_) => "bag",
         ValueRef::Tuple(_) => "tuple",
@@ -201,15 +216,16 @@ pub(crate) enum Order {
     /// Either is NULL (and neither MISSING).
     Null,
     /// Values that are ordered: numbers by value exactly whatever their type, strings by code
-    /// point, booleans (false first), blobs by byte, and two lists, bags or tuples by their `eqg`
+    /// point, booleans (false first), blobs by byte, dates, times and timestamps (with a time
+    /// zone, as instants: in UTC) of the same kind, and two lists, bags or tuples by their `eqg`
     /// keys, so that `<=` is `<` or `=` however nested (NULL and MISSING apart, NaN equal to
     /// NaN and before every other number).
     Ordered(Ordering),
     /// A NaN: no order holds.
     Unordered,
     /// Values of types that don't compare (`1 < 'a'`): MISSING, or an error in strict mode.
-    /// An Ion value the VM has no type for (a timestamp), or a collection holding one, is one
-    /// too, until the VM has a type for it.
+    /// So are a date, a time and a timestamp of different kinds (or one with a time zone and
+    /// one without), and an Ion value the VM has no type for, or a collection holding one.
     Incomparable,
 }
 
@@ -223,6 +239,15 @@ pub(crate) fn order<'a>(a: ValueRef<'a>, b: ValueRef<'a>, scratch: &'a Arena) ->
         (ValueRef::Bool(a), ValueRef::Bool(b)) => Order::Ordered(a.cmp(&b)),
         (ValueRef::Str(a), ValueRef::Str(b)) => Order::Ordered(a.cmp(b)),
         (ValueRef::Bytes(a), ValueRef::Bytes(b)) => Order::Ordered(a.cmp(b)),
+        // A time or timestamp with a time zone and one without don't compare: there is no
+        // session time zone to place the one without in
+        (ValueRef::Date(a), ValueRef::Date(b)) => Order::Ordered(a.cmp(&b)),
+        (ValueRef::Time(a), ValueRef::Time(b)) => {
+            a.compare(b).map_or(Order::Incomparable, Order::Ordered)
+        }
+        (ValueRef::Timestamp(a), ValueRef::Timestamp(b)) => {
+            a.compare(b).map_or(Order::Incomparable, Order::Ordered)
+        }
         (ValueRef::List(_), ValueRef::List(_))
         | (ValueRef::Bag(_), ValueRef::Bag(_))
         | (ValueRef::Tuple(_), ValueRef::Tuple(_)) => {
@@ -253,7 +278,8 @@ pub(crate) fn number_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Option<Option<Or
 }
 
 /// `eqg` as a total order of keys (`eqg_key`): the order GROUP BY sorts its keys in, equal
-/// exactly when the values are `eqg`. Unlike `=`, NULL equals NULL and MISSING equals MISSING
+/// exactly when the values are `eqg` (a time or timestamp with a time zone is equal to one at
+/// the same instant, whatever their offsets, and to none without one). Unlike `=`, NULL equals NULL and MISSING equals MISSING
 /// (but not each other); numbers are equal by value whatever their type (`1`, `1.0` and
 /// `1e0`), and NaN equals NaN; a tuple's attributes and a bag's elements compare in any order.
 pub(crate) fn eqg_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
@@ -274,6 +300,9 @@ pub(crate) fn eqg_cmp(a: &ValueRef<'_>, b: &ValueRef<'_>) -> Ordering {
             .map(|(x, y)| x.name.cmp(y.name).then_with(|| eqg_cmp(&x.value, &y.value)))
             .find(|ord| ord.is_ne())
             .unwrap_or_else(|| a.fields.len().cmp(&b.fields.len())),
+        (ValueRef::Date(a), ValueRef::Date(b)) => a.cmp(b),
+        (ValueRef::Time(a), ValueRef::Time(b)) => a.key().cmp(&b.key()),
+        (ValueRef::Timestamp(a), ValueRef::Timestamp(b)) => a.key().cmp(&b.key()),
         (ValueRef::Variant(a, a_type), ValueRef::Variant(b, b_type)) => {
             (a_type, a).cmp(&(b_type, b))
         }
@@ -380,6 +409,18 @@ fn write_key(key: &ValueRef<'_>, state: &mut impl Hasher) {
                 write_key(&field.value, state);
             }
         }
+        ValueRef::Date(d) => {
+            state.write_u8(10);
+            d.hash(state);
+        }
+        ValueRef::Time(t) => {
+            state.write_u8(11);
+            t.key().hash(state);
+        }
+        ValueRef::Timestamp(t) => {
+            state.write_u8(12);
+            t.key().hash(state);
+        }
         ValueRef::Variant(bytes, type_name) => {
             state.write_u8(9);
             type_name.hash(state);
@@ -444,13 +485,17 @@ fn type_rank(v: &ValueRef<'_>) -> u8 {
         ValueRef::Missing | ValueRef::Null => 0,
         ValueRef::Bool(_) => 1,
         ValueRef::I64(_) | ValueRef::F64(_) | ValueRef::Decimal(_) => 2,
-        ValueRef::Str(_) => 3,
-        ValueRef::Bytes(_) => 4,
-        ValueRef::List(_) => 5,
-        ValueRef::Tuple(_) => 6,
-        ValueRef::Bag(_) => 7,
+        // Datetimes after numbers, as in the legacy evaluator
+        ValueRef::Date(_) => 3,
+        ValueRef::Time(_) => 4,
+        ValueRef::Timestamp(_) => 5,
+        ValueRef::Str(_) => 6,
+        ValueRef::Bytes(_) => 7,
+        ValueRef::List(_) => 8,
+        ValueRef::Tuple(_) => 9,
+        ValueRef::Bag(_) => 10,
         // Not decoded: an Ion variant orders after every other type
-        ValueRef::Variant(_, _) => 8,
+        ValueRef::Variant(_, _) => 11,
     }
 }
 

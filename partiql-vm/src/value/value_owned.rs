@@ -1,3 +1,4 @@
+use super::datetime::{Date, Time, Timestamp};
 use ordered_float::OrderedFloat;
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
@@ -33,6 +34,9 @@ pub(crate) enum ValueOwned {
     Tuple(TupleOwned),
     List(Vec<ValueOwned>),
     Bag(Vec<ValueOwned>),
+    Date(Date),
+    Time(Time),
+    Timestamp(Timestamp),
     /// Ion variant literal: (raw_bytes, type_name)
     Variant(Vec<u8>, String),
 }
@@ -78,6 +82,9 @@ impl fmt::Display for ValueOwned {
                 }
                 write!(f, " >>")
             }
+            ValueOwned::Date(d) => write!(f, "{d:?}"),
+            ValueOwned::Time(t) => write!(f, "{t:?}"),
+            ValueOwned::Timestamp(t) => write!(f, "{t:?}"),
             ValueOwned::Variant(bytes, type_name) => {
                 let text = std::str::from_utf8(bytes).unwrap_or("<invalid utf8>");
                 write!(f, "Variant({type_name}::{text})")

@@ -3,7 +3,9 @@
 
 use crate::arena::Arena;
 use crate::error::{EngineError, Result};
-use crate::value::{value_ref_to_owned, TupleField, TupleRef, ValueOwned, ValueRef};
+use crate::value::{
+    value_ref_to_owned, Date, Offset, Time, Timestamp, TupleField, TupleRef, ValueOwned, ValueRef,
+};
 use ion_rs::{Element, IonType};
 use rust_decimal::Decimal;
 
@@ -127,8 +129,26 @@ fn decode<'a>(element: &Element, arena: &'a Arena) -> Option<ValueRef<'a>> {
                 fields: arena.alloc_slice(&fields),
             }))
         }
-        IonType::Timestamp => return None,
+        IonType::Timestamp => ValueRef::Timestamp(timestamp(&element.as_timestamp()?)?),
     })
+}
+
+/// An Ion timestamp as a VM timestamp: with a time zone when it has an offset (`Z` or
+/// `+01:00`), else (an unknown offset, `-00:00`, or no time) without; its fractional seconds
+/// rounded to microseconds.
+fn timestamp(ts: &ion_rs::Timestamp) -> Option<Timestamp> {
+    let date = Date::from_ymd(ts.year() as i32, ts.month() as u8, ts.day() as u8)?;
+    let offset = match ts.offset() {
+        Some(minutes) => Offset::minutes(minutes)?,
+        None => Offset::NONE,
+    };
+    let precision = ts.fractional_seconds_scale().unwrap_or(0).clamp(0, 6) as u8;
+    let (hour, minute, second) = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
+    let time = Time::from_hms_micro(hour, minute, second, 0, offset, precision)?;
+    // Rounded half up; a carry moves the timestamp on (as does a leap second's, whose
+    // fraction is a second or more)
+    let micros = (i64::from(ts.nanoseconds()) + 500) / 1_000;
+    Timestamp::from_local(date, time, offset, precision)?.plus_micros(micros)
 }
 
 /// An Ion literal's value, decoded when the VM has a type for it.
@@ -211,12 +231,42 @@ mod tests {
 
     #[test]
     fn what_the_vm_cannot_hold_stays_a_variant() {
-        assert!(lowered("2000-01-02T03:04:05Z").starts_with("Variant("));
         // Past a decimal's 96 bits
         assert!(lowered("170141183460469231731687303715884105727").starts_with("Variant("));
-        // A nested timestamp is a variant of its own in a decoded list
-        let list = lowered("[1, 2000T]");
+        // A nested one is a variant of its own in a decoded list
+        let list = lowered("[1, 170141183460469231731687303715884105727]");
         assert!(list.starts_with("List([I64(1), Variant("), "{list}");
+    }
+
+    fn timestamp(text: &str) -> Timestamp {
+        let arena = Arena::default();
+        match lower(ValueRef::Variant(text.as_bytes(), ION), &arena).expect("valid Ion") {
+            ValueRef::Timestamp(ts) => ts,
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timestamps_decode_with_their_offset_rounded_to_microseconds() {
+        let ts = timestamp("2000-01-02T03:04:05.1234567+01:30");
+        assert_eq!(ts.offset().get(), Some(90));
+        let (date, time) = ts.local();
+        assert_eq!(date.ymd(), (2000, 1, 2));
+        assert_eq!(time.hms_micro(), (3, 4, 5, 123_457));
+        assert_eq!(ts.precision(), 6);
+        // The UTC instant
+        assert_eq!(
+            ts.micros(),
+            timestamp("2000-01-02T01:34:05.123457Z").micros()
+        );
+        // Rounding carries into the next second, minute and day
+        let (date, time) = timestamp("1999-12-31T23:59:59.9999996Z").local();
+        assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
+        // An unknown offset, or a date alone, is a timestamp without a time zone
+        assert_eq!(timestamp("2000-01-01T00:00-00:00").offset().get(), None);
+        let (date, time) = timestamp("2000T").local();
+        assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
+        assert_eq!(timestamp("2000T").offset().get(), None);
     }
 
     #[test]

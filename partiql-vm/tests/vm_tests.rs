@@ -359,6 +359,19 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             }
             Value::Bag(Box::new(Bag::from(items)))
         }
+        ValueType::Date => Value::DateTime(Box::new(
+            view.get_date()
+                .unwrap()
+                .to_value()
+                .expect("a date partiql-value holds"),
+        )),
+        ValueType::Time => Value::DateTime(Box::new(view.get_time().unwrap().to_value())),
+        ValueType::Timestamp => Value::DateTime(Box::new(
+            view.get_timestamp()
+                .unwrap()
+                .to_value()
+                .expect("a timestamp partiql-value holds"),
+        )),
         ValueType::Variant => {
             use partiql_extension_ion::boxed_ion::BoxedIonType;
             use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
