@@ -22,8 +22,9 @@ pub enum Expr {
     Mod(Box<Expr>, Box<Expr>),
     Exp(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
-    Gt(Box<Expr>, Box<Expr>),
-    Lt(Box<Expr>, Box<Expr>),
+    /// `<>`: the negation of `=`, NULL and MISSING passed on.
+    Neq(Box<Expr>, Box<Expr>),
+    Compare(Comparison, Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -90,8 +91,8 @@ impl Expr {
             | Expr::Mod(a, b)
             | Expr::Exp(a, b)
             | Expr::Eq(a, b)
-            | Expr::Gt(a, b)
-            | Expr::Lt(a, b)
+            | Expr::Neq(a, b)
+            | Expr::Compare(_, a, b)
             | Expr::And(a, b)
             | Expr::Or(a, b)
             | Expr::Concat(a, b)
@@ -229,11 +230,12 @@ pub enum Inst {
         b: u16,
         b_cast: u16,
     },
-    /// PartiQL's `=` of any two values (`compare::eq`).
+    /// PartiQL's `=` of any two values (`compare::eq`), or `<>` when `negate`.
     EqDynamic {
         dst: u16,
         a: u16,
         b: u16,
+        negate: bool,
     },
     // --- Mul ---
     MulI64 {
@@ -295,19 +297,16 @@ pub enum Inst {
         b_cast: u16,
     },
     // --- Gt ---
-    /// `a > b` of any two values (`eval_ordering_dynamic`).
-    GtDynamic {
+    /// `a < b`, `a <= b`, `a > b` or `a >= b` of any two values (`compare::order`). Values of
+    /// types that don't compare give MISSING, or in `strict` mode an error.
+    CompareDynamic {
         dst: u16,
         a: u16,
         b: u16,
+        op: Comparison,
+        strict: bool,
     },
     // --- Lt ---
-    /// `a < b` of any two values (`eval_ordering_dynamic`).
-    LtDynamic {
-        dst: u16,
-        a: u16,
-        b: u16,
-    },
     // --- Concat ---
     ConcatStr {
         dst: u16,
@@ -664,6 +663,27 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+}
+
+/// An ordering comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Comparison {
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+}
+
+impl Comparison {
+    /// Whether the comparison holds of two values in `order`.
+    fn holds(self, order: Ordering) -> bool {
+        match self {
+            Comparison::Lt => order.is_lt(),
+            Comparison::LtEq => order.is_le(),
+            Comparison::Gt => order.is_gt(),
+            Comparison::GtEq => order.is_ge(),
+        }
+    }
 }
 
 /// What a collection a cursor scans is for, which decides how a value that is no collection
@@ -1185,8 +1205,12 @@ impl Program {
                     udf,
                 )?;
             }
-            Inst::EqDynamic { dst, a, b } => {
-                regs[*dst as usize] = compare::eq(regs[*a as usize], regs[*b as usize], arena)?;
+            Inst::EqDynamic { dst, a, b, negate } => {
+                regs[*dst as usize] =
+                    match compare::eq(regs[*a as usize], regs[*b as usize], arena)? {
+                        ValueRef::Bool(eq) => ValueRef::Bool(eq != *negate),
+                        absent => absent,
+                    };
             }
             // --- Mul ---
             Inst::MulI64 { dst, a, b } => {
@@ -1278,14 +1302,27 @@ impl Program {
                 self.eval_exp_dynamic(*dst, *a, *b, *a_cast, *b_cast, arena, regs, udf)?;
             }
             // --- Gt ---
-            Inst::GtDynamic { dst, a, b } => {
+            Inst::CompareDynamic {
+                dst,
+                a,
+                b,
+                op,
+                strict,
+            } => {
                 regs[*dst as usize] =
-                    eval_ordering_dynamic(regs[*a as usize], regs[*b as usize], Ordering::Greater);
-            }
-            // --- Lt ---
-            Inst::LtDynamic { dst, a, b } => {
-                regs[*dst as usize] =
-                    eval_ordering_dynamic(regs[*a as usize], regs[*b as usize], Ordering::Less);
+                    match compare::order(regs[*a as usize], regs[*b as usize], arena)? {
+                        compare::Order::Missing => ValueRef::Missing,
+                        compare::Order::Null => ValueRef::Null,
+                        compare::Order::Ordered(order) => ValueRef::Bool(op.holds(order)),
+                        compare::Order::Unordered => ValueRef::Bool(false),
+                        compare::Order::Incomparable if *strict => {
+                            return Err(EngineError::TypeError(format!(
+                                "{op:?} of values that don't compare: {:?} and {:?}",
+                                regs[*a as usize], regs[*b as usize]
+                            )))
+                        }
+                        compare::Order::Incomparable => ValueRef::Missing,
+                    };
             }
             // --- Concat ---
             Inst::ConcatStr { dst, a, b } => {
@@ -1346,9 +1383,10 @@ impl Program {
                         // NULL or MISSING (an element was absent: it might have been equal);
                         // else false (spec section 8)
                         ValueRef::List(items) | ValueRef::Bag(items) => {
+                            let val = compare::EqOperand::new(val, arena)?;
                             let mut result = ValueRef::Bool(false);
                             for item in items.iter() {
-                                match compare::eq(val, *item, arena)? {
+                                match val.eq(*item, arena)? {
                                     ValueRef::Bool(true) => {
                                         result = ValueRef::Bool(true);
                                         break;
@@ -1360,7 +1398,8 @@ impl Program {
                             result
                         }
                         ValueRef::Null | ValueRef::Missing => ValueRef::Null,
-                        // A value that is no collection: whether the value `=` it
+                        // A value that is no collection: whether the value `=` it. The parser
+                        // gives `x IN (1)` and `x IN 1` the same tree, so this is both
                         other => match compare::eq(val, other, arena)? {
                             ValueRef::Missing => ValueRef::Null,
                             result => result,
@@ -1694,6 +1733,8 @@ pub struct ProgramBuilder {
     /// Set while the emitter compiles an expression whose subqueries it has just run, so
     /// that reading a subquery's register before it ran fails to compile.
     pub(crate) subqueries_run: bool,
+    /// Strict mode: an operator given values it can't take fails, rather than giving MISSING.
+    pub(crate) strict: bool,
 }
 
 impl ProgramBuilder {
@@ -1707,6 +1748,7 @@ impl ProgramBuilder {
             reg_count: slot_count,
             slot_count,
             subqueries_run: false,
+            strict: false,
         }
     }
 
@@ -1876,7 +1918,24 @@ impl ExprCompiler<'_> {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg()?;
-                self.builder.insts.push(Inst::EqDynamic { dst, a: l, b: r });
+                self.builder.insts.push(Inst::EqDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    negate: false,
+                });
+                Ok(dst)
+            }
+            Expr::Neq(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::EqDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    negate: true,
+                });
                 Ok(dst)
             }
             Expr::And(left, right) => {
@@ -2055,18 +2114,17 @@ impl ExprCompiler<'_> {
                 });
                 Ok(dst)
             }
-            Expr::Gt(left, right) => {
+            Expr::Compare(op, left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg()?;
-                self.builder.insts.push(Inst::GtDynamic { dst, a: l, b: r });
-                Ok(dst)
-            }
-            Expr::Lt(left, right) => {
-                let l = self.compile_expr(left)?;
-                let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg()?;
-                self.builder.insts.push(Inst::LtDynamic { dst, a: l, b: r });
+                self.builder.insts.push(Inst::CompareDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    op: *op,
+                    strict: self.builder.strict,
+                });
                 Ok(dst)
             }
             Expr::Concat(left, right) => {
@@ -2153,14 +2211,8 @@ impl ExprCompiler<'_> {
                     self.compile_expr(hi)?,
                 );
                 let reg = |r| Box::new(Expr::SlotRef(r));
-                let at_least = Expr::Or(
-                    Expr::Gt(reg(value), reg(lo)).into(),
-                    Expr::Eq(reg(value), reg(lo)).into(),
-                );
-                let at_most = Expr::Or(
-                    Expr::Lt(reg(value), reg(hi)).into(),
-                    Expr::Eq(reg(value), reg(hi)).into(),
-                );
+                let at_least = Expr::Compare(Comparison::GtEq, reg(value), reg(lo));
+                let at_most = Expr::Compare(Comparison::LtEq, reg(value), reg(hi));
                 self.compile_expr(&Expr::And(at_least.into(), at_most.into()))
             }
             Expr::CollToScalar(expr) => {
@@ -2296,36 +2348,17 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     partiql_logical::BinaryOp::Add => Ok(Expr::Add(left.into(), right.into())),
                     partiql_logical::BinaryOp::Sub => Ok(Expr::Sub(left.into(), right.into())),
                     partiql_logical::BinaryOp::Mod => Ok(Expr::Mod(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Neq => {
-                        Ok(Expr::Not(Box::new(Expr::Eq(left.into(), right.into()))))
-                    }
+                    partiql_logical::BinaryOp::Neq => Ok(Expr::Neq(left.into(), right.into())),
                     partiql_logical::BinaryOp::Eq => Ok(Expr::Eq(left.into(), right.into())),
                     partiql_logical::BinaryOp::And => Ok(Expr::And(left.into(), right.into())),
                     partiql_logical::BinaryOp::Or => Ok(Expr::Or(left.into(), right.into())),
                     partiql_logical::BinaryOp::Concat => {
                         Ok(Expr::Concat(left.into(), right.into()))
                     }
-                    partiql_logical::BinaryOp::Gt => Ok(Expr::Gt(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Gteq => {
-                        // Gteq(l, r) => Or(Gt(l, r), Eq(l', r'))
-                        // We clone left/right since they're used twice
-                        let left_clone = left.clone();
-                        let right_clone = right.clone();
-                        Ok(Expr::Or(
-                            Box::new(Expr::Gt(left.into(), right.into())),
-                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
-                        ))
-                    }
-                    partiql_logical::BinaryOp::Lt => Ok(Expr::Lt(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Lteq => {
-                        // Lteq(l, r) => Or(Lt(l, r), Eq(l', r'))
-                        let left_clone = left.clone();
-                        let right_clone = right.clone();
-                        Ok(Expr::Or(
-                            Box::new(Expr::Lt(left.into(), right.into())),
-                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
-                        ))
-                    }
+                    partiql_logical::BinaryOp::Gt => Ok(compare(Comparison::Gt, left, right)),
+                    partiql_logical::BinaryOp::Gteq => Ok(compare(Comparison::GtEq, left, right)),
+                    partiql_logical::BinaryOp::Lt => Ok(compare(Comparison::Lt, left, right)),
+                    partiql_logical::BinaryOp::Lteq => Ok(compare(Comparison::LtEq, left, right)),
                     partiql_logical::BinaryOp::Mul => Ok(Expr::Mul(left.into(), right.into())),
                     partiql_logical::BinaryOp::Div => Ok(Expr::Div(left.into(), right.into())),
                     partiql_logical::BinaryOp::Exp => Ok(Expr::Exp(left.into(), right.into())),
@@ -2581,9 +2614,8 @@ impl ValueOperands {
             | Inst::MulDynamic { dst, a, b, .. }
             | Inst::DivDynamic { dst, a, b, .. }
             | Inst::ExpDynamic { dst, a, b, .. }
-            | Inst::EqDynamic { dst, a, b }
-            | Inst::GtDynamic { dst, a, b }
-            | Inst::LtDynamic { dst, a, b }
+            | Inst::EqDynamic { dst, a, b, .. }
+            | Inst::CompareDynamic { dst, a, b, .. }
             | Inst::ConcatDynamic { dst, a, b }
             | Inst::AndBool { dst, a, b }
             | Inst::OrBool { dst, a, b } => ops(Some(dst), &[a, b]),
@@ -2706,17 +2738,7 @@ fn resolve_alias_info<R: SlotResolver>(
     }
 }
 
-/// `a > b` or `a < b` (`want` is the order sought), for any two values: MISSING if either is
-/// MISSING, else NULL if either is NULL; numbers by value exactly whatever their type (NaN is
-/// ordered with nothing: false); strings by code point; other values NULL, as no order holds.
-fn eval_ordering_dynamic<'a>(a: ValueRef<'a>, b: ValueRef<'a>, want: Ordering) -> ValueRef<'a> {
-    match (a, b) {
-        (ValueRef::Missing, _) | (_, ValueRef::Missing) => ValueRef::Missing,
-        (ValueRef::Null, _) | (_, ValueRef::Null) => ValueRef::Null,
-        (ValueRef::Str(a), ValueRef::Str(b)) => ValueRef::Bool(a.cmp(b) == want),
-        _ => match compare::number_cmp(&a, &b) {
-            Some(order) => ValueRef::Bool(order == Some(want)),
-            None => ValueRef::Null,
-        },
-    }
+/// The comparison `op` of two lowered operands.
+fn compare(op: Comparison, left: Expr, right: Expr) -> Expr {
+    Expr::Compare(op, left.into(), right.into())
 }
