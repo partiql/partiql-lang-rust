@@ -93,3 +93,23 @@
   ''',
   expect: $bag::[]
 }
+
+// GROUP AS holds every FROM variable, so one bound by AT (not supported yet) is an error, not
+// left out
+{
+  sql: '''
+    SELECT k, g
+    FROM [ {'k': 1} ] AS t AT i
+    GROUP BY t.k AS k GROUP AS g
+  ''',
+  expect: { error: "AT variable" }
+}
+
+{
+  sql: '''
+    SELECT g
+    FROM << {'k': 1} >> t
+    GROUP BY t.k AS g GROUP AS g
+  ''',
+  expect: { error: "names a GROUP BY key" }
+}

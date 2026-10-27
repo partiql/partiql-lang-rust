@@ -1300,11 +1300,17 @@ impl<'a> Lowerer<'a> {
             column_slots.insert(agg.name.clone(), lowered.accum);
         }
         if let (Some(name), Some(group_as)) = (&group_by.group_as_alias, &group_as) {
+            if keys.iter().any(|(key, _)| key.eq_ignore_ascii_case(name)) {
+                return Err(EngineError::InvalidPlan(format!(
+                    "GROUP AS {name} names a GROUP BY key too"
+                )));
+            }
             column_slots.insert(name.clone(), group_as.dst);
         }
         let grouped = ResolverKind::Pipeline(PipelineSlotResolver {
             base_row_slot: None,
             scan_alias: String::new(),
+            at_alias: None,
             table_name: None,
             column_slots,
             group_output: true,
@@ -1630,6 +1636,7 @@ fn pushdown(
     let mut binding = PipelineSlotResolver {
         base_row_slot: None,
         scan_alias: scan.as_key.clone(),
+        at_alias: scan.at_key.clone(),
         table_name,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1660,6 +1667,7 @@ fn whole_row_binding(scan: &Scan) -> PipelineSlotResolver {
     PipelineSlotResolver {
         base_row_slot: Some(0),
         scan_alias: scan.as_key.clone(),
+        at_alias: scan.at_key.clone(),
         table_name: None,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1693,6 +1701,13 @@ fn group_as_row(resolver: &ResolverKind) -> Result<Expr> {
     };
     let (mut attrs, mut values) = (vec![], vec![]);
     for binding in bindings {
+        // GROUP AS holds every FROM variable, so one the VM does not bind is an error rather
+        // than left out
+        if let Some(at) = &binding.at_alias {
+            return Err(EngineError::UnsupportedExpr(format!(
+                "GROUP AS over the AT variable {at}"
+            )));
+        }
         // GROUP AS reads every variable's whole value (`extract_fields`)
         let row = binding.base_row_slot.ok_or_else(|| {
             EngineError::InvalidPlan(format!(
@@ -2083,6 +2098,8 @@ impl SlotResolver for GlobalSlotResolver {
 struct PipelineSlotResolver {
     base_row_slot: Option<SlotId>,
     scan_alias: String,
+    /// The scan's `AT` variable, which the VM does not bind yet.
+    at_alias: Option<String>,
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
     /// GROUP BY's output instead: its keys and aggregates by name, with no alias.
@@ -2467,6 +2484,7 @@ mod tests {
         ResolverKind::Pipeline(PipelineSlotResolver {
             base_row_slot: whole_row,
             scan_alias: alias.to_string(),
+            at_alias: None,
             table_name: None,
             column_slots: fields.iter().map(|&(f, s)| (f.to_string(), s)).collect(),
             group_output: false,

@@ -22,6 +22,8 @@ pub(crate) struct Sorter {
     keys: SortKeys,
     /// Current position during iteration (after sort).
     position: usize,
+    /// GROUP BY: where each group starts among the sorted records, ascending.
+    group_starts: Vec<usize>,
 }
 
 impl Sorter {
@@ -31,6 +33,7 @@ impl Sorter {
             records: Vec::new(),
             keys,
             position: 0,
+            group_starts: Vec::new(),
         }
     }
 
@@ -39,6 +42,7 @@ impl Sorter {
     pub fn reset(&mut self) {
         self.records.clear();
         self.position = 0;
+        self.group_starts.clear();
     }
 
     /// How many of a record's leading fields are GROUP BY keys, compared by their `eqg` keys.
@@ -89,6 +93,16 @@ impl Sorter {
                         .find(|cmp| cmp.is_ne())
                         .unwrap_or(Ordering::Equal)
                 });
+                // Equal keys are now adjacent: a group starts wherever they change
+                self.group_starts = (0..self.records.len())
+                    .filter(|&i| {
+                        i == 0
+                            || !eqg_rows(
+                                &self.records[i - 1].group_keys,
+                                &self.records[i].group_keys,
+                            )
+                    })
+                    .collect();
             }
             SortKeys::Order(orders) => {
                 self.records.sort_by(|a, b| {
@@ -122,28 +136,18 @@ impl Sorter {
     /// Whether the current record starts a group: it is the first, or its GROUP BY keys are
     /// not `eqg` to the previous record's.
     pub fn new_group(&self) -> bool {
-        match self.position.checked_sub(1) {
-            None => true,
-            Some(previous) => !eqg_rows(
-                &self.records[previous].group_keys,
-                &self.records[self.position].group_keys,
-            ),
-        }
+        self.group_starts.binary_search(&self.position).is_ok()
     }
 
-    /// Field `field` of each record of the group that just ended, in input order: the run of
-    /// records with equal GROUP BY keys that ends before the current record (or at the end,
-    /// once the sorter is exhausted).
+    /// Field `field` of each record of the group that just ended, in input order: the group
+    /// that ends before the current record (or at the end, once the sorter is exhausted).
     pub fn group_field(&self, field: usize) -> Vec<ValueRef<'static>> {
         let end = self.position.min(self.records.len());
-        let Some(last) = end.checked_sub(1) else {
-            return vec![];
+        // The last group to start before `end`
+        let start = match self.group_starts.partition_point(|&start| start < end) {
+            0 => return vec![],
+            n => self.group_starts[n - 1],
         };
-        let keys = &self.records[last].group_keys;
-        let mut start = last;
-        while start > 0 && eqg_rows(&self.records[start - 1].group_keys, keys) {
-            start -= 1;
-        }
         self.records[start..end]
             .iter()
             .map(|record| record.fields[field])
