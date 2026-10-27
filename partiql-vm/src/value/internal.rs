@@ -108,13 +108,6 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn as_bool(&self) -> Result<bool> {
-        match *self {
-            ValueRef::Bool(v) => Ok(v),
-            _ => Err(EngineError::TypeError("expected bool".to_string())),
-        }
-    }
-
     pub fn as_decimal(&self) -> Result<RustDecimal> {
         match *self {
             ValueRef::Decimal(d) => Ok(d),
