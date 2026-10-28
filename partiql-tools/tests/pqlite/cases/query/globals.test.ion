@@ -8,11 +8,13 @@ CREATE TABLE u;
 INSERT INTO u SELECT * FROM << {'b': 2} >>
 '''
 
-// In SELECT and WHERE of a query with FROM: a table's name is the table, not an attribute of
-// the FROM binding
+// In SELECT and WHERE of a query with several FROM sources, a name that is no variable is the
+// table. (With a single source of no schema, such a name is an attribute of its variable, as
+// https://partiql.org/concepts/scopes has it; the planner does not follow that yet, so no step
+// here relies on either.)
 {
   sql: '''
-    SELECT x.b, COLL_COUNT(t) AS n FROM u AS x WHERE COLL_COUNT(t) > 2
+    SELECT x.b, COLL_COUNT(t) AS n FROM u AS x, [0] AS z WHERE COLL_COUNT(t) > 2
   ''',
   expect: $bag::[ { b: 2, n: 3 } ]
 }
@@ -28,7 +30,7 @@ INSERT INTO u SELECT * FROM << {'b': 2} >>
 // In ORDER BY, and in a correlated subquery
 {
   sql: '''
-    SELECT VALUE (SELECT VALUE COLL_COUNT(t) + x.a FROM u) FROM t AS x ORDER BY x.a
+    SELECT VALUE (SELECT VALUE COLL_COUNT(t) + x.a FROM u, [0] AS z) FROM t AS x ORDER BY x.a
   ''',
   expect: [ $bag::[4], $bag::[5], $bag::[6] ]
 }
@@ -97,7 +99,15 @@ CREATE TABLE "Q"
 
 {
   sql: '''
-    SELECT VALUE [COLL_COUNT("Q"), COLL_COUNT(Q), COLL_COUNT("T"), COLL_COUNT(T)] FROM u
+    SELECT VALUE [COLL_COUNT("Q"), COLL_COUNT(T)] FROM u, [0] AS z
   ''',
-  expect: $bag::[ [0, $missing::null, $missing::null, 3] ]
+  expect: $bag::[ [0, 3] ]
+}
+
+// ... so `Q` and `"T"` name no table: attributes of the FROM variable
+{
+  sql: '''
+    SELECT VALUE [COLL_COUNT(Q), COLL_COUNT("T")] FROM u
+  ''',
+  expect: $bag::[ [$missing::null, $missing::null] ]
 }
