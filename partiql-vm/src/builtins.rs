@@ -38,6 +38,10 @@ impl UdfRegistry for BuiltinFunctions {
             "BTrim" => builtin_btrim(args),
             "RTrim" => builtin_rtrim(args),
             "Exists" => builtin_exists(args),
+            _ if name.starts_with("Extract") => match DateTimeField::named(name) {
+                Some(field) => self.extract(field, args.first().copied()),
+                None => Err(EngineError::UdfNotFound(name.to_string())),
+            },
             _ => match coll_function(name) {
                 Some((func, distinct)) => {
                     let collection = args.first().copied().unwrap_or(ValueRef::Missing);
@@ -291,6 +295,113 @@ fn builtin_exists<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
         Some(ValueRef::Missing) => Ok(ValueRef::Missing),
         _ => Ok(ValueRef::Bool(false)),
     }
+}
+
+/// A field `EXTRACT` reads of a datetime.
+#[derive(Clone, Copy, Debug)]
+enum DateTimeField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    TimezoneHour,
+    TimezoneMinute,
+}
+
+impl DateTimeField {
+    /// The field of an `EXTRACT` function, by the name the planner calls it.
+    fn named(name: &str) -> Option<DateTimeField> {
+        Some(match name {
+            "ExtractYear" => DateTimeField::Year,
+            "ExtractMonth" => DateTimeField::Month,
+            "ExtractDay" => DateTimeField::Day,
+            "ExtractHour" => DateTimeField::Hour,
+            "ExtractMinute" => DateTimeField::Minute,
+            "ExtractSecond" => DateTimeField::Second,
+            "ExtractTimezoneHour" => DateTimeField::TimezoneHour,
+            "ExtractTimezoneMinute" => DateTimeField::TimezoneMinute,
+            _ => return None,
+        })
+    }
+}
+
+impl BuiltinFunctions {
+    /// `EXTRACT(field FROM value)`: NULL for NULL, MISSING for MISSING. A value that is no
+    /// datetime, or whose type has no such field (the hour of a date, the time zone of a
+    /// timestamp without one), is MISSING too, or an error in strict mode. Fields are local, as written; SECOND is a decimal with the
+    /// fractional digits the value was written with.
+    fn extract<'a>(
+        &self,
+        field: DateTimeField,
+        value: Option<ValueRef<'a>>,
+    ) -> Result<ValueRef<'a>> {
+        use DateTimeField as F;
+        let int = |n: i64| ValueRef::I64(n);
+        let (date, time) = match value.unwrap_or(ValueRef::Missing) {
+            ValueRef::Null => return Ok(ValueRef::Null),
+            ValueRef::Missing => return Ok(ValueRef::Missing),
+            ValueRef::Date(date) => (Some(date), None),
+            ValueRef::Time(time) => (None, Some(time)),
+            ValueRef::Timestamp(ts) => {
+                let (date, time) = ts.local();
+                (Some(date), Some(time))
+            }
+            other if self.strict => {
+                return Err(EngineError::TypeError(format!(
+                    "EXTRACT({field:?}) of a value that is no datetime: {}",
+                    crate::compare::type_name(&other)
+                )))
+            }
+            _ => return Ok(ValueRef::Missing),
+        };
+        let zoned = time.is_some_and(|t| t.offset().get().is_some());
+        let has_field = match field {
+            F::Year | F::Month | F::Day => date.is_some(),
+            F::Hour | F::Minute | F::Second => time.is_some(),
+            F::TimezoneHour | F::TimezoneMinute => zoned,
+        };
+        // As SQL has it, a field the value's type doesn't have (the year of a TIME, the time
+        // zone of a TIMESTAMP without one) is a type error: MISSING, or in strict mode an error
+        if !has_field {
+            return match self.strict {
+                true => Err(EngineError::TypeError(format!(
+                    "EXTRACT({field:?}) of a value without it: {}",
+                    crate::compare::type_name(&value.unwrap_or(ValueRef::Missing))
+                ))),
+                false => Ok(ValueRef::Missing),
+            };
+        }
+        let ymd = date.map(|d| d.ymd());
+        let hms = time.map(|t| t.hms_micro());
+        let offset = time.and_then(|t| t.offset().get()).map(i64::from);
+        Ok(match field {
+            F::Year => ymd.map_or(ValueRef::Missing, |(y, _, _)| int(i64::from(y))),
+            F::Month => ymd.map_or(ValueRef::Missing, |(_, m, _)| int(i64::from(m))),
+            F::Day => ymd.map_or(ValueRef::Missing, |(_, _, d)| int(i64::from(d))),
+            F::Hour => hms.map_or(ValueRef::Missing, |(h, _, _, _)| int(i64::from(h))),
+            F::Minute => hms.map_or(ValueRef::Missing, |(_, m, _, _)| int(i64::from(m))),
+            F::Second => match (hms, time) {
+                (Some((_, _, s, micros)), Some(time)) => {
+                    ValueRef::Decimal(seconds(s, micros, time.precision()))
+                }
+                _ => ValueRef::Missing,
+            },
+            // An offset's hours and minutes both have its sign (-08:09 is -8 and -9)
+            F::TimezoneHour => offset.map_or(ValueRef::Missing, |m| int(m / 60)),
+            F::TimezoneMinute => offset.map_or(ValueRef::Missing, |m| int(m % 60)),
+        })
+    }
+}
+
+/// `second.micros` as a decimal with `precision` fractional digits, which the microseconds
+/// fit (a time or timestamp has no more digits than its precision).
+fn seconds(second: u8, micros: u32, precision: u8) -> rust_decimal::Decimal {
+    let mut seconds =
+        rust_decimal::Decimal::new(i64::from(second) * 1_000_000 + i64::from(micros), 6);
+    seconds.rescale(u32::from(precision));
+    seconds
 }
 
 /// The aggregate a `COLL_*` function name (as the planner calls it) computes, and whether

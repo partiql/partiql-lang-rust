@@ -847,6 +847,24 @@ fn strict_aggregate_inputs() {
     }
 }
 
+/// In strict mode, EXTRACT of a value that is no datetime, or whose type has no such field (the
+/// time zone of a timestamp without one), is an error (permissive mode gives MISSING).
+#[test]
+fn strict_extract_of_no_datetime() {
+    for query in ["EXTRACT(YEAR FROM 1)", "EXTRACT(HOUR FROM 'a')"] {
+        let err = strict_error(query);
+        assert!(err.contains("no datetime"), "{query}: {err}");
+    }
+    for query in [
+        "EXTRACT(TIMEZONE_HOUR FROM `2000T`)",
+        "EXTRACT(TIMEZONE_MINUTE FROM `2000-01-01T00:00-00:00`)",
+    ] {
+        let err = strict_error(query);
+        assert!(err.contains("without it"), "{query}: {err}");
+    }
+    assert_eq!(strict_error("EXTRACT(YEAR FROM `2000T`)"), "None");
+}
+
 /// In strict mode, comparing values of types that don't compare is an error (permissive mode
 /// gives MISSING).
 #[test]
