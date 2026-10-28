@@ -328,10 +328,9 @@ impl DateTimeField {
 }
 
 impl BuiltinFunctions {
-    /// `EXTRACT(field FROM value)`, as in the legacy evaluator: NULL for NULL, MISSING for
-    /// MISSING, and MISSING for a field the value has none of (the hour of a date, the time
-    /// zone of a timestamp without one). A value that is no datetime is MISSING too, or an
-    /// error in strict mode. Fields are local, as written; SECOND is a decimal with the
+    /// `EXTRACT(field FROM value)`: NULL for NULL, MISSING for MISSING. A value that is no
+    /// datetime, or whose type has no such field (the hour of a date, the time zone of a
+    /// timestamp without one), is MISSING too, or an error in strict mode. Fields are local, as written; SECOND is a decimal with the
     /// fractional digits the value was written with.
     fn extract<'a>(
         &self,
@@ -357,6 +356,23 @@ impl BuiltinFunctions {
             }
             _ => return Ok(ValueRef::Missing),
         };
+        let zoned = time.is_some_and(|t| t.offset().get().is_some());
+        let has_field = match field {
+            F::Year | F::Month | F::Day => date.is_some(),
+            F::Hour | F::Minute | F::Second => time.is_some(),
+            F::TimezoneHour | F::TimezoneMinute => zoned,
+        };
+        // As SQL has it, a field the value's type doesn't have (the year of a TIME, the time
+        // zone of a TIMESTAMP without one) is a type error: MISSING, or in strict mode an error
+        if !has_field {
+            return match self.strict {
+                true => Err(EngineError::TypeError(format!(
+                    "EXTRACT({field:?}) of a value without it: {}",
+                    crate::compare::type_name(&value.unwrap_or(ValueRef::Missing))
+                ))),
+                false => Ok(ValueRef::Missing),
+            };
+        }
         let ymd = date.map(|d| d.ymd());
         let hms = time.map(|t| t.hms_micro());
         let offset = time.and_then(|t| t.offset().get()).map(i64::from);
@@ -379,15 +395,12 @@ impl BuiltinFunctions {
     }
 }
 
-/// `second.micros` as a decimal with `precision` fractional digits, or 6 where the
-/// microseconds need them (a value rounded from more digits than it was written with).
+/// `second.micros` as a decimal with `precision` fractional digits, which the microseconds
+/// fit (a time or timestamp has no more digits than its precision).
 fn seconds(second: u8, micros: u32, precision: u8) -> rust_decimal::Decimal {
     let mut seconds =
         rust_decimal::Decimal::new(i64::from(second) * 1_000_000 + i64::from(micros), 6);
-    let unit = 10u32.pow(u32::from(6 - precision.min(6)));
-    if micros / unit * unit == micros {
-        seconds.rescale(u32::from(precision));
-    }
+    seconds.rescale(u32::from(precision));
     seconds
 }
 

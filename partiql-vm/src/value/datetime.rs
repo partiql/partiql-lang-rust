@@ -22,6 +22,23 @@ const MIN_DAYS: i64 = -MAX_DAYS;
 /// The most fractional digits of a second a value holds.
 pub const MAX_PRECISION: u8 = 6;
 
+/// The microseconds of a time's or timestamp's last fractional digit at `precision`: its
+/// microseconds are a multiple of them, so that the value has the digits it was written with.
+fn micro_unit(precision: u8) -> i64 {
+    10i64.pow(u32::from(MAX_PRECISION - precision.min(MAX_PRECISION)))
+}
+
+/// `nanos` rounded half up to `precision` fractional digits of a second, and truncated to them,
+/// in microseconds.
+fn rounded_micros(nanos: u32, precision: u8) -> (i64, i64) {
+    let unit = micro_unit(precision) * 1_000;
+    let nanos = i64::from(nanos);
+    (
+        (nanos + unit / 2) / unit * unit / 1_000,
+        nanos / unit * unit / 1_000,
+    )
+}
+
 /// A UTC offset in minutes (east positive), or none: a value without a time zone.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Offset(i16);
@@ -139,17 +156,20 @@ impl Time {
             return None;
         }
         let seconds = i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second);
-        Some(Time {
-            micros: seconds * MICROS_PER_SECOND + i64::from(micros),
+        Time::from_parts(
+            seconds * MICROS_PER_SECOND + i64::from(micros),
             offset,
-            precision: precision.min(MAX_PRECISION),
-        })
+            precision.min(MAX_PRECISION),
+        )
     }
 
     /// The time of `micros` since midnight (local), if it is one, as `micros()` and the like
     /// give it back, for storing it.
     pub fn from_parts(micros: i64, offset: Offset, precision: u8) -> Option<Time> {
-        ((0..MICROS_PER_DAY).contains(&micros) && precision <= MAX_PRECISION).then_some(Time {
+        let valid = (0..MICROS_PER_DAY).contains(&micros)
+            && precision <= MAX_PRECISION
+            && micros % micro_unit(precision) == 0;
+        valid.then_some(Time {
             micros,
             offset,
             precision,
@@ -157,7 +177,7 @@ impl Time {
     }
 
     /// The time `hour:minute:second` and `nanos` nanoseconds, if it is one: the nanoseconds
-    /// rounded half up to microseconds, truncated instead where the carry would pass midnight.
+    /// rounded half up to `precision` fractional digits, truncated instead where the carry would pass midnight.
     pub fn from_hms_nano(
         hour: u8,
         minute: u8,
@@ -172,17 +192,12 @@ impl Time {
         Time::from_hms_micro(hour, minute, second, 0, offset, precision)?.plus_nanos(nanos)
     }
 
-    /// The time `nanos` nanoseconds (less than a second) later, rounded half up to
-    /// microseconds; truncated instead where the carry would pass midnight.
+    /// The time `nanos` nanoseconds (less than a second) later, rounded half up to its
+    /// precision's digits; truncated instead where the carry would pass midnight.
     fn plus_nanos(self, nanos: u32) -> Option<Time> {
-        let micros = i64::from((nanos + 500) / 1_000);
-        Time::from_parts(self.micros + micros, self.offset, self.precision).or_else(|| {
-            Time::from_parts(
-                self.micros + i64::from(nanos / 1_000),
-                self.offset,
-                self.precision,
-            )
-        })
+        let (rounded, truncated) = rounded_micros(nanos, self.precision);
+        Time::from_parts(self.micros + rounded, self.offset, self.precision)
+            .or_else(|| Time::from_parts(self.micros + truncated, self.offset, self.precision))
     }
 
     /// Microseconds since midnight, local.
@@ -256,7 +271,11 @@ impl Timestamp {
     fn new(micros: i64, offset: Offset, precision: u8) -> Option<Timestamp> {
         let local = micros.checked_add(offset.micros())?;
         let days = local.div_euclid(MICROS_PER_DAY);
-        ((MIN_DAYS..=MAX_DAYS).contains(&days) && precision <= MAX_PRECISION).then_some(Timestamp {
+        // An offset is whole minutes, so the local and UTC micros have the same digits
+        let valid = (MIN_DAYS..=MAX_DAYS).contains(&days)
+            && precision <= MAX_PRECISION
+            && micros % micro_unit(precision) == 0;
+        valid.then_some(Timestamp {
             micros,
             offset,
             precision,
@@ -280,8 +299,8 @@ impl Timestamp {
 
     /// The timestamp of a local date, a time of day to the second and `nanos` nanoseconds
     /// (less than a second, or two for a leap second), and its `offset`, if it is one: the
-    /// nanoseconds rounded half up to microseconds, truncated instead where the carry would
-    /// leave the range a timestamp may have.
+    /// nanoseconds rounded half up to `precision` fractional digits, truncated instead where the
+    /// carry would leave the range a timestamp may have.
     pub fn from_local_nano(
         date: Date,
         (hour, minute, second): (u8, u8, u8),
@@ -297,14 +316,10 @@ impl Timestamp {
     }
 
     /// The timestamp `nanos` nanoseconds (less than a second, or two for a leap second) later,
-    /// rounded half up to microseconds; truncated instead where the carry would leave the
-    /// range a timestamp may have.
+    /// rounded half up to its precision's digits; truncated instead where the carry would leave
+    /// the range a timestamp may have.
     fn plus_nanos(self, nanos: u32) -> Option<Timestamp> {
-        let (rounded, truncated) = (i64::from(nanos.div_ceil(1_000)), i64::from(nanos / 1_000));
-        let rounded = match nanos % 1_000 >= 500 {
-            true => rounded,
-            false => truncated,
-        };
+        let (rounded, truncated) = rounded_micros(nanos, self.precision);
         self.plus_micros(rounded)
             .or_else(|| self.plus_micros(truncated))
     }
@@ -480,6 +495,20 @@ mod tests {
         assert_eq!(format!("{:?}", Offset::minutes(-489).unwrap()), "-08:09");
         assert_eq!(format!("{:?}", Offset::minutes(90).unwrap()), "+01:30");
         assert!(Offset::minutes(i32::MIN).is_none());
+    }
+
+    #[test]
+    fn fractions_round_to_the_precision() {
+        let t = Time::from_hms_nano(1, 23, 45, 678_000_000, Offset::NONE, 2).unwrap();
+        assert_eq!(t.hms_micro(), (1, 23, 45, 680_000));
+        // A value's microseconds have no more digits than its precision
+        assert!(Time::from_hms_micro(1, 23, 45, 678_000, Offset::NONE, 2).is_none());
+        assert!(Time::from_parts(1_234, Offset::NONE, 3).is_none());
+        assert!(Timestamp::from_parts(1_234, Offset::NONE, 3).is_none());
+        assert!(Timestamp::from_parts(1_000, Offset::NONE, 3).is_some());
+        let date = Date::from_ymd(2000, 1, 1).unwrap();
+        let ts = Timestamp::from_local_nano(date, (0, 0, 59), 950_000_000, Offset::NONE, 1);
+        assert_eq!(ts.unwrap().local().1.hms_micro(), (0, 1, 0, 0));
     }
 
     #[test]
