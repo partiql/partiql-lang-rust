@@ -4,6 +4,7 @@ use crate::table_fn::TableFunction;
 use delegate::delegate;
 use partiql_common::catalog::{CatalogId, EntryId, ObjectId};
 use partiql_types::PartiqlShape;
+use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -54,6 +55,19 @@ pub trait ReadOnlyCatalog: Debug {
     fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
     fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>>;
     fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
+
+    /// The type of the global `name` names, as a query writes it: a quoted name
+    /// (`CaseSensitive`) matches as written, any other ignoring case. By default this is
+    /// [`ReadOnlyCatalog::resolve_type`], whose names match ignoring case; a catalog that wraps
+    /// another forwards this too, or loses the other's case rules.
+    fn resolve_binding_type(&self, name: &BindingsName<'_>) -> Option<TypeEntry> {
+        match name {
+            BindingsName::CaseSensitive(s) | BindingsName::CaseInsensitive(s) => {
+                self.resolve_type(s)
+            }
+            _ => None,
+        }
+    }
 }
 
 pub trait SharedCatalog: ReadOnlyCatalog + Send + Sync {}
@@ -85,6 +99,12 @@ pub struct TypeEntry {
 }
 
 impl TypeEntry {
+    /// The entry `id` of a catalog, of type `ty`: what a catalog's `resolve_type` returns.
+    #[must_use]
+    pub fn new(id: ObjectId, ty: PartiqlShape) -> Self {
+        TypeEntry { id, ty }
+    }
+
     #[must_use]
     pub fn id(&self) -> &ObjectId {
         &self.id

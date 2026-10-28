@@ -1,6 +1,5 @@
 // A table named in an expression is the collection of its rows, read once however many places
-// name it. (pqlite's planner knows no table names, so outside FROM sources a name in a query
-// with FROM is an attribute of its binding; these name tables inside FROM sources.)
+// name it.
 
 '''
 CREATE TABLE t;
@@ -8,6 +7,33 @@ INSERT INTO t SELECT * FROM << {'a': 1}, {'a': 2}, {'a': 3} >>;
 CREATE TABLE u;
 INSERT INTO u SELECT * FROM << {'b': 2} >>
 '''
+
+// In SELECT and WHERE of a query with several FROM sources, a name that is no variable is the
+// table. (With a single source of no schema, such a name is an attribute of its variable, as
+// https://partiql.org/concepts/scopes has it; the planner does not follow that yet, so no step
+// here relies on either.)
+{
+  sql: '''
+    SELECT x.b, COLL_COUNT(t) AS n FROM u AS x, [0] AS z WHERE COLL_COUNT(t) > 2
+  ''',
+  expect: $bag::[ { b: 2, n: 3 } ]
+}
+
+// ... but a binding hides it
+{
+  sql: '''
+    SELECT VALUE t FROM [1, 2] AS t
+  ''',
+  expect: $bag::[1, 2]
+}
+
+// In ORDER BY, and in a correlated subquery
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE COLL_COUNT(t) + x.a FROM u, [0] AS z) FROM t AS x ORDER BY x.a
+  ''',
+  expect: [ $bag::[4], $bag::[5], $bag::[6] ]
+}
 
 // Tables inside a FROM source's expression
 {
@@ -48,4 +74,40 @@ INSERT INTO u SELECT * FROM << {'b': 2} >>
     SELECT VALUE (SELECT VALUE n + x.a FROM << COLL_COUNT(u) >> AS n) FROM t AS x
   ''',
   expect: $bag::[ $bag::[2], $bag::[3], $bag::[4] ]
+}
+
+// In FROM a table's name is the table, even after a binding of the name (`t, t AS y` joins
+// the table to itself), and `@x` the binding's value
+{
+  sql: '''
+    SELECT VALUE COUNT(*) FROM t, t AS y
+  ''',
+  expect: $bag::[9]
+}
+
+{
+  sql: '''
+    SELECT VALUE y.a FROM t AS x, @x AS y
+  ''',
+  expect: $bag::[1, 2, 3]
+}
+
+// A quoted name is a table of that name as written; a bare one, of its name in lowercase
+'''
+CREATE TABLE "Q"
+'''
+
+{
+  sql: '''
+    SELECT VALUE [COLL_COUNT("Q"), COLL_COUNT(T)] FROM u, [0] AS z
+  ''',
+  expect: $bag::[ [0, 3] ]
+}
+
+// ... so `Q` and `"T"` name no table: attributes of the FROM variable
+{
+  sql: '''
+    SELECT VALUE [COLL_COUNT(Q), COLL_COUNT("T")] FROM u
+  ''',
+  expect: $bag::[ [$missing::null, $missing::null] ]
 }

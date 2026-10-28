@@ -1557,18 +1557,12 @@ impl<'a> Lowerer<'a> {
     ) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
         match &scan.expr {
             ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
-            // In a subquery, a variable of an enclosing query (`FROM e x` over an outer `e`)
-            // hides a table of the same name; a binding of the same FROM clause does not (as
-            // in the legacy evaluator, `FROM l, l l2` scans table `l` twice).
-            ValueExpr::VarRef(name, VarRefType::Local)
-                if self
-                    .scopes
-                    .iter()
-                    .any(|s| s.resolver.resolve_var(name, VarRefType::Local).is_some()) =>
-            {
-                Err(EngineError::InvalidPlan(
-                    "a scan of an enclosing query's variable".to_string(),
-                ))
+            // A name the planner resolved to a variable (of this FROM clause, `FROM l, @l
+            // AS r`, or of an enclosing query) is that variable's value, even when a table
+            // has the name: the planner, whose catalog must know the tables the VM's does,
+            // resolves a table's name to the table
+            ValueExpr::VarRef(_, VarRefType::Local) => {
+                Err(EngineError::InvalidPlan("a scan of a variable".to_string()))
             }
             ValueExpr::VarRef(table_name, _) => {
                 let db_ref = DBRef {
