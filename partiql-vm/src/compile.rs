@@ -26,8 +26,8 @@ use crate::catalog::CompilationContext;
 use crate::error::{EngineError, Result};
 use crate::expr::{Expr, Inst, Program, ProgramBuilder};
 use crate::lower_ir::{
-    self, Aggregate, Cond, Distinct, Filter, Globals, Join, JoinType, Limit, Op, Open, Output,
-    Project, Query, Root, ScanLoop, SetOp, SetOpKind, Sort, Subquery,
+    self, Aggregate, Collect, Cond, Distinct, Filter, Join, JoinType, Limit, Op, Open, Output,
+    Project, Query, Root, ScanLoop, SetOp, SetOpKind, Sort, Subquery, SubqueryBody,
 };
 use crate::plan::{CompiledPlan, EvaluationMode};
 use crate::value::ValueOwned;
@@ -253,12 +253,9 @@ impl<'q> Emitter<'q> {
 
     fn emit(mut self) -> Result<Program> {
         match &self.query.root {
-            Root::Expr { globals, expr, dst } => {
-                let halt = self.asm.label();
-                self.emit_globals(globals, halt)?;
+            Root::Expr { expr, dst } => {
                 self.emit_expr(expr, *dst)?;
                 self.asm.push(Inst::EmitRow);
-                self.asm.bind(halt);
                 self.asm.push(Inst::Halt);
             }
             Root::Rows(op) => {
@@ -287,26 +284,6 @@ impl<'q> Emitter<'q> {
             Op::Distinct(distinct) => self.emit_distinct(distinct, row),
             Op::SetOperator(set_op) => self.emit_set_op(set_op, row),
         }
-    }
-
-    /// Read the catalog objects an expression outside FROM names: the one row of each single
-    /// value (or, when one has none, go to `eof`), then the rows of each table.
-    fn emit_globals(&mut self, globals: &Globals, eof: Label) -> Result<()> {
-        for &cursor_id in &globals.cursors {
-            self.asm.push(Inst::OpenCursor { cursor_id });
-            self.asm.push_to(
-                Inst::NextRow {
-                    cursor_id,
-                    eof_target: 0,
-                },
-                eof,
-            );
-            self.asm.push(Inst::CloseCursor { cursor_id });
-        }
-        for &id in &globals.tables {
-            self.call_subquery(id as usize)?;
-        }
-        Ok(())
     }
 
     /// SELECT DISTINCT, streaming: a row is produced as soon as it is read, if its key is
@@ -431,7 +408,7 @@ impl<'q> Emitter<'q> {
     fn emit_scan(&mut self, scan: &'q ScanLoop, row: Row<'_, 'q>) -> Result<()> {
         let cursor_id = scan.cursor;
         let (head, done) = (self.asm.label(), self.asm.label());
-        self.emit_open(&scan.open, cursor_id, done)?;
+        self.emit_open(&scan.open, cursor_id)?;
         self.asm.bind(head);
         self.asm.push_to(
             Inst::NextRow {
@@ -729,9 +706,8 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// Bind a scan's cursor to its data, then open it. A catalog object its expression names
-    /// that has no value goes to `empty`, the end of the scan.
-    fn emit_open(&mut self, open: &'q Open, cursor_id: u16, empty: Label) -> Result<()> {
+    /// Bind a scan's cursor to its data, then open it.
+    fn emit_open(&mut self, open: &'q Open, cursor_id: u16) -> Result<()> {
         match open {
             Open::Bound => {}
             Open::TableFn { func_name, args } => {
@@ -747,11 +723,9 @@ impl<'q> Emitter<'q> {
             Open::Expr {
                 src,
                 expr,
-                globals,
                 coercion,
                 assert_collection,
             } => {
-                self.emit_globals(globals, empty)?;
                 self.emit_expr(expr, *src)?;
                 if *assert_collection {
                     self.asm.push(Inst::AssertCollection {
@@ -985,17 +959,21 @@ impl<'q> Emitter<'q> {
 
     /// A subquery, as a subroutine of its own: emitted once however many places read it
     /// (a FULL JOIN emits its sides twice), so code does not multiply with nesting. Its rows
-    /// are collected in its sorter, then made into a collection. An uncorrelated subquery runs
-    /// only the first time (registers start each run MISSING). A subquery never calls
-    /// itself, so its return register is free whenever it is called. Its scans would reset
-    /// the scratch bank, which holds the temporaries of the expression reading it (and of the
-    /// others of the same step), so it raises the bank's floor while it runs:
+    /// are collected in its sorter, then made into a collection; a catalog object that is a
+    /// single value is its cursor's one row instead. An uncorrelated subquery (a catalog
+    /// object's always is) runs only the first time (registers start each run MISSING). A
+    /// subquery never calls itself, so its return register is free whenever it is called. Its
+    /// scans would reset the scratch bank, which holds the temporaries of the expression
+    /// reading it (and of the others of the same step), so it raises the bank's floor while
+    /// it runs:
     /// ```text
     ///   SUB:  [if once: goto done]
     ///         ScratchEnter
-    ///         SorterReset
-    ///         for each row of the subquery: copy the row into the record; SorterInsert
-    ///         SorterCollect → dst
+    ///         rows:  SorterReset
+    ///                for each row of the subquery: copy the row into the record; SorterInsert
+    ///                SorterCollect → dst
+    ///         value: SorterReset; OpenCursor; NextRow (none→close); SorterInsert
+    ///         close: CloseCursor; SorterSort (empty→done); SorterData → dst
     ///         ScratchLeave
     ///         [once = true]
     ///   done: Return
@@ -1003,7 +981,6 @@ impl<'q> Emitter<'q> {
     fn emit_subquery(&mut self, subquery: &'q Subquery) -> Result<Label> {
         let entry = self.asm.label();
         let caller = self.asm.begin_routine(entry);
-        let sorter_id = subquery.sorter;
         let done = self.asm.label();
         if let Some(once) = subquery.once {
             let run = self.asm.label();
@@ -1012,35 +989,45 @@ impl<'q> Emitter<'q> {
             self.asm.bind(run);
         }
         self.asm.push(Inst::ScratchEnter);
-        self.asm.push(Inst::SorterReset { sorter_id });
-        self.emit_op(&subquery.input, &mut |e| {
-            for (dst, &src) in (subquery.record..).zip(&subquery.row) {
-                if dst != src {
-                    e.asm.push(Inst::Copy { dst, src });
-                }
+        match &subquery.body {
+            SubqueryBody::Rows(collect) => self.emit_collect(collect, subquery.dst)?,
+            &SubqueryBody::Value {
+                cursor,
+                sorter: sorter_id,
+                row,
+            } => {
+                // The row is copied into the sorter, which holds it for the rest of the run
+                let (close, empty) = (self.asm.label(), self.asm.label());
+                self.asm.push(Inst::SorterReset { sorter_id });
+                self.asm.push(Inst::OpenCursor { cursor_id: cursor });
+                self.asm.push_to(
+                    Inst::NextRow {
+                        cursor_id: cursor,
+                        eof_target: 0,
+                    },
+                    close,
+                );
+                self.asm.push(Inst::SorterInsert {
+                    sorter_id,
+                    src_reg: row,
+                    reg_count: 1,
+                });
+                self.asm.bind(close);
+                self.asm.push(Inst::CloseCursor { cursor_id: cursor });
+                self.asm.push_to(
+                    Inst::SorterSort {
+                        sorter_id,
+                        eof_target: 0,
+                    },
+                    empty,
+                );
+                self.asm.push(Inst::SorterData {
+                    sorter_id,
+                    dst_reg: subquery.dst,
+                });
+                self.asm.bind(empty);
             }
-            e.asm.push(Inst::SorterInsert {
-                sorter_id,
-                src_reg: subquery.record,
-                reg_count: subquery.row.len() as u16,
-            });
-            Ok(())
-        })?;
-        let fields = match &subquery.fields {
-            Some(names) => Some(
-                names
-                    .iter()
-                    .map(|name| self.asm.b.push_key_pub(name.clone()))
-                    .collect::<Result<Vec<_>>>()?,
-            ),
-            None => None,
-        };
-        self.asm.push(Inst::SorterCollect {
-            sorter_id,
-            dst: subquery.dst,
-            fields,
-            list: subquery.ordered,
-        });
+        }
         self.asm.push(Inst::ScratchLeave);
         if let Some(once) = subquery.once {
             self.asm.load_const(once, ValueOwned::Bool(true))?;
@@ -1051,6 +1038,48 @@ impl<'q> Emitter<'q> {
         });
         self.asm.resume(caller);
         Ok(entry)
+    }
+
+    /// The collection of `collect`'s rows, into `dst`.
+    fn emit_collect(&mut self, collect: &'q Collect, dst: SlotId) -> Result<()> {
+        let Collect {
+            ref input,
+            sorter: sorter_id,
+            ref row,
+            record,
+            ref fields,
+            ordered,
+        } = *collect;
+        self.asm.push(Inst::SorterReset { sorter_id });
+        self.emit_op(input, &mut |e| {
+            for (dst, &src) in (record..).zip(row) {
+                if dst != src {
+                    e.asm.push(Inst::Copy { dst, src });
+                }
+            }
+            e.asm.push(Inst::SorterInsert {
+                sorter_id,
+                src_reg: record,
+                reg_count: row.len() as u16,
+            });
+            Ok(())
+        })?;
+        let fields = match fields {
+            Some(names) => Some(
+                names
+                    .iter()
+                    .map(|name| self.asm.b.push_key_pub(name.clone()))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            None => None,
+        };
+        self.asm.push(Inst::SorterCollect {
+            sorter_id,
+            dst,
+            fields,
+            list: ordered,
+        });
+        Ok(())
     }
 
     /// GROUP BY's OUTPUT subroutine, run per group: skip an empty group (unless there are

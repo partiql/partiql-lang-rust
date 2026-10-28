@@ -459,7 +459,7 @@ pub struct ExprQuery {
 
 /// Represents a database object reference with a catalog name and path.
 /// Used for qualified table references like `my_catalog.schema.table`.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DBRef {
     /// Name of the catalog
