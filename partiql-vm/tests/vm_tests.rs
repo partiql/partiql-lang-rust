@@ -41,6 +41,10 @@ fn parse_ion(ion_text: &str) -> Value {
 }
 
 fn ion_to_rows(ion_text: &str) -> Vec<Value> {
+    // No text: an object without a row
+    if ion_text.trim().is_empty() {
+        return vec![];
+    }
     let data = parse_ion(ion_text);
     match data {
         Value::List(l) => l.into_iter().collect(),
@@ -212,7 +216,10 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
 
 // --- Catalogs ---
 
-struct SchemalessMetadata;
+/// A table (its Ion text a list or bag) or a single value (with no row when it has no text).
+struct SchemalessMetadata {
+    collection: bool,
+}
 
 impl DataSourceMetadata for SchemalessMetadata {
     fn buffer_stability(&self) -> BufferStability {
@@ -222,10 +229,15 @@ impl DataSourceMetadata for SchemalessMetadata {
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         Some(ScanSource::field(field_name, PhysicalType::Dynamic))
     }
+
+    fn is_collection(&self) -> bool {
+        self.collection
+    }
 }
 
 struct TestCompilationCatalog {
-    tables: FxHashMap<String, EntryId>,
+    /// Each object's entry, and whether it is a collection.
+    tables: FxHashMap<String, (EntryId, bool)>,
 }
 
 impl CompilationCatalog for TestCompilationCatalog {
@@ -241,7 +253,9 @@ impl CompilationCatalog for TestCompilationCatalog {
         self.tables
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, entry_id)| DataSourceHandle::new(*entry_id, Arc::new(SchemalessMetadata)))
+            .map(|(_, &(entry_id, collection))| {
+                DataSourceHandle::new(entry_id, Arc::new(SchemalessMetadata { collection }))
+            })
     }
 }
 
@@ -460,7 +474,9 @@ fn eval_vm_mode(
 
     for (idx, (name, ion_text)) in tables.iter().enumerate() {
         let entry_id = EntryId::from(idx as u64);
-        comp_tables.insert(name.to_string(), entry_id);
+        let collection = !ion_text.trim().is_empty()
+            && matches!(parse_ion(ion_text), Value::List(_) | Value::Bag(_));
+        comp_tables.insert(name.to_string(), (entry_id, collection));
         exec_ion.insert(entry_id, ion_text.to_string());
     }
 
@@ -1074,4 +1090,194 @@ fn wide_row_crossing_row_bank() {
         &[("data", &format!("[{{s: \"{s}\"}}]"))],
         &format!("$bag::[{{{}}}]", expected.join(", ")),
     );
+}
+
+// --- Catalog objects named in expressions ---
+
+/// A table named in an expression of a query with FROM (outside its FROM sources) is the
+/// collection of its rows, wherever the expression is: SELECT, WHERE, ORDER BY, a subquery.
+#[test]
+fn global_table_in_query_with_from() {
+    let tables = [("t", "[{a: 1}, {a: 2}, {a: 3}]"), ("u", "[{b: 2}]")];
+    assert_vm_eval(
+        "SELECT u.b, COLL_COUNT(t) AS n FROM u WHERE COLL_COUNT(t) > 2",
+        &tables,
+        "$bag::[{b: 2, n: 3}]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE COLL_COUNT(t) FROM t AS x ORDER BY x.a",
+        &tables,
+        "[3, 3, 3]",
+    );
+    // In a correlated subquery, and named twice in one expression
+    assert_vm_eval(
+        "SELECT VALUE (SELECT VALUE COLL_COUNT(t) + COLL_COUNT(T) + y FROM [x.a] AS y) FROM t AS x",
+        &tables,
+        "$bag::[$bag::[7], $bag::[8], $bag::[9]]",
+    );
+}
+
+/// Catalog objects inside a FROM source's expression: tables in a bag constructor, a path
+/// into a single value.
+#[test]
+fn global_in_from_expression() {
+    let tables = [
+        ("numbers", "[1, 2, 3]"),
+        ("hr", "{employees: [{name: \"ann\"}, {name: \"bob\"}]}"),
+        ("i", "7"),
+    ];
+    assert_vm_eval(
+        "SELECT VALUE COLL_COUNT(v) FROM <<numbers, numbers>> AS v",
+        &tables,
+        "$bag::[3, 3]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE e.name FROM hr.employees AS e",
+        &tables,
+        "$bag::[\"ann\", \"bob\"]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE x FROM << -1, i, 100 >> AS x WHERE x BETWEEN 0 AND i",
+        &tables,
+        "$bag::[7]",
+    );
+}
+
+/// A single value named in a pipeline's expressions: a WHERE, a projection, a GROUP BY key
+/// and an aggregate's argument, an operand of a set operator.
+#[test]
+fn global_value_in_pipeline() {
+    let tables = [("i", "2"), ("d", "[1, 2, 3, 4]")];
+    assert_vm_eval(
+        "SELECT VALUE x * i FROM d AS x WHERE x > i",
+        &tables,
+        "$bag::[6, 8]",
+    );
+    assert_vm_eval(
+        "SELECT k, SUM(x + i) AS s FROM d AS x GROUP BY x > i AS k",
+        &tables,
+        "$bag::[{k: false, s: 7}, {k: true, s: 11}]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE x FROM d AS x WHERE x < i OUTER UNION ALL SELECT VALUE i FROM [0] AS y",
+        &tables,
+        "$bag::[1, 2]",
+    );
+}
+
+/// A FROM binding that the planner resolves a name to hides a global of the same name; one
+/// named before the binding (an earlier ON) is the global.
+#[test]
+fn global_shadowed_by_a_later_binding() {
+    assert_vm_eval(
+        "SELECT VALUE [a, b, d] FROM [1, 3] AS a INNER JOIN [1, 2, 3] AS b ON b < d \
+         LEFT JOIN [1.1, 2.1] AS d ON b < d AND a <= d",
+        &[("d", "2")],
+        "$bag::[[1, 1, 1.1], [1, 1, 2.1], [3, 1, null]]",
+    );
+}
+
+/// A nested single value, read whole and through paths, for every row.
+#[test]
+fn global_nested_value() {
+    let tables = [
+        ("hr", "{boss: \"ann\", deep: {xs: [{a: 1}, {a: 2}]}}"),
+        ("d", "[1, 2]"),
+    ];
+    assert_vm_eval(
+        "SELECT VALUE [x, hr.deep.xs, hr.boss] FROM d AS x",
+        &tables,
+        "$bag::[[1, [{a: 1}, {a: 2}], \"ann\"], [2, [{a: 1}, {a: 2}], \"ann\"]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE y.a FROM hr.deep.xs AS y",
+        &tables,
+        "$bag::[1, 2]",
+    );
+}
+
+/// A single value whose source has no row is MISSING.
+#[test]
+fn global_value_without_a_row() {
+    assert_vm_eval("[i, 1]", &[("i", "")], "[$missing::null, 1]");
+    assert_vm_eval(
+        "SELECT VALUE x FROM << i, 1 >> AS x",
+        &[("i", "")],
+        "$bag::[$missing::null, 1]",
+    );
+}
+
+/// Globals in LIMIT, in outer joins' ON, in a LIKE pattern and ESCAPE, and in subqueries two
+/// levels deep.
+#[test]
+fn global_in_other_clauses() {
+    let tables = [
+        ("n", "2"),
+        ("s", "\"h%\""),
+        ("e", "\"!\""),
+        ("t", "[{a: 1}, {a: 2}, {a: 3}]"),
+    ];
+    assert_vm_eval(
+        "SELECT VALUE x.a FROM t AS x LIMIT n",
+        &tables,
+        "$bag::[1, 2]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE [x, y] FROM [1, 2] AS x LEFT JOIN [2] AS y ON x = n",
+        &tables,
+        "$bag::[[1, null], [2, 2]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE [x, y] FROM [1] AS x FULL JOIN [2] AS y ON y = n AND x = n",
+        &tables,
+        "$bag::[[1, null], [null, 2]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE [w LIKE s, w LIKE 'h!%' ESCAPE e] FROM ['hi', 'h%'] AS w",
+        &tables,
+        "$bag::[[true, false], [true, true]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE (SELECT VALUE (SELECT VALUE COLL_COUNT(t) * n + x + y FROM [0] AS z) \
+         FROM [10] AS y) FROM [100] AS x",
+        &tables,
+        "$bag::[$bag::[$bag::[116]]]",
+    );
+}
+
+/// A string read from a global stays valid for every row that reads it, across many rows.
+#[test]
+fn global_string_across_rows() {
+    let s = "x".repeat(1000);
+    let rows: Vec<String> = (0..300).map(|i| format!("\"{i}\"")).collect();
+    let expected: Vec<String> = (0..300)
+        .map(|i: usize| (1000 + i.to_string().len()).to_string())
+        .collect();
+    assert_vm_eval(
+        "SELECT VALUE CHAR_LENGTH(s || r) FROM d AS r",
+        &[
+            ("s", &format!("\"{s}\"")),
+            ("d", &format!("[{}]", rows.join(", "))),
+        ],
+        &format!("$bag::[{}]", expected.join(", ")),
+    );
+}
+
+/// Each run of a VM reads its globals again: a run that stops early leaves none half read.
+#[test]
+fn global_across_runs() {
+    let tables = [
+        ("t", "[{a: 1}, {a: 2}, {a: 3}]"),
+        ("u", "[{b: 10}, {b: 20}]"),
+        ("i", "5"),
+    ];
+    let runs = eval_vm_runs(
+        "SELECT VALUE COLL_COUNT(t) + x.b + i FROM u AS x",
+        &tables,
+        &[None, Some(0), Some(1), None],
+    );
+    let expected = ["$bag::[18, 28]", "$bag::[]", "$bag::[18]", "$bag::[18, 28]"];
+    for (run, expected) in runs.into_iter().zip(expected) {
+        assert_eq!(parse_ion(expected), run);
+    }
 }

@@ -3,7 +3,7 @@ use crate::compare;
 use crate::error::{count_u16, EngineError, Result};
 use crate::value::{value_get_field_ref, variant, ValueOwned, ValueRef};
 use partiql_logical::{
-    CallExpr, CallName, Lit, PathComponent, SubQueryExpr, ValueExpr, VarRefType,
+    CallExpr, CallName, DBRef, Lit, PathComponent, SubQueryExpr, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -2235,9 +2235,27 @@ impl ExprCompiler<'_> {
 /// Subqueries already lowered, by the address of their node in the expression being lowered.
 pub(crate) type LoweredSubqueries = FxHashMap<*const SubQueryExpr, Expr>;
 
+/// The catalog object `expr` names, if it is a name of one: a `DBRef`, or a global name (as a
+/// planner without the catalog's schema writes one).
+pub(crate) fn global_ref(expr: &ValueExpr) -> Option<DBRef> {
+    match expr {
+        ValueExpr::DBRef(db_ref) => Some(db_ref.clone()),
+        ValueExpr::VarRef(name, VarRefType::Global) => Some(DBRef {
+            catalog: "default".to_string(),
+            path: vec![name.clone()],
+        }),
+        _ => None,
+    }
+}
+
+/// The catalog objects an expression names, as it names them, already lowered to what reads
+/// their values.
+pub(crate) type LoweredGlobals = FxHashMap<DBRef, Expr>;
+
 pub struct LogicalExprCompiler<'a, R: SlotResolver> {
     resolver: &'a R,
     subqueries: Option<&'a LoweredSubqueries>,
+    globals: Option<&'a LoweredGlobals>,
 }
 
 impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
@@ -2245,6 +2263,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
         LogicalExprCompiler {
             resolver,
             subqueries: None,
+            globals: None,
         }
     }
 
@@ -2252,6 +2271,18 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
     pub(crate) fn with_subqueries(mut self, subqueries: &'a LoweredSubqueries) -> Self {
         self.subqueries = Some(subqueries);
         self
+    }
+
+    /// Lower each catalog object the expression names (that no binding answers) to its entry
+    /// in `globals`.
+    pub(crate) fn with_globals(mut self, globals: &'a LoweredGlobals) -> Self {
+        self.globals = Some(globals);
+        self
+    }
+
+    /// What reads the catalog object `db_ref` names, if the expression names one.
+    fn global(&self, db_ref: &DBRef) -> Option<Expr> {
+        self.globals?.get(db_ref).cloned()
     }
 
     /// Lower `expr`, resolving its names to registers.
@@ -2262,14 +2293,20 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 .resolver
                 .resolve_var(name, scope.clone())
                 .map(Expr::SlotRef)
+                // A global name no binding answers: a catalog object (as a planner without
+                // the catalog's schema writes one)
+                .or_else(|| self.global(&global_ref(expr)?))
                 .ok_or_else(|| {
                     EngineError::UnsupportedExpr(format!(
                         "unresolved var {name:?} with scope {scope:?}"
                     ))
                 }),
             ValueExpr::DBRef(db_ref) => {
-                // DBRef represents a catalog-registered database object (table/view)
-                // Resolve the first component of the path as a global variable
+                // A catalog object: what reads it, else the first component of its path as a
+                // global variable a resolver answers
+                if let Some(global) = self.global(db_ref) {
+                    return Ok(global);
+                }
                 if let Some(name) = db_ref.path.first() {
                     self.resolver
                         .resolve_var(name, VarRefType::Global)

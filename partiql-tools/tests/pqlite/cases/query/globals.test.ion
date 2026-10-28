@@ -1,0 +1,51 @@
+// A table named in an expression is the collection of its rows, read once however many places
+// name it. (pqlite's planner knows no table names, so outside FROM sources a name in a query
+// with FROM is an attribute of its binding; these name tables inside FROM sources.)
+
+'''
+CREATE TABLE t;
+INSERT INTO t SELECT * FROM << {'a': 1}, {'a': 2}, {'a': 3} >>;
+CREATE TABLE u;
+INSERT INTO u SELECT * FROM << {'b': 2} >>
+'''
+
+// Tables inside a FROM source's expression
+{
+  sql: '''
+    SELECT VALUE COLL_COUNT(v) FROM << t, u >> AS v
+  ''',
+  expect: $bag::[3, 1]
+}
+
+{
+  sql: '''
+    SELECT n, x.b FROM << COLL_COUNT(t) >> AS n, u AS x
+  ''',
+  expect: $bag::[ { n: 3, b: 2 } ]
+}
+
+// One table named three times, as `t` and as `T`
+{
+  sql: '''
+    COLL_COUNT(t) + COLL_COUNT(T) + COLL_COUNT(t)
+  ''',
+  expect: { rows: 9 }
+}
+
+// In a FROM source of a set operator's operand
+{
+  sql: '''
+    SELECT VALUE x.a FROM t AS x
+    OUTER UNION ALL
+    SELECT VALUE n FROM << COLL_COUNT(t) >> AS n
+  ''',
+  expect: $bag::[1, 2, 3, 3]
+}
+
+// In a FROM source of a subquery
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE n + x.a FROM << COLL_COUNT(u) >> AS n) FROM t AS x
+  ''',
+  expect: $bag::[ $bag::[2], $bag::[3], $bag::[4] ]
+}

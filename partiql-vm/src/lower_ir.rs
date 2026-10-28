@@ -11,7 +11,8 @@ use crate::arena::SlotId;
 use crate::catalog::CompilationContext;
 use crate::error::{count_u16, EngineError, Result};
 use crate::expr::{
-    lit_to_value, AggFunc, Coercion, Expr, LogicalExprCompiler, LoweredSubqueries, SlotResolver,
+    global_ref, lit_to_value, AggFunc, Coercion, Expr, LogicalExprCompiler, LoweredGlobals,
+    LoweredSubqueries, SlotResolver,
 };
 use crate::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::plan::{
@@ -56,25 +57,10 @@ pub(crate) struct Query {
 }
 
 pub(crate) enum Root {
-    /// A query without FROM: read the catalog objects it names, then evaluate `expr` into
-    /// `dst`.
-    Expr {
-        globals: Globals,
-        expr: Expr,
-        dst: SlotId,
-    },
+    /// A query without FROM: evaluate `expr` into `dst`.
+    Expr { expr: Expr, dst: SlotId },
     /// Every row of the operator tree is a result.
     Rows(Op),
-}
-
-/// The catalog objects an expression outside any FROM clause names (a query without FROM, an
-/// operand of a set operator), read into the registers the names read before it runs.
-#[derive(Default)]
-pub(crate) struct Globals {
-    /// Each catalog table's rows, collected by a subquery.
-    pub(crate) tables: Vec<u32>,
-    /// The cursor reading the one row of each single value.
-    pub(crate) cursors: Vec<u16>,
 }
 
 /// A physical operator. Each produces rows into registers; the operator above it runs
@@ -190,12 +176,10 @@ pub(crate) enum Open {
         func_name: String,
         args: Vec<(SlotId, Expr)>,
     },
-    /// A collection computed at runtime: read `globals`, evaluate `expr` into `src`, then
-    /// read from it.
+    /// A collection computed at runtime: evaluate `expr` into `src`, then read from it.
     Expr {
         src: SlotId,
         expr: Expr,
-        globals: Globals,
         /// How a value that is no collection is read.
         coercion: Coercion,
         /// Strict mode: fail unless `src` holds a collection.
@@ -274,10 +258,34 @@ pub(crate) struct Sort {
     pub(crate) record: SlotId,
 }
 
-/// A subquery, evaluated to the collection of its rows: each row of `input` (its registers
-/// `row`, copied into consecutive registers from `record`) is inserted into `sorter`, then the
-/// records are collected into `dst`.
+/// A value computed by a subroutine of its own, into `dst`, wherever an expression reads it:
+/// a subquery, or a catalog object the query names.
 pub(crate) struct Subquery {
+    pub(crate) body: SubqueryBody,
+    pub(crate) dst: SlotId,
+    /// An uncorrelated subquery (one that reads nothing of the queries around it) runs at most
+    /// once: this register is set once it has.
+    pub(crate) once: Option<SlotId>,
+    /// The subquery is a subroutine, called wherever it is read, returning through this.
+    pub(crate) ret: SlotId,
+}
+
+pub(crate) enum SubqueryBody {
+    /// The collection of a query's rows (a catalog table's are `SELECT VALUE r FROM t r`).
+    Rows(Collect),
+    /// A catalog object that is a single value: the one row `cursor` reads into `row`
+    /// (MISSING if it has none), copied into `sorter`, whose bank holds it for the rest of the
+    /// run (a source need not keep a row once its cursor closes).
+    Value {
+        cursor: u16,
+        sorter: u16,
+        row: SlotId,
+    },
+}
+
+/// The collection of `input`'s rows: each row (its registers `row`, copied into consecutive
+/// registers from `record`) is inserted into `sorter`, then the records are collected.
+pub(crate) struct Collect {
     pub(crate) input: Op,
     pub(crate) sorter: u16,
     pub(crate) row: Vec<SlotId>,
@@ -286,12 +294,6 @@ pub(crate) struct Subquery {
     pub(crate) fields: Option<Vec<String>>,
     /// The rows are in ORDER BY order, so the collection is a list.
     pub(crate) ordered: bool,
-    pub(crate) dst: SlotId,
-    /// An uncorrelated subquery (one that reads nothing of the queries around it) runs at most
-    /// once: this register is set once it has.
-    pub(crate) once: Option<SlotId>,
-    /// The subquery is a subroutine, called wherever it is read, returning through this.
-    pub(crate) ret: SlotId,
 }
 
 pub(crate) struct GroupAgg {
@@ -344,6 +346,7 @@ pub(crate) fn lower(
         subqueries: Vec::new(),
         hash_tables: 0,
         scopes: Vec::new(),
+        globals: FxHashMap::default(),
     };
     let graph = PlanGraph::new(plan);
     let top = graph.single_input(graph.find_sink()?)?;
@@ -491,6 +494,9 @@ struct Lowerer<'a> {
     hash_tables: u16,
     /// While lowering a subquery: the scopes of the queries around it, outermost first.
     scopes: Vec<OuterScope>,
+    /// The catalog objects the query names in its expressions, read at most once per run
+    /// however many places name them: each one's subquery.
+    globals: FxHashMap<ObjectId, Expr>,
 }
 
 /// The names of a query around the subquery being lowered.
@@ -816,8 +822,7 @@ impl<'a> Lowerer<'a> {
             if let Some(scan) = self.table_operand(&expr_query.expr, row)? {
                 return Ok(scan);
             }
-            let (globals, resolver) = self.lower_globals(&expr_query.expr)?;
-            let expr = self.lower_expr(&expr_query.expr, &resolver)?;
+            let expr = self.lower_expr(&expr_query.expr, &ResolverKind::Empty)?;
             let src = self.alloc_reg()?;
             let scan_id = self.whole_value_scan(ScanKind::Expr {
                 src,
@@ -828,7 +833,6 @@ impl<'a> Lowerer<'a> {
                 open: Open::Expr {
                     src,
                     expr,
-                    globals,
                     coercion: Coercion::SetOp,
                     assert_collection: self.mode == EvaluationMode::Strict,
                 },
@@ -852,13 +856,8 @@ impl<'a> Lowerer<'a> {
 
     /// A scan of the catalog table `expr` names, its rows read into `row`, if it names one.
     fn table_operand(&mut self, expr: &ValueExpr, row: SlotId) -> Result<Option<Op>> {
-        let db_ref = match expr {
-            ValueExpr::DBRef(db_ref) => db_ref.clone(),
-            ValueExpr::VarRef(name, VarRefType::Global) => DBRef {
-                catalog: "default".to_string(),
-                path: vec![name.clone()],
-            },
-            _ => return Ok(None),
+        let Some(db_ref) = global_ref(expr) else {
+            return Ok(None);
         };
         let Ok((catalog_id, handle)) = self.resolve_catalog_table(&db_ref) else {
             return Ok(None);
@@ -1039,7 +1038,6 @@ impl<'a> Lowerer<'a> {
                     true => Expr::Literal(ValueOwned::Missing),
                     false => self.lower_expr(scan_expr, resolver)?,
                 },
-                globals: Globals::default(),
                 coercion: Coercion::From,
                 assert_collection: self.mode == EvaluationMode::Strict,
             },
@@ -1054,14 +1052,24 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lower `expr`, resolving names with `resolver`, then with those of the queries around
-    /// this one. Its subqueries are lowered first.
+    /// this one, then as the catalog objects they name. Its subqueries and the catalog objects
+    /// it names are lowered first.
     fn lower_expr(&mut self, expr: &ValueExpr, resolver: &ResolverKind) -> Result<Expr> {
-        let mut found = vec![];
-        subquery_exprs(expr, &mut found);
+        let mut refs = ExprRefs::default();
+        expr_refs(expr, &mut refs);
         let mut subqueries = LoweredSubqueries::default();
-        for subquery in found {
+        for subquery in refs.subqueries {
             let lowered = self.lower_subquery(subquery, resolver)?;
             subqueries.insert(std::ptr::from_ref(subquery), lowered);
+        }
+        let mut globals = LoweredGlobals::default();
+        for db_ref in refs.globals {
+            if globals.contains_key(&db_ref) {
+                continue;
+            }
+            if let Some(global) = self.lower_global(&db_ref)? {
+                globals.insert(db_ref, global);
+            }
         }
         let scoped = ScopedResolver {
             inner: resolver,
@@ -1069,7 +1077,65 @@ impl<'a> Lowerer<'a> {
         };
         LogicalExprCompiler::new(&scoped)
             .with_subqueries(&subqueries)
+            .with_globals(&globals)
             .lower_expr(expr)
+    }
+
+    /// The catalog object `db_ref` names, as an expression reading its value (a table's is
+    /// the collection of its rows, as `COLL_COUNT(t)` reads it), if the catalog has one. Each
+    /// object is read by one subquery, at most once per run, the first time an expression
+    /// reading it runs.
+    fn lower_global(&mut self, db_ref: &DBRef) -> Result<Option<Expr>> {
+        let Ok((catalog_id, handle)) = self.resolve_catalog_table(db_ref) else {
+            return Ok(None);
+        };
+        let object_id = ObjectId::new(catalog_id, handle.entry_id);
+        if let Some(global) = self.globals.get(&object_id) {
+            return Ok(Some(global.clone()));
+        }
+        let scan_id = self.alloc_scan_id();
+        let row = self.alloc_reg()?;
+        let layout = whole_value_layout();
+        self.scan_metadata
+            .insert(scan_id, ScanMetadata { layout, object_id });
+        self.scans.insert(scan_id, ScanKind::Bound);
+        let cursor = self.add_cursor(scan_id, row)?;
+        let sorter = count_u16(self.sorters.len(), "subqueries")?;
+        self.sorters.push(SorterMetadata {
+            keys: SortKeys::Group(0),
+        });
+        let body = match handle.is_collection() {
+            true => SubqueryBody::Rows(Collect {
+                input: Op::Scan(ScanLoop {
+                    cursor,
+                    open: Open::Bound,
+                    window: row..row + 1,
+                    whole_row: true,
+                }),
+                sorter,
+                row: vec![row],
+                record: row,
+                fields: None,
+                ordered: handle.is_ordered(),
+            }),
+            false => SubqueryBody::Value {
+                cursor,
+                sorter,
+                row,
+            },
+        };
+        let (dst, once, ret) = (self.alloc_reg()?, self.alloc_reg()?, self.alloc_reg()?);
+        let id = u32::try_from(self.subqueries.len())
+            .map_err(|_| EngineError::TooLarge("subqueries"))?;
+        self.subqueries.push(Subquery {
+            body,
+            dst,
+            once: Some(once),
+            ret,
+        });
+        let global = Expr::Subquery { id, dst };
+        self.globals.insert(object_id, global.clone());
+        Ok(Some(global))
     }
 
     /// Lower a subquery of an expression that names things with `resolver`.
@@ -1139,12 +1205,14 @@ impl<'a> Lowerer<'a> {
         let id = u32::try_from(self.subqueries.len())
             .map_err(|_| EngineError::TooLarge("subqueries"))?;
         self.subqueries.push(Subquery {
-            input: lowered.op,
-            sorter,
-            row,
-            record,
-            fields,
-            ordered: lowered.ordered,
+            body: SubqueryBody::Rows(Collect {
+                input: lowered.op,
+                sorter,
+                row,
+                record,
+                fields,
+                ordered: lowered.ordered,
+            }),
             dst,
             once,
             ret,
@@ -1205,7 +1273,7 @@ impl<'a> Lowerer<'a> {
                     .collect::<Result<Vec<_>>>()?;
                 outputs.push(Output::ConcatTuples { dst, srcs });
             }
-            ResolverKind::Global(_) | ResolverKind::Empty => {
+            ResolverKind::Empty => {
                 return Err(EngineError::InvalidPlan(
                     "SELECT * on expression query".to_string(),
                 ))
@@ -1377,85 +1445,10 @@ impl<'a> Lowerer<'a> {
         &mut self,
         expr_query: &partiql_logical::ExprQuery,
     ) -> Result<(Root, Shape)> {
-        let (globals, resolver) = self.lower_globals(&expr_query.expr)?;
-        let expr = self.lower_expr(&expr_query.expr, &resolver)?;
+        let expr = self.lower_expr(&expr_query.expr, &ResolverKind::Empty)?;
         let dst = self.alloc_reg()?;
         let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
-        Ok((Root::Expr { globals, expr, dst }, shape))
-    }
-
-    /// The catalog objects `expr` (outside any FROM clause) names, each read through an
-    /// implicit scan into a register of its own, and the resolver for its names.
-    fn lower_globals(&mut self, expr: &ValueExpr) -> Result<(Globals, ResolverKind)> {
-        let mut slots = FxHashMap::default();
-        let mut globals = Globals::default();
-        for db_ref in collect_db_refs(expr) {
-            let Some(name) = db_ref.path.first().and_then(binding_name_string) else {
-                continue;
-            };
-            // `t` and `T` name one table
-            if slots.keys().any(|k: &String| k.eq_ignore_ascii_case(&name)) {
-                continue;
-            }
-            let Ok((catalog_id, reader_factory)) = self.resolve_catalog_table(&db_ref) else {
-                continue;
-            };
-
-            let scan_id = self.alloc_scan_id();
-            let slot = self.alloc_reg()?;
-            let layout = ScanLayout {
-                projections: vec![ScanProjection {
-                    source: ScanSource::whole_value(),
-                    target_slot: 0,
-                }],
-            };
-            let object_id = ObjectId::new(catalog_id, reader_factory.entry_id);
-            self.scan_metadata
-                .insert(scan_id, ScanMetadata { layout, object_id });
-            self.scans.insert(scan_id, ScanKind::Bound);
-            if !reader_factory.is_collection() {
-                globals.cursors.push(self.add_cursor(scan_id, slot)?);
-                slots.insert(name, slot);
-                continue;
-            }
-            // A table's name is the collection of its rows (`COLL_COUNT(t)`), collected like
-            // an uncorrelated `(SELECT VALUE r FROM t r)` into the register the name reads
-            let row = self.alloc_reg()?;
-            let scan = Op::Scan(ScanLoop {
-                cursor: self.add_cursor(scan_id, row)?,
-                open: Open::Bound,
-                window: row..row + 1,
-                whole_row: true,
-            });
-            let sorter = count_u16(self.sorters.len(), "subqueries")?;
-            self.sorters.push(SorterMetadata {
-                keys: SortKeys::Group(0),
-            });
-            globals.tables.push(
-                u32::try_from(self.subqueries.len())
-                    .map_err(|_| EngineError::TooLarge("subqueries"))?,
-            );
-            let (once, ret) = (self.alloc_reg()?, self.alloc_reg()?);
-            self.subqueries.push(Subquery {
-                input: scan,
-                sorter,
-                row: vec![row],
-                record: row,
-                fields: None,
-                ordered: reader_factory.is_ordered(),
-                dst: slot,
-                once: Some(once),
-                ret,
-            });
-            slots.insert(name, slot);
-        }
-
-        let resolver = if slots.is_empty() {
-            ResolverKind::Empty
-        } else {
-            ResolverKind::Global(GlobalSlotResolver { slots })
-        };
-        Ok((globals, resolver))
+        Ok((Root::Expr { expr, dst }, shape))
     }
 
     // -----------------------------------------------------------------------
@@ -1697,7 +1690,7 @@ fn group_as_row(resolver: &ResolverKind) -> Result<Expr> {
     let bindings = match resolver {
         ResolverKind::Pipeline(binding) => std::slice::from_ref(binding),
         ResolverKind::Multi(bindings) => bindings.as_slice(),
-        ResolverKind::Global(_) | ResolverKind::Empty => &[],
+        ResolverKind::Empty => &[],
     };
     let (mut attrs, mut values) = (vec![], vec![]);
     for binding in bindings {
@@ -1801,14 +1794,23 @@ fn extract_fields(op: &BindingsOp, ctx: &mut CompileContext) {
     }
 }
 
-/// The subqueries of `expr`, outermost first; not those inside them.
-fn subquery_exprs<'e>(expr: &'e ValueExpr, out: &mut Vec<&'e SubQueryExpr>) {
+/// What an expression reads that is lowered before it: its subqueries, outermost first (not
+/// those inside them), and the catalog objects it names, outside its subqueries.
+#[derive(Default)]
+struct ExprRefs<'e> {
+    subqueries: Vec<&'e SubQueryExpr>,
+    globals: Vec<DBRef>,
+}
+
+/// Add what `expr` reads that is lowered before it to `out`.
+fn expr_refs<'e>(expr: &'e ValueExpr, out: &mut ExprRefs<'e>) {
     let mut walk_all = |exprs: &mut dyn Iterator<Item = &'e ValueExpr>| {
-        exprs.for_each(|e| subquery_exprs(e, out));
+        exprs.for_each(|e| expr_refs(e, out));
     };
     match expr {
-        ValueExpr::SubQueryExpr(subquery) => out.push(subquery),
-        ValueExpr::Lit(_) | ValueExpr::VarRef(..) | ValueExpr::DBRef(_) => {}
+        ValueExpr::SubQueryExpr(subquery) => out.subqueries.push(subquery),
+        ValueExpr::VarRef(..) | ValueExpr::DBRef(_) => out.globals.extend(global_ref(expr)),
+        ValueExpr::Lit(_) => {}
         ValueExpr::Path(base, steps) => {
             let step_exprs = steps.iter().filter_map(|step| match step {
                 PathComponent::KeyExpr(e) | PathComponent::IndexExpr(e) => Some(&**e),
@@ -1878,9 +1880,8 @@ enum ResolverKind {
     Pipeline(PipelineSlotResolver),
     /// One resolver per FROM binding of a join, in FROM order
     Multi(Vec<PipelineSlotResolver>),
-    /// Global resolver for expression queries that reference catalog objects
-    Global(GlobalSlotResolver),
-    /// Empty resolver for expression queries with no variable references
+    /// No names: a query without FROM, an operand of a set operator, LIMIT and OFFSET (catalog
+    /// objects are resolved apart from the resolvers)
     Empty,
 }
 
@@ -1891,7 +1892,6 @@ impl SlotResolver for ResolverKind {
             // A global (catalog) name never means a FROM binding of the same name
             ResolverKind::Multi(_) if scope == VarRefType::Global => None,
             ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
-            ResolverKind::Global(r) => r.resolve_var(name, scope),
             ResolverKind::Empty => None,
         }
     }
@@ -1899,7 +1899,6 @@ impl SlotResolver for ResolverKind {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_alias(name),
             ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
-            ResolverKind::Global(r) => r.resolve_alias(name),
             ResolverKind::Empty => None,
         }
     }
@@ -1908,7 +1907,6 @@ impl SlotResolver for ResolverKind {
             ResolverKind::Pipeline(r) => r.resolve_field(name),
             // An unqualified field is ambiguous across join bindings; the planner qualifies it.
             ResolverKind::Multi(_) => None,
-            ResolverKind::Global(r) => r.resolve_field(name),
             ResolverKind::Empty => None,
         }
     }
@@ -1916,7 +1914,6 @@ impl SlotResolver for ResolverKind {
         match self {
             ResolverKind::Pipeline(r) => r.is_alias(name),
             ResolverKind::Multi(rs) => binding_for(rs, name).is_some(),
-            ResolverKind::Global(_) => false,
             ResolverKind::Empty => false,
         }
     }
@@ -1928,7 +1925,7 @@ impl SlotResolver for ResolverKind {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_qualified(alias, field),
             ResolverKind::Multi(rs) => binding_for(rs, alias)?.resolve_qualified(alias, field),
-            ResolverKind::Global(_) | ResolverKind::Empty => None,
+            ResolverKind::Empty => None,
         }
     }
 }
@@ -1939,7 +1936,6 @@ impl ResolverKind {
         let mut regs: Vec<SlotId> = match self {
             ResolverKind::Pipeline(r) => r.registers_read(reads),
             ResolverKind::Multi(rs) => rs.iter().flat_map(|r| r.registers_read(reads)).collect(),
-            ResolverKind::Global(r) => r.slots.values().copied().collect(),
             ResolverKind::Empty => vec![],
         };
         regs.sort_unstable();
@@ -1952,7 +1948,7 @@ impl ResolverKind {
         match self {
             ResolverKind::Pipeline(r) => Ok(vec![r]),
             ResolverKind::Multi(rs) => Ok(rs),
-            ResolverKind::Global(_) | ResolverKind::Empty => Err(EngineError::InvalidPlan(
+            ResolverKind::Empty => Err(EngineError::InvalidPlan(
                 "join input is not a FROM source".to_string(),
             )),
         }
@@ -2052,43 +2048,6 @@ impl SlotResolver for ScopedResolver<'_> {
         let slot = self.outer[depth].resolver.resolve_qualified(alias, field)?;
         self.read_outer(depth);
         Some(slot)
-    }
-}
-
-/// Resolver for global DB object references in expression queries.
-#[derive(Clone)]
-struct GlobalSlotResolver {
-    slots: FxHashMap<String, SlotId>,
-}
-
-impl SlotResolver for GlobalSlotResolver {
-    fn resolve_var(&self, name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
-        let key = match name {
-            BindingsName::CaseSensitive(s) => s.as_ref(),
-            BindingsName::CaseInsensitive(s) => s.as_ref(),
-            _ => return None,
-        };
-        self.slots
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(key))
-            .map(|(_, v)| *v)
-    }
-    fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
-        self.resolve_var(name, VarRefType::Global)
-    }
-    fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
-        self.resolve_var(name, VarRefType::Global)
-    }
-    fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
-        false
-    }
-    /// Catalog objects are loaded whole; none has pushed-down fields.
-    fn resolve_qualified(
-        &self,
-        _alias: &BindingsName<'_>,
-        _field: &BindingsName<'_>,
-    ) -> Option<SlotId> {
-        None
     }
 }
 
@@ -2345,92 +2304,6 @@ fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
             }
         }
         _ => None,
-    }
-}
-
-/// The catalog objects `expr` names: a `DBRef`, or a global name (as a planner without the
-/// catalog's schema writes one).
-fn collect_db_refs(expr: &ValueExpr) -> Vec<DBRef> {
-    let mut refs = Vec::new();
-    collect_db_refs_inner(expr, &mut refs);
-    refs
-}
-
-fn collect_db_refs_inner(expr: &ValueExpr, out: &mut Vec<DBRef>) {
-    match expr {
-        ValueExpr::DBRef(db_ref) => out.push(db_ref.clone()),
-        ValueExpr::VarRef(name, VarRefType::Global) => out.push(DBRef {
-            catalog: "default".to_string(),
-            path: vec![name.clone()],
-        }),
-        ValueExpr::UnExpr(_, inner) => collect_db_refs_inner(inner, out),
-        ValueExpr::BinaryExpr(_, lhs, rhs) => {
-            collect_db_refs_inner(lhs, out);
-            collect_db_refs_inner(rhs, out);
-        }
-        ValueExpr::Call(call) => {
-            for arg in &call.arguments {
-                collect_db_refs_inner(arg, out);
-            }
-        }
-        ValueExpr::ListExpr(list) => {
-            for elem in &list.elements {
-                collect_db_refs_inner(elem, out);
-            }
-        }
-        ValueExpr::BagExpr(bag) => {
-            for elem in &bag.elements {
-                collect_db_refs_inner(elem, out);
-            }
-        }
-        ValueExpr::TupleExpr(tuple) => {
-            for attr in &tuple.attrs {
-                collect_db_refs_inner(attr, out);
-            }
-            for val in &tuple.values {
-                collect_db_refs_inner(val, out);
-            }
-        }
-        ValueExpr::Path(base, _steps) => {
-            collect_db_refs_inner(base.as_ref(), out);
-        }
-        ValueExpr::DynamicLookup(lookups) => {
-            for lookup in lookups.iter() {
-                collect_db_refs_inner(lookup, out);
-            }
-        }
-        ValueExpr::BetweenExpr(b) => {
-            for e in [&b.value, &b.from, &b.to] {
-                collect_db_refs_inner(e, out);
-            }
-        }
-        ValueExpr::IsTypeExpr(t) => collect_db_refs_inner(&t.expr, out),
-        ValueExpr::NullIfExpr(n) => {
-            collect_db_refs_inner(&n.lhs, out);
-            collect_db_refs_inner(&n.rhs, out);
-        }
-        ValueExpr::CoalesceExpr(c) => {
-            for e in &c.elements {
-                collect_db_refs_inner(e, out);
-            }
-        }
-        ValueExpr::PatternMatchExpr(m) => collect_db_refs_inner(&m.value, out),
-        ValueExpr::SimpleCase(c) => {
-            collect_db_refs_inner(&c.expr, out);
-            for (when, then) in &c.cases {
-                collect_db_refs_inner(when, out);
-                collect_db_refs_inner(then, out);
-            }
-            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
-        }
-        ValueExpr::SearchedCase(c) => {
-            for (when, then) in &c.cases {
-                collect_db_refs_inner(when, out);
-                collect_db_refs_inner(then, out);
-            }
-            c.default.iter().for_each(|e| collect_db_refs_inner(e, out));
-        }
-        _ => {}
     }
 }
 
