@@ -36,10 +36,9 @@ pub const MAX_RECURSION_DEPTH: u32 = 128;
 /// (possibly adversarial) on-disk container payload.
 pub const MAX_CONTAINER_ELEMENTS: u32 = 65_536;
 
-// Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
-// load-bearing: deserialize_row_into tells a container-rooted row from a
-// scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
-// tag may sit at or above TAG_TUPLE.
+// Tag taxonomy: scalars 0x00-0x07 and 0x0B-0x0D, containers 0x08-0x0A.
+// deserialize_row_into tells a container-rooted row from a scalar-rooted one
+// by `is_container_tag`. Tags are never renumbered: rows stay readable.
 pub const TAG_NULL: u8 = 0x00;
 pub const TAG_MISSING: u8 = 0x01;
 pub const TAG_BOOL: u8 = 0x02;
@@ -51,6 +50,17 @@ pub const TAG_BYTES: u8 = 0x07;
 pub const TAG_TUPLE: u8 = 0x08;
 pub const TAG_LIST: u8 = 0x09;
 pub const TAG_BAG: u8 = 0x0A;
+/// payload = days since 1970-01-01 (i32 LE)
+pub const TAG_DATE: u8 = 0x0B;
+/// payload = micros since midnight (i64 LE) offset (i16 LE, i16::MIN for none) precision (u8)
+pub const TAG_TIME: u8 = 0x0C;
+/// payload = micros since 1970-01-01T00:00 (i64 LE) offset (i16 LE) precision (u8)
+pub const TAG_TIMESTAMP: u8 = 0x0D;
+
+/// Whether a value's tag is a container's.
+fn is_container_tag(tag: u8) -> bool {
+    matches!(tag, TAG_TUPLE | TAG_LIST | TAG_BAG)
+}
 
 #[derive(Debug)]
 pub enum SerializeError {
@@ -291,6 +301,21 @@ fn write_value_from_view(
             buf.extend_from_slice(&byte_len.to_le_bytes());
             buf.extend_from_slice(b);
         }
+        ValueType::Date => {
+            buf.push(TAG_DATE);
+            let d = view.get_date().expect("date view");
+            buf.extend_from_slice(&d.days().to_le_bytes());
+        }
+        ValueType::Time => {
+            buf.push(TAG_TIME);
+            let t = view.get_time().expect("time view");
+            write_micros_offset_precision(t.micros(), t.offset(), t.precision(), buf);
+        }
+        ValueType::Timestamp => {
+            buf.push(TAG_TIMESTAMP);
+            let t = view.get_timestamp().expect("timestamp view");
+            write_micros_offset_precision(t.micros(), t.offset(), t.precision(), buf);
+        }
         ValueType::Tuple => write_tuple_via_view(view, depth + 1, buf)?,
         ValueType::List => write_list_or_bag_via_view(view, TAG_LIST, "list", depth + 1, buf)?,
         ValueType::Bag => write_list_or_bag_via_view(view, TAG_BAG, "bag", depth + 1, buf)?,
@@ -305,6 +330,18 @@ fn write_value_from_view(
         }
     }
     Ok(())
+}
+
+/// A time's or timestamp's payload.
+fn write_micros_offset_precision(
+    micros: i64,
+    offset: partiql_vm::value::Offset,
+    precision: u8,
+    buf: &mut Vec<u8>,
+) {
+    buf.extend_from_slice(&micros.to_le_bytes());
+    buf.extend_from_slice(&offset.to_bits().to_le_bytes());
+    buf.push(precision);
 }
 
 /// Encode a runtime tuple (`{...}` literal) reached as `ValueType::Tuple` in a
@@ -480,7 +517,7 @@ impl std::error::Error for DeserializeError {}
 ///
 /// Same contract as [`deserialize_row_into`]: `bytes` must outlive every
 /// arena reset that touches `target_slot`. Reachable only when the row's
-/// first byte is a scalar tag (`< TAG_TUPLE`); container roots use the
+/// first byte is a scalar tag (not `is_container_tag`); container roots use the
 /// `ValueWriter` frame-stack path in `deserialize_row_into`.
 unsafe fn decode_top_scalar_into(
     bytes: &[u8],
@@ -500,6 +537,9 @@ unsafe fn decode_top_scalar_into(
         Scalar::Decimal(d) => writer.write_decimal(target_slot, d).map_err(io_err)?,
         Scalar::Str(s) => writer.write_str(target_slot, s).map_err(io_err)?,
         Scalar::Bytes(b) => writer.write_bytes(target_slot, b).map_err(io_err)?,
+        Scalar::Date(d) => writer.write_date(target_slot, d).map_err(io_err)?,
+        Scalar::Time(t) => writer.write_time(target_slot, t).map_err(io_err)?,
+        Scalar::Timestamp(t) => writer.write_timestamp(target_slot, t).map_err(io_err)?,
     }
     if cursor != bytes.len() {
         return Err(DeserializeError::Unsupported(format!(
@@ -532,10 +572,10 @@ pub unsafe fn deserialize_row_into(
     if bytes.is_empty() {
         return Err(DeserializeError::Truncated);
     }
-    // Container-rooted rows start with a tag >= TAG_TUPLE (0x08) and use the
-    // ValueWriter frame-stack path. Scalar-rooted rows write straight to the
-    // register (a bare scalar has no frame for ValueWriter::put_*).
-    if bytes[0] >= TAG_TUPLE {
+    // Container-rooted rows use the ValueWriter frame-stack path. Scalar-rooted
+    // rows write straight to the register (a bare scalar has no frame for
+    // ValueWriter::put_*).
+    if is_container_tag(bytes[0]) {
         let mut cursor = 0usize;
         let mut vw = writer.value_writer(target_slot).map_err(|e| {
             DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}"))
@@ -568,6 +608,9 @@ enum Scalar<'a> {
     Decimal(rust_decimal::Decimal),
     Str(&'a str),
     Bytes(&'a [u8]),
+    Date(partiql_vm::value::Date),
+    Time(partiql_vm::value::Time),
+    Timestamp(partiql_vm::value::Timestamp),
 }
 
 /// Decode the payload for a single scalar `tag`, advancing `cursor`. The
@@ -630,9 +673,45 @@ unsafe fn decode_scalar_payload<'a>(
             let b_ext: &'a [u8] = unsafe { extend_bytes_to_arena_lifetime(slice) };
             Scalar::Bytes(b_ext)
         }
+        TAG_DATE => {
+            let days = i32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            Scalar::Date(
+                partiql_vm::value::Date::from_days(days)
+                    .ok_or_else(|| DeserializeError::Unsupported(format!("invalid date {days}")))?,
+            )
+        }
+        TAG_TIME => {
+            let (micros, offset, precision) = take_micros_offset_precision(bytes, cursor)?;
+            Scalar::Time(
+                partiql_vm::value::Time::from_parts(micros, offset, precision).ok_or_else(
+                    || DeserializeError::Unsupported(format!("invalid time {micros}")),
+                )?,
+            )
+        }
+        TAG_TIMESTAMP => {
+            let (micros, offset, precision) = take_micros_offset_precision(bytes, cursor)?;
+            Scalar::Timestamp(
+                partiql_vm::value::Timestamp::from_parts(micros, offset, precision).ok_or_else(
+                    || DeserializeError::Unsupported(format!("invalid timestamp {micros}")),
+                )?,
+            )
+        }
         t => return Err(DeserializeError::UnknownTag(t)),
     };
     Ok(scalar)
+}
+
+/// A time's or timestamp's payload.
+fn take_micros_offset_precision(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<(i64, partiql_vm::value::Offset, u8), DeserializeError> {
+    let micros = i64::from_le_bytes(take_array::<8>(bytes, cursor)?);
+    let bits = i16::from_le_bytes(take_array::<2>(bytes, cursor)?);
+    let offset = partiql_vm::value::Offset::from_bits(bits)
+        .ok_or_else(|| DeserializeError::Unsupported(format!("invalid offset {bits}")))?;
+    let precision = take_byte(bytes, cursor)?;
+    Ok((micros, offset, precision))
 }
 
 fn decode_tagged_into(
@@ -696,6 +775,9 @@ fn decode_tagged_into(
                 Scalar::Decimal(d) => vw.put_decimal(d).map_err(io_err)?,
                 Scalar::Str(s) => vw.put_str(s).map_err(io_err)?,
                 Scalar::Bytes(b) => vw.put_bytes(b).map_err(io_err)?,
+                Scalar::Date(d) => vw.put_date(d).map_err(io_err)?,
+                Scalar::Time(t) => vw.put_time(t).map_err(io_err)?,
+                Scalar::Timestamp(t) => vw.put_timestamp(t).map_err(io_err)?,
             }
         }
     }

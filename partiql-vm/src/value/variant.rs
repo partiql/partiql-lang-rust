@@ -3,7 +3,9 @@
 
 use crate::arena::Arena;
 use crate::error::{EngineError, Result};
-use crate::value::{value_ref_to_owned, TupleField, TupleRef, ValueOwned, ValueRef};
+use crate::value::{
+    value_ref_to_owned, Date, Offset, Timestamp, TupleField, TupleRef, ValueOwned, ValueRef,
+};
 use ion_rs::{Element, IonType};
 use rust_decimal::Decimal;
 
@@ -127,8 +129,47 @@ fn decode<'a>(element: &Element, arena: &'a Arena) -> Option<ValueRef<'a>> {
                 fields: arena.alloc_slice(&fields),
             }))
         }
-        IonType::Timestamp => return None,
+        IonType::Timestamp => ValueRef::Timestamp(timestamp(&element.as_timestamp()?)?),
     })
+}
+
+/// An Ion timestamp as a VM timestamp: with a time zone when it has an offset (`Z` or
+/// `+01:00`), else (an unknown offset, `-00:00`, or no time) without; its fractional seconds
+/// rounded to microseconds.
+fn timestamp(ts: &ion_rs::Timestamp) -> Option<Timestamp> {
+    let date = Date::from_ymd(ts.year() as i32, ts.month() as u8, ts.day() as u8)?;
+    let offset = match ts.offset() {
+        Some(minutes) => Offset::minutes(minutes)?,
+        None => Offset::NONE,
+    };
+    let precision = ts.fractional_seconds_scale().unwrap_or(0).clamp(0, 6) as u8;
+    let hms = (ts.hour() as u8, ts.minute() as u8, ts.second() as u8);
+    // A carry moves the timestamp on (as does a leap second's, whose fraction is a second),
+    // but not past year 9999, Ion's last, so that the value can be written as Ion again
+    let nanos = fraction_nanos(ts)?;
+    let rounded = Timestamp::from_local_nano(date, hms, nanos, offset, precision)?;
+    match rounded.local().0.ymd().0 > 9999 {
+        true => Timestamp::from_local_nano(date, hms, nanos / 1_000 * 1_000, offset, precision),
+        false => Some(rounded),
+    }
+}
+
+/// An Ion timestamp's fraction of a second, in nanoseconds (truncated past them).
+fn fraction_nanos(ts: &ion_rs::Timestamp) -> Option<u32> {
+    if ts.fractional_seconds_scale().unwrap_or(0) <= 9 {
+        return Some(ts.nanoseconds());
+    }
+    // ion-rs 1.0.0-rc.11 scales a fraction of more than 9 digits wrongly (fixed in rc.12; the
+    // pin is #655's), so read its digits from the timestamp's text instead
+    let text = ts.to_string();
+    let digits: String = text
+        .split_once('.')?
+        .1
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .take(9)
+        .collect();
+    format!("{digits:0<9}").parse().ok()
 }
 
 /// An Ion literal's value, decoded when the VM has a type for it.
@@ -211,12 +252,57 @@ mod tests {
 
     #[test]
     fn what_the_vm_cannot_hold_stays_a_variant() {
-        assert!(lowered("2000-01-02T03:04:05Z").starts_with("Variant("));
         // Past a decimal's 96 bits
         assert!(lowered("170141183460469231731687303715884105727").starts_with("Variant("));
-        // A nested timestamp is a variant of its own in a decoded list
-        let list = lowered("[1, 2000T]");
+        // A nested one is a variant of its own in a decoded list
+        let list = lowered("[1, 170141183460469231731687303715884105727]");
         assert!(list.starts_with("List([I64(1), Variant("), "{list}");
+    }
+
+    fn timestamp(text: &str) -> Timestamp {
+        let arena = Arena::default();
+        match lower(ValueRef::Variant(text.as_bytes(), ION), &arena).expect("valid Ion") {
+            ValueRef::Timestamp(ts) => ts,
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timestamps_decode_with_their_offset_rounded_to_microseconds() {
+        let ts = timestamp("2000-01-02T03:04:05.1234567+01:30");
+        assert_eq!(ts.offset().get(), Some(90));
+        let (date, time) = ts.local();
+        assert_eq!(date.ymd(), (2000, 1, 2));
+        assert_eq!(time.hms_micro(), (3, 4, 5, 123_457));
+        assert_eq!(ts.precision(), 6);
+        // The UTC instant
+        assert_eq!(
+            ts.micros(),
+            timestamp("2000-01-02T01:34:05.123457Z").micros()
+        );
+        // Rounding carries into the next second, minute and day
+        let (date, time) = timestamp("1999-12-31T23:59:59.9999996Z").local();
+        assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
+        // More fractional digits than nanoseconds hold
+        assert_eq!(
+            timestamp("2000-01-01T00:00:00.123456789012Z").micros(),
+            timestamp("2000-01-01T00:00:00.123457Z").micros()
+        );
+        assert_eq!(
+            timestamp("2000-01-01T00:00:00.0000004999999Z").micros(),
+            timestamp("2000-01-01T00:00:00Z").micros()
+        );
+        // An unknown offset, or a date alone, is a timestamp without a time zone
+        assert_eq!(timestamp("2000-01-01T00:00-00:00").offset().get(), None);
+        let (date, time) = timestamp("2000T").local();
+        assert_eq!((date.ymd(), time.hms_micro()), ((2000, 1, 1), (0, 0, 0, 0)));
+        assert_eq!(timestamp("2000T").offset().get(), None);
+        // ... and rounding stops at Ion's last year
+        let (date, time) = timestamp("9999-12-31T23:59:59.9999999Z").local();
+        assert_eq!(
+            (date.ymd(), time.hms_micro()),
+            ((9999, 12, 31), (23, 59, 59, 999_999))
+        );
     }
 
     #[test]

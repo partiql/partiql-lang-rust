@@ -1,0 +1,89 @@
+// Timestamps: Ion timestamps decode to the VM's timestamp (microseconds since the epoch, in UTC
+// for one with a time zone). One with an offset has a time zone; one with an unknown offset
+// (`-00:00`) or a date alone has none.
+
+// Equal and ordered as instants, whatever the offset or the precision written
+{
+  sql: '''
+    [`2000-01-01T00:00Z` = `2000-01-01T00:00:00.000Z`, `2000-01-01T01:00+01:00` = `2000-01-01T00:00Z`,
+     `2000-01-01T00:00Z` < `2001-01-01T00:00Z`, `2000-06-01T12:30:00.5+02:00` > `2000-06-01T10:30Z`,
+     `2000-01-01T00:00Z` BETWEEN `1999-01-01T00:00Z` AND `2000-01-01T00:00Z`]
+  ''',
+  expect: { rows: [true, true, true, true, true] }
+}
+
+// One with a time zone and one without are not equal, and don't compare: there is no session
+// time zone to place the one without in
+{
+  sql: '''
+    [`2000-01-01T00:00Z` = `2000-01-01T00:00-00:00`, `2000-01-01T00:00Z` < `2000-01-01T00:00-00:00`,
+     `2000T` = `2000-01-01T00:00-00:00`, `2000T` < `2000-01-02T`]
+  ''',
+  expect: { rows: [false, $missing::null, true, true] }
+}
+
+// Fractions of a second round to microseconds
+{
+  sql: '''
+    [`2000-01-02T03:04:05.1234567Z` = `2000-01-02T03:04:05.123457Z`,
+     `1999-12-31T23:59:59.9999996Z` = `2000-01-01T00:00Z`]
+  ''',
+  expect: { rows: [true, true] }
+}
+
+// GROUP BY, DISTINCT, ORDER BY, MIN and MAX tell timestamps apart as instants
+{
+  sql: '''
+    SELECT COUNT(*) AS n
+    FROM << `2000-01-01T00:00Z`, ` 2000-01-01T00:00:00Z`, `2000-01-01T01:00+01:00`, `2001-01-01T00:00Z` >> x
+    GROUP BY x
+    ORDER BY n
+  ''',
+  expect: { rows: [ { n: 1 }, { n: 3 } ] }
+}
+
+{
+  sql: '''
+    SELECT VALUE COUNT(DISTINCT x)
+    FROM << `2000-01-01T00:00Z`, `2000-01-01T01:00+01:00`, `2000-01-01T00:00-00:00` >> x
+  ''',
+  expect: $bag::[2]
+}
+
+{
+  sql: '''
+    [COLL_MIN(<< `2001-06-01T00:00Z`, `2000-01-01T01:00+01:00`, `2000-06-01T00:00Z` >>) = `2000-01-01T00:00Z`,
+     COLL_MAX(<< `2001-06-01T00:00Z`, `2000-01-01T00:00Z`, `2000-06-01T00:00Z` >>) = `2001-06-01T00:00Z`]
+  ''',
+  expect: { rows: [true, true] }
+}
+
+// Stored in a table, and read back as the same instants
+'''
+  CREATE TABLE events;
+  INSERT INTO events
+    SELECT r.id AS id, MIN(r.ts) AS ts
+    FROM << {'id': 1, 'ts': `2000-01-01T01:00+01:00`}, {'id': 2, 'ts': `2001-06-01T12:30:00.25Z`},
+            {'id': 3, 'ts': `2000T`} >> r
+    GROUP BY r.id;
+'''
+
+{
+  sql: '''
+    SELECT VALUE e.id
+    FROM events e
+    WHERE e.ts = `2000-01-01T00:00Z` OR e.ts > `2001-06-01T12:30:00.2Z` OR e.ts = `2000-01-01T00:00-00:00`
+    ORDER BY e.id
+  ''',
+  expect: { rows: [1, 2, 3] }
+}
+
+// ORDER BY puts timestamps without a time zone before those with
+{
+  sql: '''
+    SELECT VALUE e.id
+    FROM events e
+    ORDER BY e.ts DESC
+  ''',
+  expect: { rows: [2, 1, 3] }
+}

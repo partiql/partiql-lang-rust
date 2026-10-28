@@ -64,10 +64,12 @@
 }
 
 // Collections order by their `eqg` keys, so <= is < or = nested too: NULL and MISSING are apart
-// (MISSING first); one holding an Ion value the VM has no type for (a timestamp) doesn't compare
+// (MISSING first); one holding an Ion value the VM has no type for (an int past a decimal's 96
+// bits) doesn't compare
 {
   sql: '''
-    [[NULL] = [MISSING], [NULL] <= [MISSING], [MISSING] < [NULL], [`2000-01-01T00:00Z`] <= [`2001-01-01T00:00Z`]]
+    [[NULL] = [MISSING], [NULL] <= [MISSING], [MISSING] < [NULL],
+     [`170141183460469231731687303715884105727`] <= [1]]
   ''',
   expect: { rows: [false, false, true, $missing::null] }
 }

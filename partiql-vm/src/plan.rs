@@ -1312,6 +1312,9 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
             let refs_slice = bank.alloc_slice(&refs);
             ValueRef::Bag(refs_slice)
         }
+        ValueRef::Date(d) => ValueRef::Date(d),
+        ValueRef::Time(t) => ValueRef::Time(t),
+        ValueRef::Timestamp(t) => ValueRef::Timestamp(t),
         ValueRef::Variant(bytes, type_name) => {
             let copied_bytes = bank.alloc_slice(bytes);
             let name_bytes = bank.alloc_slice(type_name.as_bytes());

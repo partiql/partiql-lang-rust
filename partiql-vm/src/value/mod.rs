@@ -1,4 +1,5 @@
 // Public types
+mod datetime;
 mod register_reader;
 mod shape;
 mod value_owned;
@@ -9,6 +10,7 @@ mod internal;
 pub(crate) mod variant;
 
 // Public exports
+pub use datetime::{Date, Offset, Time, Timestamp, MAX_PRECISION};
 pub use register_reader::RegisterReader;
 pub use shape::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
 pub(crate) use value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};
