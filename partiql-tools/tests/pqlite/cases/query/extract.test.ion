@@ -1,0 +1,61 @@
+// EXTRACT reads a field of a datetime, as written (local); SECOND is a decimal with the digits
+// the value was written with.
+
+{
+  sql: '''
+    [EXTRACT(YEAR FROM `2000-01-02T03:04:05.67Z`), EXTRACT(MONTH FROM `2000-01-02T03:04:05.67Z`),
+     EXTRACT(DAY FROM `2000-01-02T03:04:05.67Z`), EXTRACT(HOUR FROM `2000-01-02T03:04:05.67Z`),
+     EXTRACT(MINUTE FROM `2000-01-02T03:04:05.67Z`), EXTRACT(SECOND FROM `2000-01-02T03:04:05.67Z`)]
+  ''',
+  expect: { rows: [2000, 1, 2, 3, 4, 5.67] }
+}
+
+// Local fields, whatever the instant in UTC; a time zone's hours and minutes both carry its sign
+{
+  sql: '''
+    [EXTRACT(HOUR FROM `2000-01-01T23:30-05:00`), EXTRACT(DAY FROM `2000-01-01T23:30-05:00`),
+     EXTRACT(TIMEZONE_HOUR FROM `2000-01-02T03:04:05+08:09`),
+     EXTRACT(TIMEZONE_MINUTE FROM `2000-01-02T03:04:05+08:09`),
+     EXTRACT(TIMEZONE_HOUR FROM `2000-01-02T03:04:05-08:09`),
+     EXTRACT(TIMEZONE_MINUTE FROM `2000-01-02T03:04:05-08:09`),
+     EXTRACT(TIMEZONE_MINUTE FROM `2000-01-02T03:04:05-00:30`)]
+  ''',
+  expect: { rows: [23, 1, 8, 9, -8, -9, -30] }
+}
+
+// SECOND keeps the digits written (to microseconds), or none
+{
+  sql: '''
+    [EXTRACT(SECOND FROM `2000-01-01T00:00:01.1234567Z`), EXTRACT(SECOND FROM `2000-01-01T00:00:07Z`),
+     EXTRACT(SECOND FROM `2000-01-01T00:00:07.500Z`)]
+  ''',
+  expect: { rows: [1.123457, 7., 7.500] }
+}
+
+// NULL is NULL and MISSING MISSING; a field the value has none of, or a value that is no
+// datetime, is MISSING (an error in strict mode for the latter)
+{
+  sql: '''
+    [EXTRACT(YEAR FROM NULL), EXTRACT(TIMEZONE_HOUR FROM `2000T`),
+     EXTRACT(TIMEZONE_HOUR FROM `2000-01-01T00:00-00:00`), EXTRACT(YEAR FROM 1)]
+  ''',
+  expect: { rows: [null, $missing::null, $missing::null, $missing::null] }
+}
+
+{
+  sql: '''
+    EXTRACT(YEAR FROM MISSING)
+  ''',
+  expect: { rows: $missing::null }
+}
+
+// Over a column, after GROUP BY
+{
+  sql: '''
+    SELECT EXTRACT(YEAR FROM t.ts) AS y, COUNT(*) AS n
+    FROM << {'ts': `2000-03-01T00:00Z`}, {'ts': `2000-12-31T23:00-05:00`}, {'ts': `2001-01-01T01:00Z`} >> t
+    GROUP BY EXTRACT(YEAR FROM t.ts)
+    ORDER BY y
+  ''',
+  expect: { rows: [ { y: 2000, n: 2 }, { y: 2001, n: 1 } ] }
+}
