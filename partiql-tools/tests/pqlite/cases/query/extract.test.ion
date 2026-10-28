@@ -32,8 +32,8 @@
   expect: { rows: [1.123457, 7., 7.500] }
 }
 
-// NULL is NULL and MISSING MISSING; a field the value has none of, or a value that is no
-// datetime, is MISSING (an error in strict mode for the latter)
+// NULL is NULL and MISSING MISSING; a field the value's type has none of (the time zone of a
+// timestamp without one), or a value that is no datetime, is MISSING (an error in strict mode)
 {
   sql: '''
     [EXTRACT(YEAR FROM NULL), EXTRACT(TIMEZONE_HOUR FROM `2000T`),
