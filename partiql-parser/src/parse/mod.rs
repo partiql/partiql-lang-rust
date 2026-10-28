@@ -282,6 +282,23 @@ mod tests {
             parse!("id");
             parse!(r#""quoted_id""#);
         }
+        // `@` qualifies a variable: it names the binding before a table of the name
+        #[test]
+        fn at_identifier() {
+            for (query, qualifier, case) in [
+                ("id", "Unqualified", "CaseInsensitive"),
+                ("@id", "Qualified", "CaseInsensitive"),
+                (r#"@"Id""#, "Qualified", "CaseSensitive"),
+                ("@id.a", "Qualified", "CaseInsensitive"),
+            ] {
+                let stmt = format!("{:?}", parse!(query));
+                assert!(
+                    stmt.contains(&format!("qualifier: {qualifier} ")),
+                    "{query}: {stmt}"
+                );
+                assert!(stmt.contains(&format!("case: {case} ")), "{query}: {stmt}");
+            }
+        }
         #[test]
         fn array() {
             parse!(r"[]");

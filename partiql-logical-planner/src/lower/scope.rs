@@ -227,13 +227,13 @@ impl Lowerer<'_> {
 
     /// A catalog table named `name`.
     fn resolve_global(&self, name: &SymbolPrimitive) -> Result<Option<ValueExpr>> {
-        Ok(match self.catalog.resolve_type(&name.value) {
-            Some(_) => Some(ValueExpr::DBRef(partiql_logical::DBRef {
+        let binding = symprim_to_binding(name)?;
+        Ok(self.catalog.resolve_binding_type(&binding).map(|_| {
+            ValueExpr::DBRef(partiql_logical::DBRef {
                 catalog: self.catalog.name().to_string(),
-                path: vec![symprim_to_binding(name)?],
-            })),
-            None => None,
-        })
+                path: vec![binding],
+            })
+        }))
     }
 
     /// [`VarRefResolution::Static`]: resolve to a single local `VarRef`, `Path` or `DBRef`.
@@ -354,7 +354,7 @@ impl Lowerer<'_> {
                 };
                 let expr = if same {
                     var(&b.name)?
-                } else if !b.generated && self.catalog.resolve_type(&name.value).is_some() {
+                } else if !b.generated && self.catalog.resolve_binding_type(&binding).is_some() {
                     global(name)?
                 } else {
                     ValueExpr::Path(

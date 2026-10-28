@@ -33,6 +33,7 @@ partiql-vm = { path = "../partiql-vm" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
+partiql-types = { path = "../partiql-types" }
 partiql-value = { path = "../partiql-value" }
 clap = { version = "4.6.1", features = ["derive"] }
 # Generates the scripts printed by `pqlite completions <shell>`.

@@ -1,3 +1,5 @@
+use crate::catalog::HeedPlannerCatalog;
+use crate::storage::HeedDB;
 use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::call_defs::{CallDef, CallSpec};
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog};
@@ -5,6 +7,7 @@ use partiql_catalog::context::SessionContext;
 use partiql_catalog::table_fn::{
     BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo, TableFunction,
 };
+use partiql_common::catalog::CatalogId;
 use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::{Parsed, Parser, ParserError};
 use partiql_value::{BindingsName, Value};
@@ -41,16 +44,20 @@ pub fn lower_statement(
     planner.lower_statement(stmt)
 }
 
-/// Create a frontend catalog with only table function stubs.
-/// Used by pqlite when table functions are the sole data source mechanism.
-pub fn create_table_fn_catalog() -> Box<dyn SharedCatalog> {
+/// Create the planner's catalog: the table function stubs, and the tables of `db`.
+pub fn create_planner_catalog(db: Option<Arc<HeedDB>>) -> Box<dyn SharedCatalog> {
     let mut catalog = PartiqlCatalog::default();
-    register_table_fn_stubs(&mut catalog);
-    Box::new(catalog.to_shared_catalog())
+    let catalog_id = register_table_fn_stubs(&mut catalog);
+    Box::new(HeedPlannerCatalog::new(
+        catalog.to_shared_catalog(),
+        catalog_id,
+        db,
+    ))
 }
 
-fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) {
-    catalog
+/// Register the table function stubs; returns the catalog's id.
+fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) -> CatalogId {
+    let id = catalog
         .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
             "rand",
             vec![
@@ -74,6 +81,7 @@ fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) {
             vec![partiql_catalog::call_defs::CallSpecArg::Positional],
         ))))
         .expect("Failed to add scan_ion table function");
+    id.catalog_id()
 }
 
 /// Stub table function for the frontend planner. Only provides `call_def()` so
