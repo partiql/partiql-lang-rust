@@ -21,7 +21,7 @@ permissions:
 jobs:
   benchmark:
     name: Performance regression check
-    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
+    runs-on: codebuild-partiql-lang-rust-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4

@@ -46,7 +46,7 @@ jobs:
   # queues for runners only once.
   build:
     name: Lint, Build and Test (Linux)
-    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
+    runs-on: codebuild-partiql-lang-rust-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
@@ -65,16 +65,16 @@ jobs:
       # Reports, but does not fail on:
       #  - security advisories
       # See: https://embarkstudios.github.io/cargo-deny/index.html
+      # Installed as a binary rather than via EmbarkStudios/cargo-deny-action, which is a Docker container action and
+      # cannot run on the CodeBuild runner (no Docker without privileged mode).
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
       - name: cargo-deny (bans licenses sources)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check bans licenses sources
+        run: cargo deny check bans licenses sources
       - name: cargo-deny (advisories)
         # Prevent sudden announcement of a new advisory from failing ci
         continue-on-error: true
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories
+        run: cargo deny check advisories
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -93,7 +93,7 @@ jobs:
 
   coverage:
     name: Code Coverage
-    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
+    runs-on: codebuild-partiql-lang-rust-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
   # and posts the result as a PR comment.
   conformance-report:
     name: Conformance report
-    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
+    runs-on: codebuild-partiql-lang-rust-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
