@@ -10,6 +10,7 @@ build = "build.rs"
 [lib]
 name = "partiql_tools"
 path = "src/lib.rs"
+bench = false
 
 [features]
 test-support = []
