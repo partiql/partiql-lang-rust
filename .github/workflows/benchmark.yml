@@ -40,13 +40,7 @@ jobs:
           # memory per rustc. Cargo defaults to one job per vCPU, which ran out of memory on the CodeBuild runner
           # (8 vCPU, 15 GB), so cap it at 4 jobs, as on the previous 4-core runner.
           CARGO_BUILD_JOBS: 4
-        run: |
-          # Log the CPU count and memory use (to stderr, so not into output.txt) to show the remaining headroom.
-          echo "nproc: $(nproc)" >&2
-          (while sleep 5; do free -m | awk 'NR==2 {print "memory used: " $3 " MB of " $2 " MB"}' >&2; done) &
-          monitor=$!
-          trap 'kill "$monitor"' EXIT
-          cargo bench -- --output-format bencher | tee output.txt
+        run: cargo bench -- --output-format bencher | tee output.txt
       # gh-pages branch is updated and pushed automatically with extracted benchmark data
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
