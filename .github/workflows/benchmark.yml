@@ -21,7 +21,7 @@ permissions:
 jobs:
   benchmark:
     name: Performance regression check
-    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
+    runs-on: codebuild-partiql-lang-rust-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
@@ -38,7 +38,8 @@ jobs:
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: PartiQL (rust) Benchmark
+          # A new series for the CodeBuild runner, so alerts do not compare against results from other hardware.
+          name: PartiQL (rust) Benchmark (CodeBuild)
           tool: 'cargo'
           output-file-path: output.txt
           # Access token to deploy GitHub Pages branch

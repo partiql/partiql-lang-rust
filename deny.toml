@@ -1,6 +1,13 @@
 # Configuration for cargo-deny
 # See https://embarkstudios.github.io/cargo-deny/
 
+# Check the dependency graph with all features enabled, so crates only pulled in by optional features are checked too.
+# This applies to every `cargo deny check` (CI and `make deny`).
+# More documentation for the graph section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/cfg.html#the-graph-field-optional
+[graph]
+all-features = true
+
 
 # This section is considered when running `cargo deny check advisories`
 # More documentation for the advisories section can be found here:
