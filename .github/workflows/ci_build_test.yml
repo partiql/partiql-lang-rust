@@ -67,8 +67,11 @@ jobs:
       # See: https://embarkstudios.github.io/cargo-deny/index.html
       # Installed as a binary rather than via EmbarkStudios/cargo-deny-action, which is a Docker container action and
       # cannot run on the CodeBuild runner (no Docker without privileged mode).
+      # Pinned (to the version the action used) so that a new cargo-deny release cannot change results on its own.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
       - name: cargo-deny (bans licenses sources)
         run: cargo deny check bans licenses sources
       - name: cargo-deny (advisories)
