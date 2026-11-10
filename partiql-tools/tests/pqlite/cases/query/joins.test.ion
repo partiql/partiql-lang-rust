@@ -115,11 +115,13 @@
   ]
 }
 
+// In a FROM source a name is a table before a variable (`a.arr` is the table's), so `@a`
+// names the variable `a`
 {
   sql: '''
     SELECT VALUE [a.x, v]
     FROM a
-    LEFT JOIN a.arr v ON true
+    LEFT JOIN @a.arr v ON true
     WHERE a.k < 3
   ''',
   expect: $bag::[

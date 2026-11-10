@@ -701,6 +701,41 @@ fn test_static_local_binding_shadows_global_outside_from() {
 }
 
 #[test]
+fn test_static_at_names_the_binding_in_from() {
+    // In a FROM source `a` is the catalog table `a` before the binding `a`; `@a` (and
+    // `@"a"`) the binding.
+    let mut catalog = PartiqlCatalog::default();
+    let _oid = catalog.add_type_entry(TypeEnvEntry::new("a", &[], PartiqlShape::Dynamic));
+    let catalog = catalog.to_shared_catalog();
+    let lower = |statement: &str| {
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static)
+            .lower(&parsed)
+            .expect("lower")
+    };
+    let path_base = |plan: &LogicalPlan<BindingsOp>| match scan_expr(plan, "v") {
+        ValueExpr::Path(base, _) => (**base).clone(),
+        other => panic!("not a path: {other:?}"),
+    };
+
+    let plan = lower("SELECT VALUE v FROM a, a.arr AS v");
+    assert_matches!(path_base(&plan), ValueExpr::DBRef(db)
+        if db.path == vec![BindingsName::CaseInsensitive("a".into())]);
+    let plan = lower("SELECT VALUE v FROM a, @a.arr AS v");
+    assert_eq!(
+        path_base(&plan),
+        ValueExpr::VarRef(BindingsName::CaseInsensitive("a".into()), VarRefType::Local)
+    );
+    let plan = lower(r#"SELECT VALUE v FROM a, @"a".arr AS v"#);
+    assert_eq!(
+        path_base(&plan),
+        ValueExpr::VarRef(BindingsName::CaseSensitive("a".into()), VarRefType::Local)
+    );
+}
+
+#[test]
 fn test_static_from_infers_alias_from_table_name_or_last_path_step() {
     let mut catalog = PartiqlCatalog::default();
     let _oid = catalog.add_type_entry(TypeEnvEntry::new("onek", &[], PartiqlShape::Dynamic));

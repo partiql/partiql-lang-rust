@@ -1754,11 +1754,11 @@ VarRef: ast::AstNode<ast::VarRef> = {
       }, lo..hi),
     <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
-            qualifier: ast::ScopeQualifier::Unqualified
+            qualifier: ast::ScopeQualifier::Qualified
         }, lo..hi),
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
-            qualifier: ast::ScopeQualifier::Unqualified
+            qualifier: ast::ScopeQualifier::Qualified
         },lo..hi),
     <lo:@L> <ident:VarNonReservedKeyword> <hi:@R> => state.node(ast::VarRef {
             name: ident,

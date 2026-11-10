@@ -3,7 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use partiql_common::catalog::EntryId;
+use partiql_catalog::catalog::{
+    FunctionEntry, PartiqlSharedCatalog, ReadOnlyCatalog, SharedCatalog, TypeEntry,
+};
+use partiql_common::catalog::{CatalogId, EntryId, ObjectId};
+use partiql_types::PartiqlShapeBuilder;
 use partiql_value::BindingsName;
 use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata,
@@ -43,23 +47,11 @@ impl CompilationCatalog for HeedCompilationCatalog {
         if path.len() != 1 {
             return None;
         }
-        // Bare identifiers (case-insensitive) fold to ASCII lowercase; quoted
-        // identifiers (case-sensitive) are taken verbatim. This is the standard
-        // SQL identifier canonicalization rule.
-        let canonical = match &path[0] {
-            BindingsName::CaseInsensitive(s) => s.to_lowercase(),
-            BindingsName::CaseSensitive(s) => s.to_string(),
-            _ => return None,
-        };
-        let entry_id = hash_to_entry_id(&canonical);
-
-        // Scope the read txn so it drops before the handle is returned.
-        {
-            let rtxn = self.db.read_txn().ok()?;
-            if self.db.open_table(&rtxn, &canonical).is_err() {
-                return None;
-            }
+        let canonical = canonical_name(&path[0])?;
+        if !table_exists(&self.db, &canonical) {
+            return None;
         }
+        let entry_id = hash_to_entry_id(&canonical);
 
         let metadata: Arc<dyn DataSourceMetadata> = Arc::new(HeedTableMetadata);
         Some(DataSourceHandle::new(entry_id, metadata))
@@ -160,6 +152,87 @@ impl ExecutionCatalog for HeedExecutionCatalog {
         }))
     }
 }
+
+/// The name a table `name` names is stored under. Bare identifiers (case-insensitive) fold
+/// to lowercase; quoted identifiers (case-sensitive) are taken verbatim. This is the standard
+/// SQL identifier canonicalization rule.
+fn canonical_name(name: &BindingsName<'_>) -> Option<String> {
+    match name {
+        BindingsName::CaseInsensitive(s) => Some(s.to_lowercase()),
+        BindingsName::CaseSensitive(s) => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+/// Whether `db` has a table named `canonical`.
+fn table_exists(db: &HeedDB, canonical: &str) -> bool {
+    // Scope the read txn to the lookup
+    db.read_txn()
+        .is_ok_and(|rtxn| db.open_table(&rtxn, canonical).is_ok())
+}
+
+/// The planner's catalog: the table functions of `functions`, and the tables of `db`, looked
+/// up when the planner resolves a name, so that it plans a table's name as the table
+/// (`COLL_COUNT(t)` in a query with FROM) rather than as an attribute of a FROM binding.
+#[derive(Debug)]
+pub struct HeedPlannerCatalog {
+    functions: PartiqlSharedCatalog,
+    /// The catalog `functions` has, which the tables share.
+    catalog_id: CatalogId,
+    db: Option<Arc<HeedDB>>,
+}
+
+impl HeedPlannerCatalog {
+    pub fn new(
+        functions: PartiqlSharedCatalog,
+        catalog_id: CatalogId,
+        db: Option<Arc<HeedDB>>,
+    ) -> Self {
+        Self {
+            functions,
+            catalog_id,
+            db,
+        }
+    }
+}
+
+impl ReadOnlyCatalog for HeedPlannerCatalog {
+    fn name(&self) -> &str {
+        self.functions.name()
+    }
+
+    fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>> {
+        self.functions.get_function(name)
+    }
+
+    fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>> {
+        self.functions.get_function_by_id(id)
+    }
+
+    /// A table of the name ignoring case, for a caller that does not say how the name was
+    /// written: a bare name is folded to lowercase, as the VM's catalog folds one.
+    fn resolve_type(&self, name: &str) -> Option<TypeEntry> {
+        self.resolve_binding_type(&BindingsName::CaseInsensitive(name.into()))
+    }
+
+    /// The table `name` names, as the VM's catalog resolves it: a quoted name as written, a
+    /// bare name folded to lowercase.
+    fn resolve_binding_type(&self, name: &BindingsName<'_>) -> Option<TypeEntry> {
+        let db = self.db.as_ref()?;
+        let canonical = canonical_name(name)?;
+        if !table_exists(db, &canonical) {
+            return None;
+        }
+        let id = ObjectId::new(self.catalog_id, hash_to_entry_id(&canonical));
+        // A table is a bag of rows of any type
+        Some(TypeEntry::new(
+            id,
+            PartiqlShapeBuilder::default().new_bag_of_dyn(),
+        ))
+    }
+}
+
+impl SharedCatalog for HeedPlannerCatalog {}
 
 #[inline]
 fn hash_to_entry_id(name: &str) -> EntryId {

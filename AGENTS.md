@@ -42,7 +42,7 @@ The compilation pipeline flows through these crates in order:
 5. **partiql-logical** — Graph-based logical plan representation. Nodes are `BindingsOp` (relational) and leaves are `ValueExpr` (scalar).
 6. **Evaluation** — Two backends, in separate crates:
    - **partiql-eval** — Legacy tree-walker; interprets logical plan nodes via the `Evaluable` trait. Uses the planner's default `VarRefResolution::Dynamic`.
-   - **partiql-vm** — Bytecode VM (unpublished); compiles the logical plan to flat `Inst` bytecode and executes it in a register-based VM with cursors. This is the actively developed path. Requires plans lowered with `VarRefResolution::Static` (`LogicalPlanner::with_var_resolution`).
+   - **partiql-vm** — Bytecode VM (unpublished); compiles the logical plan to flat `Inst` bytecode and executes it in a register-based VM with cursors. This is the actively developed path. Requires plans lowered with `VarRefResolution::Static` (`LogicalPlanner::with_var_resolution`), by a planner whose catalog knows every table the VM's `CompilationCatalog` has: the VM follows the plan's name resolution (a FROM source resolved to a variable is the variable, even when a table has its name).
 
 ### Key supporting crates
 

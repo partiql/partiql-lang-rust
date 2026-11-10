@@ -200,7 +200,7 @@ pub(super) fn execute_statement_silent(
     db: Arc<HeedDB>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture = DebugCapture::default();
-    let catalog = common::create_table_fn_catalog();
+    let catalog = common::create_planner_catalog(Some(Arc::clone(&db)));
     let statement =
         common::lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
 
@@ -234,7 +234,7 @@ fn dispatch(
     parse_time: Duration,
     capture: &mut DebugCapture,
 ) -> Result<RunOutcome, Box<dyn std::error::Error>> {
-    let catalog = common::create_table_fn_catalog();
+    let catalog = common::create_planner_catalog(db.cloned());
 
     let lower_start = Instant::now();
     let statement =

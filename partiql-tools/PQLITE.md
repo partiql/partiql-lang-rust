@@ -141,6 +141,22 @@ type, using the parser's own lexer. An unclosed string or comment stays colored 
 end of the entry. It's off when stdout isn't a terminal, `NO_COLOR` is set, `TERM=dumb`,
 or with `pqlite open --no-color <db>`.
 
+**Table names and variables**
+
+A name resolves as [PartiQL's scoping rules](https://partiql.org/concepts/scopes) have it:
+
+- In a FROM source, a table comes first: in `FROM t, t.arr AS v`, `t.arr` is the table's.
+  `@` names the variable instead: `FROM t, @t.arr AS v` ranges over each row's `arr`.
+- Elsewhere, a variable comes first: `SELECT u.a FROM t AS u` reads the variable `u`.
+- With a single FROM source, a name that is no variable is an attribute of it
+  (`SELECT a FROM t` reads `t.a`), since pqlite's tables have no schema. With several, it is
+  a table (`SELECT COLL_COUNT(t) FROM u, v` reads table `t`). Known deviation: pqlite's
+  planner currently resolves a table's name to the table before an attribute even with a
+  single source, so creating a table can change what such a name means
+  ([#745](https://github.com/partiql/partiql-lang-rust/issues/745)).
+- A bare name is the table of its name in lowercase (`T` is `t`); a quoted one, of its name
+  as written (`"T"`).
+
 **Table functions**
 
 ```

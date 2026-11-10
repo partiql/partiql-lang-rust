@@ -306,10 +306,22 @@
   ]
 }
 
-// ... even when a table has the variable's name: the row `dept` is one tuple, not the table
+// ... but in a FROM source a name is a table before a variable: `dept` is the table
 {
   sql: '''
-    SELECT VALUE (SELECT VALUE x.name FROM dept x)
+    SELECT VALUE (SELECT VALUE x.title FROM dept x)
+    FROM emp dept
+    WHERE dept.id = 1
+  ''',
+  expect: $bag::[
+    $bag::["eng", "ops", "hr"]
+  ]
+}
+
+// ... and `@dept` the variable: the row `dept` is one tuple, not the table
+{
+  sql: '''
+    SELECT VALUE (SELECT VALUE x.name FROM @dept x)
     FROM emp dept
     WHERE dept.id = 1
   ''',
