@@ -2,11 +2,22 @@
 // Locks in the MISSING_ANNOT branch in value_to_element.
 {
   sql: '''
-    SELECT m.nope AS x
+    SELECT VALUE m.nope
     FROM << {'a': 1} >> m
   ''',
   expect: $bag::[
-    { x: $missing::null }
+    $missing::null
+  ]
+}
+
+// ... while a row has no attribute whose value is MISSING (a NULL one stays)
+{
+  sql: '''
+    SELECT m.nope AS x, NULL AS y
+    FROM << {'a': 1} >> m
+  ''',
+  expect: $bag::[
+    { y: null }
   ]
 }
 

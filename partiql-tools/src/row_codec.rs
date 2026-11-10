@@ -165,6 +165,16 @@ fn write_tuple(
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
     check_encode_depth(depth)?;
+    // Dynamic field names are not supported yet
+    if let Some(col) = fields
+        .iter()
+        .position(|field| matches!(field.name, FieldName::Register(_)))
+    {
+        return Err(SerializeError::Unsupported(format!(
+            "field {col}: dynamic field names are not supported yet"
+        )));
+    }
+    // Capped on the shape, so a row's MISSING attributes don't decide whether it is stored
     if fields.len() > MAX_FIELDS_PER_ROW as usize {
         return Err(SerializeError::Unsupported(format!(
             "tuple has {} fields, exceeds MAX_FIELDS_PER_ROW ({})",
@@ -172,22 +182,17 @@ fn write_tuple(
             MAX_FIELDS_PER_ROW
         )));
     }
+    // The row's attributes: none whose value is MISSING
+    let attributes: Vec<_> = row.attributes(fields).collect();
     buf.push(TAG_TUPLE);
-    // Safe: the cap above bounds fields.len() to MAX_FIELDS_PER_ROW (u32).
-    let field_count: u32 = fields.len() as u32;
+    // Safe: the cap above bounds attributes.len() to MAX_FIELDS_PER_ROW (u32).
+    let field_count: u32 = attributes.len() as u32;
     buf.extend_from_slice(&field_count.to_le_bytes());
-    for (col, field) in fields.iter().enumerate() {
-        let name = match &field.name {
-            FieldName::Static(s) => s.as_str(),
-            FieldName::Register(_) => {
-                return Err(SerializeError::Unsupported(format!(
-                    "field {col}: dynamic field names are not supported yet"
-                )));
-            }
-        };
+    for (name, value) in attributes {
         if name.len() > MAX_NAME_LEN_BYTES as usize {
+            let start: String = name.chars().take(64).collect();
             return Err(SerializeError::Unsupported(format!(
-                "field {col}: name length {} bytes exceeds MAX_NAME_LEN_BYTES ({})",
+                "field {start:?}…: name length {} bytes exceeds MAX_NAME_LEN_BYTES ({})",
                 name.len(),
                 MAX_NAME_LEN_BYTES
             )));
@@ -196,7 +201,7 @@ fn write_tuple(
         let name_len: u32 = name.len() as u32;
         buf.extend_from_slice(&name_len.to_le_bytes());
         buf.extend_from_slice(name.as_bytes());
-        match &field.value {
+        match value {
             // depth + 1: the field value is one frame below this tuple. This keeps
             // the encoder at or ahead of the decoder's per-frame count (encoder is
             // the stricter side), so any row the encoder accepts is decodable.

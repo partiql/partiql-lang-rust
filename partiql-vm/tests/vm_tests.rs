@@ -219,6 +219,8 @@ fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm
 /// A table (its Ion text a list or bag) or a single value (with no row when it has no text).
 struct SchemalessMetadata {
     collection: bool,
+    /// The table is a list.
+    ordered: bool,
 }
 
 impl DataSourceMetadata for SchemalessMetadata {
@@ -233,11 +235,15 @@ impl DataSourceMetadata for SchemalessMetadata {
     fn is_collection(&self) -> bool {
         self.collection
     }
+
+    fn is_ordered(&self) -> bool {
+        self.ordered
+    }
 }
 
 struct TestCompilationCatalog {
-    /// Each object's entry, and whether it is a collection.
-    tables: FxHashMap<String, (EntryId, bool)>,
+    /// Each object's entry, whether it is a collection, and whether it is a list.
+    tables: FxHashMap<String, (EntryId, bool, bool)>,
 }
 
 impl CompilationCatalog for TestCompilationCatalog {
@@ -253,8 +259,12 @@ impl CompilationCatalog for TestCompilationCatalog {
         self.tables
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, &(entry_id, collection))| {
-                DataSourceHandle::new(entry_id, Arc::new(SchemalessMetadata { collection }))
+            .map(|(_, &(entry_id, collection, ordered))| {
+                let metadata = SchemalessMetadata {
+                    collection,
+                    ordered,
+                };
+                DataSourceHandle::new(entry_id, Arc::new(metadata))
             })
     }
 }
@@ -292,22 +302,16 @@ impl ExecutionCatalog for TestExecutionCatalog {
 // --- Result extraction ---
 
 fn row_to_value(row: &RegisterReader<'_>, shape: &Shape) -> Value {
-    use partiql_vm::value::FieldName;
-
     match shape.row_shape() {
         RowShape::Struct(fields) => {
             let mut tuple = Tuple::new();
-            for field in fields.iter() {
-                let name = match &field.name {
-                    FieldName::Static(s) => s.clone(),
-                    FieldName::Register(reg) => row.get_str(*reg).unwrap_or("?").to_string(),
-                };
-                let reg_idx = match &field.value {
+            for (name, value) in row.attributes(fields) {
+                let reg_idx = match value {
                     RowShape::Register(idx, _) => *idx,
                     _ => continue,
                 };
                 if let Some(mut view) = row.get_value_view(reg_idx) {
-                    tuple.insert(&name, view_to_value(&mut view));
+                    tuple.insert(name, view_to_value(&mut view));
                 }
             }
             Value::Tuple(Box::new(tuple))
@@ -474,9 +478,10 @@ fn eval_vm_mode(
 
     for (idx, (name, ion_text)) in tables.iter().enumerate() {
         let entry_id = EntryId::from(idx as u64);
-        let collection = !ion_text.trim().is_empty()
-            && matches!(parse_ion(ion_text), Value::List(_) | Value::Bag(_));
-        comp_tables.insert(name.to_string(), (entry_id, collection));
+        let value = (!ion_text.trim().is_empty()).then(|| parse_ion(ion_text));
+        let collection = matches!(value, Some(Value::List(_) | Value::Bag(_)));
+        let ordered = matches!(value, Some(Value::List(_)));
+        comp_tables.insert(name.to_string(), (entry_id, collection, ordered));
         exec_ion.insert(entry_id, ion_text.to_string());
     }
 
@@ -1279,5 +1284,61 @@ fn global_across_runs() {
     let expected = ["$bag::[18, 28]", "$bag::[]", "$bag::[18]", "$bag::[18, 28]"];
     for (run, expected) in runs.into_iter().zip(expected) {
         assert_eq!(parse_ion(expected), run);
+    }
+}
+
+// --- AT ---
+
+/// `AT` over a catalog table: each row's position when the table is a list, MISSING when it is
+/// a bag.
+#[test]
+fn at_over_a_table() {
+    let tables = [("l", "[{a: 5}, {a: 6}]"), ("b", "$bag::[{a: 5}]")];
+    assert_vm_eval(
+        "SELECT VALUE [i, r.a] FROM l AS r AT i",
+        &tables,
+        "$bag::[[0, 5], [1, 6]]",
+    );
+    assert_vm_eval(
+        "SELECT VALUE [i, r.a] FROM b AS r AT i",
+        &tables,
+        "$bag::[[$missing::null, 5]]",
+    );
+    // The position of each run's rows starts again from 0
+    let runs = eval_vm_runs("SELECT VALUE i FROM l AS r AT i", &tables, &[Some(1), None]);
+    assert_eq!(runs, [parse_ion("$bag::[0]"), parse_ion("$bag::[0, 1]")]);
+}
+
+/// In strict mode, `AT` over a collection that is no list is an error.
+#[test]
+fn strict_at_over_no_list() {
+    for query in [
+        "SELECT VALUE i FROM <<1, 2>> AS v AT i",
+        "SELECT VALUE i FROM (SELECT VALUE w FROM [1] AS w) AS v AT i",
+    ] {
+        let err = strict_error(query);
+        assert!(err.contains("AT over a collection"), "{query}: {err}");
+    }
+    assert_eq!(strict_error("SELECT VALUE i FROM [1, 2] AS v AT i"), "None");
+    // An empty bag has no rows to give a position
+    assert_eq!(strict_error("SELECT VALUE i FROM <<>> AS v AT i"), "None");
+}
+
+/// In strict mode, an index that finds no element is an error: a position outside the list,
+/// an index that is no integer, a base that is no list. A NULL or MISSING base is MISSING.
+#[test]
+fn strict_index_without_element() {
+    for query in [
+        "[1, 2, 3][3]",
+        "[1, 2, 3][-1]",
+        "[1, 2, 3][1.0]",
+        "<<1, 2>>[0]",
+        "{'a': 1}[0]",
+    ] {
+        let err = strict_error(query);
+        assert!(err.contains("no element"), "{query}: {err}");
+    }
+    for query in ["[1, 2, 3][2]", "NULL[0]", "MISSING[0]"] {
+        assert_eq!(strict_error(query), "None", "{query}");
     }
 }

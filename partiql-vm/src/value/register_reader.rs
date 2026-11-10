@@ -1,4 +1,5 @@
 use super::internal::ValueRef;
+use super::shape::{FieldName, FieldShape, RowShape};
 use super::value_view::ValueView;
 
 pub struct RegisterReader<'a> {
@@ -39,5 +40,29 @@ impl<'a> RegisterReader<'a> {
     /// ```
     pub fn get_value_view(&self, col: usize) -> Option<ValueView<'a>> {
         self.slots.get(col).map(|v| ValueView::from_ref(*v))
+    }
+
+    /// The attributes of a tuple row shaped `fields`: each one's name, and the shape of its
+    /// value in this row. As in a tuple constructor, an attribute whose value is MISSING, or
+    /// whose name (read from a register) is no string, is left out: `SELECT x.a, x.b` of a
+    /// row without `b` is `{'a': ...}`.
+    pub fn attributes<'s>(
+        &'s self,
+        fields: &'s [FieldShape],
+    ) -> impl Iterator<Item = (&'s str, &'s RowShape)> + 's {
+        fields.iter().filter_map(move |field| {
+            let name = match &field.name {
+                FieldName::Static(name) => name.as_str(),
+                FieldName::Register(reg) => self.get_str(*reg)?,
+            };
+            match field.value {
+                RowShape::Register(reg, _)
+                    if matches!(self.slots.get(reg), Some(ValueRef::Missing)) =>
+                {
+                    None
+                }
+                _ => Some((name, &field.value)),
+            }
+        })
     }
 }

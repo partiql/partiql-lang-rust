@@ -47,22 +47,13 @@ pub(super) fn row_to_value(
     row: &partiql_vm::value::RegisterReader<'_>,
     shape: &partiql_vm::value::Shape,
 ) -> Result<Value, RowConvertError> {
-    use partiql_vm::value::{FieldName, RowShape};
+    use partiql_vm::value::RowShape;
 
     match shape.row_shape() {
         RowShape::Struct(fields) => {
             let mut tuple = Tuple::new();
-            for field in fields.iter() {
-                let name = match &field.name {
-                    FieldName::Static(s) => (*s).to_string(),
-                    FieldName::Register(reg) => row
-                        .get_str(*reg)
-                        .ok_or_else(|| {
-                            RowConvertError(format!("field-name register {reg} unreadable"))
-                        })?
-                        .to_string(),
-                };
-                let reg_idx = match &field.value {
+            for (name, value) in row.attributes(fields) {
+                let reg_idx = match value {
                     RowShape::Register(idx, _) => *idx,
                     RowShape::Struct(_) => {
                         return Err(RowConvertError(format!(
@@ -73,7 +64,7 @@ pub(super) fn row_to_value(
                 let mut view = row
                     .get_value_view(reg_idx)
                     .ok_or_else(|| RowConvertError(format!("register {reg_idx} unreadable")))?;
-                tuple.insert(&name, value_view_to_value(&mut view)?);
+                tuple.insert(name, value_view_to_value(&mut view)?);
             }
             Ok(Value::Tuple(Box::new(tuple)))
         }

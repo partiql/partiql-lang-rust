@@ -224,17 +224,12 @@
   ]
 }
 
-// With an alias in scope the table name is not a binding. pqlite's planning
-// catalog does not know its tables, so this lowers to `e.example.a`; with a
-// catalog entry it would be a path on the global bag. Both are MISSING here.
+// With an alias in scope the table name is not a binding: `example.a` is a path on the
+// table, a bag, which is MISSING; a row has no attribute whose value is MISSING.
 {
   sql: '''
     SELECT example.a
     FROM example e
   ''',
-  expect: $bag::[
-    { a: $missing::null },
-    { a: $missing::null },
-    { a: $missing::null }
-  ]
+  expect: $bag::[ {}, {}, {} ]
 }

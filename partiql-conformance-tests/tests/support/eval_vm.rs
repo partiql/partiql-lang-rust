@@ -11,7 +11,7 @@ use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
     RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
 };
-use partiql_vm::value::{FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView};
+use partiql_vm::value::{RegisterReader, RowShape, Shape, ValueType, ValueView};
 use partiql_vm::{
     CompilationCatalog, CompilationContext, EngineError, ExecutionCatalog, ExecutionContext,
     ExecutionResult, PartiQLVM, PlanCompiler,
@@ -32,17 +32,13 @@ fn row_to_value(row: &RegisterReader<'_>, shape: &Shape) -> Value {
     match shape.row_shape() {
         RowShape::Struct(fields) => {
             let mut tuple = Tuple::new();
-            for field in fields.iter() {
-                let name = match &field.name {
-                    FieldName::Static(s) => s.clone(),
-                    FieldName::Register(reg) => row.get_str(*reg).unwrap_or("?").to_string(),
-                };
-                let reg_idx = match &field.value {
+            for (name, value) in row.attributes(fields) {
+                let reg_idx = match value {
                     RowShape::Register(idx, _) => *idx,
                     _ => continue,
                 };
                 if let Some(mut view) = row.get_value_view(reg_idx) {
-                    tuple.insert(&name, view_to_value(&mut view));
+                    tuple.insert(name, view_to_value(&mut view));
                 }
             }
             Value::Tuple(Box::new(tuple))
