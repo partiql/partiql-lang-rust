@@ -417,6 +417,14 @@ impl<'q> Emitter<'q> {
             },
             done,
         );
+        if let Some(dst) = scan.position {
+            let strict = self.asm.b.strict;
+            self.asm.push(Inst::Position {
+                cursor_id,
+                dst,
+                strict,
+            });
+        }
         row(self)?;
         self.asm.jump(head);
         self.asm.bind(done);
@@ -685,6 +693,9 @@ impl<'q> Emitter<'q> {
                 };
                 for dst in scan.window.clone() {
                     self.asm.load_const(dst, value.clone())?;
+                }
+                if let Some(dst) = scan.position {
+                    self.asm.load_const(dst, ValueOwned::Null)?;
                 }
             }
             Op::Join(join) => {

@@ -687,9 +687,10 @@ fn ctas_then_select_missing_column() {
     assert!(ok, "CTAS failed: {err}");
     let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
     assert!(ok, "SELECT failed: {err}");
+    // A row has no attribute whose value is MISSING, so each stored row is `{}`
     assert!(
-        out.contains("MISSING"),
-        "expected MISSING in output; got: {out}"
+        out.contains("{}") && !out.contains('x'),
+        "expected rows without `x`; got: {out}"
     );
 }
 

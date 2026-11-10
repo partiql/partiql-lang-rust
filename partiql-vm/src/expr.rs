@@ -45,6 +45,8 @@ pub enum Expr {
         escape: Box<Expr>,
     },
     GetField(Box<Expr>, String),
+    /// `base[index]`: the element of a list at a position.
+    Index(Box<Expr>, Box<Expr>),
     UdfCall {
         name: String,
         args: Vec<Expr>,
@@ -96,7 +98,8 @@ impl Expr {
             | Expr::And(a, b)
             | Expr::Or(a, b)
             | Expr::Concat(a, b)
-            | Expr::In(a, b) => {
+            | Expr::In(a, b)
+            | Expr::Index(a, b) => {
                 a.for_each_subquery(f);
                 b.for_each_subquery(f);
             }
@@ -402,10 +405,27 @@ pub enum Inst {
         cursor_id: u16,
         func_name_idx: u16,
     },
+    /// `AT`: the position (from 0) of `cursor_id`'s current row in its source. A source that
+    /// is no list (a bag, or a value read as a bag of one) has none: MISSING, or in strict
+    /// mode an error.
+    Position {
+        cursor_id: u16,
+        dst: u16,
+        strict: bool,
+    },
     GetField {
         dst: u16,
         base: u16,
         key_idx: u16,
+    },
+    /// `base[index]`: element `index` (from 0) of the list `base`. A position outside it, an
+    /// index that is no integer, or a base that is no list (a bag has no positions) is
+    /// MISSING, or in strict mode an error; a NULL or MISSING base is MISSING.
+    GetIndex {
+        dst: u16,
+        base: u16,
+        index: u16,
+        strict: bool,
     },
     StoreSlot {
         slot: SlotId,
@@ -1530,6 +1550,33 @@ impl Program {
                     .ok_or_else(|| EngineError::IllegalState("invalid key index".to_string()))?;
                 regs[*dst as usize] = value_get_field_ref(regs[*base as usize], key);
             }
+            Inst::GetIndex {
+                dst,
+                base,
+                index,
+                strict,
+            } => {
+                let (base, index) = (regs[*base as usize], regs[*index as usize]);
+                let element = match (base, index) {
+                    (ValueRef::List(items), ValueRef::I64(i)) => {
+                        usize::try_from(i).ok().and_then(|i| items.get(i).copied())
+                    }
+                    _ => None,
+                };
+                regs[*dst as usize] = match element {
+                    Some(element) => element,
+                    None if !*strict || matches!(base, ValueRef::Null | ValueRef::Missing) => {
+                        ValueRef::Missing
+                    }
+                    None => {
+                        return Err(EngineError::TypeError(format!(
+                            "no element {} in {}",
+                            crate::compare::type_name(&index),
+                            crate::compare::type_name(&base)
+                        )))
+                    }
+                };
+            }
             Inst::StoreSlot { slot, src } => {
                 regs[*slot as usize] = regs[*src as usize];
             }
@@ -1638,6 +1685,7 @@ impl Program {
             // not by eval_inst. If we reach them here, it's a bug.
             Inst::OpenCursor { .. }
             | Inst::NextRow { .. }
+            | Inst::Position { .. }
             | Inst::CloseCursor { .. }
             | Inst::Jump { .. }
             | Inst::JumpIfNotTrue { .. }
@@ -2025,6 +2073,18 @@ impl ExprCompiler<'_> {
                 });
                 Ok(dst)
             }
+            Expr::Index(base, index) => {
+                let (base, index) = (self.compile_expr(base)?, self.compile_expr(index)?);
+                let dst = self.builder.alloc_reg()?;
+                let strict = self.builder.strict;
+                self.builder.insts.push(Inst::GetIndex {
+                    dst,
+                    base,
+                    index,
+                    strict,
+                });
+                Ok(dst)
+            }
             Expr::UdfCall { name, args } => {
                 let mut arg_regs = Vec::with_capacity(args.len());
                 for arg in args {
@@ -2285,6 +2345,30 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
         self.globals?.get(db_ref).cloned()
     }
 
+    /// Apply path `components` to `base`: a key step reads an attribute, an index step an
+    /// element of a list. The planner writes `a['k']` as a key step, so a computed key
+    /// (`KeyExpr`) never reaches the VM.
+    fn path_tail(&self, base: Expr, components: &[PathComponent]) -> Result<Expr> {
+        components
+            .iter()
+            .try_fold(base, |current, component| match component {
+                PathComponent::Key(name) => Ok(Expr::GetField(
+                    current.into(),
+                    bindings_name_to_string(name),
+                )),
+                &PathComponent::Index(i) => Ok(Expr::Index(
+                    current.into(),
+                    Expr::Literal(ValueOwned::I64(i)).into(),
+                )),
+                PathComponent::IndexExpr(index) => {
+                    Ok(Expr::Index(current.into(), self.lower_expr(index)?.into()))
+                }
+                _ => Err(EngineError::UnsupportedExpr(format!(
+                    "unsupported path component: {component:?}"
+                ))),
+            })
+    }
+
     /// Lower `expr`, resolving its names to registers.
     pub fn lower_expr(&self, expr: &ValueExpr) -> Result<Expr> {
         match expr {
@@ -2338,7 +2422,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     (&**base, components.first())
                 {
                     if let Some(slot) = self.resolver.resolve_qualified(alias, field) {
-                        return path_tail(Expr::SlotRef(slot), &components[1..]);
+                        return self.path_tail(Expr::SlotRef(slot), &components[1..]);
                     }
                 }
 
@@ -2360,7 +2444,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                         .then(|| self.resolver.resolve_field(name))
                         .flatten()
                     {
-                        return path_tail(Expr::SlotRef(slot), &components[1..]);
+                        return self.path_tail(Expr::SlotRef(slot), &components[1..]);
                     }
                 }
 
@@ -2369,7 +2453,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     if is_alias {
                         if let Some(base_slot) = base_slot {
                             // We have a resolved base slot - build GetField chain
-                            return path_tail(Expr::SlotRef(base_slot), components);
+                            return self.path_tail(Expr::SlotRef(base_slot), components);
                         }
                         // is_alias=true but base_slot=None means VarRef(Local) that can't be resolved yet
                         // This can happen for table names in FROM clause - fall through to generic handling
@@ -2377,7 +2461,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 }
 
                 // Generic path handling - lower the base expression and build GetField chain
-                path_tail(self.lower_expr(base)?, components)
+                self.path_tail(self.lower_expr(base)?, components)
             }
             ValueExpr::BinaryExpr(op, left, right) => {
                 let left = self.lower_expr(left)?;
@@ -2672,6 +2756,9 @@ impl ValueOperands {
             | Inst::CoerceToTuple { dst, src, .. } => ops(Some(dst), &[src]),
             Inst::Cast { dst, from, .. } => ops(Some(dst), &[from]),
             Inst::GetField { dst, base, .. } => ops(Some(dst), &[base]),
+            Inst::GetIndex {
+                dst, base, index, ..
+            } => ops(Some(dst), &[base, index]),
             Inst::LikeMatch { dst, value, .. } => ops(Some(dst), &[value]),
             Inst::LikeDynamicMatch {
                 dst,
@@ -2724,23 +2811,6 @@ fn bindings_name_to_string(name: &BindingsName<'_>) -> String {
         BindingsName::CaseInsensitive(s) => s.to_string(),
         other => format!("{other:?}"),
     }
-}
-
-/// Apply path `components` to `base` as a `GetField` chain. The VM has no index
-/// navigation yet, so `Index`/`IndexExpr`/`KeyExpr` components are unsupported on
-/// every path, pushed-down or not.
-fn path_tail(base: Expr, components: &[PathComponent]) -> Result<Expr> {
-    components
-        .iter()
-        .try_fold(base, |current, component| match component {
-            PathComponent::Key(name) => Ok(Expr::GetField(
-                current.into(),
-                bindings_name_to_string(name),
-            )),
-            _ => Err(EngineError::UnsupportedExpr(format!(
-                "unsupported path component: {component:?}"
-            ))),
-        })
 }
 
 fn resolve_alias_info<R: SlotResolver>(

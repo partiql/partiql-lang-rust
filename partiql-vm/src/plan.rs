@@ -76,6 +76,9 @@ pub struct CursorInfo {
     /// `ScanLayout` slots relative to this base, so several cursors (one per side of a
     /// join) can each fill their own registers.
     pub slot_base: u16,
+    /// The source's rows are in an order known when the query compiles (a list), so each
+    /// has a position (`AT`). A cursor bound to a value when it opens learns it then.
+    pub ordered: bool,
 }
 
 /// Compiled query execution plan — pure bytecode.
@@ -393,6 +396,8 @@ pub struct PartiQLVM {
     hash_tables: Vec<HashTable>,
     /// Whether each cursor's data source is open, so closing is idempotent.
     source_open: Vec<bool>,
+    /// Each cursor's current row's position, if its rows are ordered.
+    positions: Vec<Position>,
     /// The scratch bank's floor in each running subquery, innermost last: `NextRow` rewinds
     /// the bank to the innermost, not past it.
     scratch_floors: Vec<ArenaMark>,
@@ -449,6 +454,7 @@ impl PartiQLVM {
             sorters,
             hash_tables,
             source_open: Vec::new(),
+            positions: Vec::new(),
             scratch_floors: Vec::new(),
         };
         vm.reset_cursor_state();
@@ -517,6 +523,15 @@ impl PartiQLVM {
     /// Forget which sources are open.
     fn reset_cursor_state(&mut self) {
         self.source_open = vec![false; self.compiled.cursors.len()];
+        self.positions = self
+            .compiled
+            .cursors
+            .iter()
+            .map(|cursor| Position {
+                ordered: cursor.ordered,
+                row: -1,
+            })
+            .collect();
         self.scratch_floors.clear();
     }
 
@@ -649,6 +664,7 @@ impl<'vm> QueryIterator<'vm> {
                         return Some(Err(e));
                     }
                     self.vm.source_open[c] = true;
+                    self.vm.positions[c].row = -1;
                 }
 
                 Inst::NextRow {
@@ -684,9 +700,28 @@ impl<'vm> QueryIterator<'vm> {
                         }
                     };
 
-                    if !has_row {
-                        self.vm.ip = *eof_target as usize;
+                    match has_row {
+                        true => self.vm.positions[c].row += 1,
+                        false => self.vm.ip = *eof_target as usize,
                     }
+                }
+
+                Inst::Position {
+                    cursor_id,
+                    dst,
+                    strict,
+                } => {
+                    let position = self.vm.positions[*cursor_id as usize];
+                    regs[*dst as usize] = match (position.ordered, strict) {
+                        (true, _) => ValueRef::I64(position.row),
+                        // A bag's elements, and a value read as a bag of one, have no position
+                        (false, false) => ValueRef::Missing,
+                        (false, true) => {
+                            return Some(Err(EngineError::StrictModeViolation(
+                                "AT over a collection that is no list".to_string(),
+                            )))
+                        }
+                    };
                 }
 
                 Inst::CloseCursor { cursor_id } => {
@@ -801,6 +836,8 @@ impl<'vm> QueryIterator<'vm> {
                         Ok(collection) => collection,
                         Err(e) => return Some(Err(e)),
                     };
+                    self.vm.positions[*cursor_id as usize].ordered =
+                        matches!(collection, ValueRef::List(_));
                     let values = match (collection, coercion) {
                         (ValueRef::Bag(items) | ValueRef::List(items), _) => {
                             items.iter().map(|item| value_ref_to_owned(*item)).collect()
@@ -1322,4 +1359,12 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
             ValueRef::Variant(copied_bytes, copied_name)
         }
     }
+}
+
+/// Where a cursor is: its current row's position (from 0), which `AT` reads if the rows are
+/// ordered.
+#[derive(Clone, Copy)]
+struct Position {
+    ordered: bool,
+    row: i64,
 }

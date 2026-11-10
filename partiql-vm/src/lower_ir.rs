@@ -165,6 +165,8 @@ pub(crate) struct ScanLoop {
     pub(crate) window: Range<SlotId>,
     /// The scan loads whole rows (rather than only the fields the query reads).
     pub(crate) whole_row: bool,
+    /// `AT`: the register each row's position is written into.
+    pub(crate) position: Option<SlotId>,
 }
 
 /// What a scan's cursor needs before `OpenCursor`.
@@ -343,6 +345,7 @@ pub(crate) fn lower(
         scan_metadata: HashMap::new(),
         inline_scans: HashMap::new(),
         sorters: Vec::new(),
+        ordered_scans: FxHashSet::default(),
         subqueries: Vec::new(),
         hash_tables: 0,
         scopes: Vec::new(),
@@ -490,6 +493,9 @@ struct Lowerer<'a> {
     inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
     /// Index = sorter_id.
     sorters: Vec<SorterMetadata>,
+    /// The scans whose rows are in an order known when the query compiles (a catalog table
+    /// that is a list, a list literal); any other's order is known when its cursor opens.
+    ordered_scans: FxHashSet<ScanId>,
     subqueries: Vec<Subquery>,
     hash_tables: u16,
     /// While lowering a subquery: the scopes of the queries around it, outermost first.
@@ -573,6 +579,7 @@ struct ScanSlots<'p> {
     cursor: u16,
     window: Range<SlotId>,
     whole_row: bool,
+    position: Option<SlotId>,
 }
 
 struct JoinLayout<'p> {
@@ -613,7 +620,12 @@ impl<'a> Lowerer<'a> {
     /// Register a cursor reading `scan_id` into the registers from `slot_base`.
     fn add_cursor(&mut self, scan_id: ScanId, slot_base: SlotId) -> Result<u16> {
         let cursor_id = count_u16(self.cursors.len(), "cursors")?;
-        self.cursors.push(CursorInfo { scan_id, slot_base });
+        let ordered = self.ordered_scans.contains(&scan_id);
+        self.cursors.push(CursorInfo {
+            scan_id,
+            slot_base,
+            ordered,
+        });
         Ok(cursor_id)
     }
 
@@ -838,6 +850,7 @@ impl<'a> Lowerer<'a> {
                 },
                 window: row..row + 1,
                 whole_row: true,
+                position: None,
             }));
         }
         let lowered = self.lower_op(graph, id, &mut CompileContext::new())?;
@@ -881,6 +894,7 @@ impl<'a> Lowerer<'a> {
             open: Open::Bound,
             window: row..row + 1,
             whole_row: true,
+            position: None,
         })))
     }
 
@@ -911,7 +925,13 @@ impl<'a> Lowerer<'a> {
             BindingsOp::Scan(scan) => {
                 let (scan_id, binding, width) = self.compile_scan(scan, ctx)?;
                 let window = self.alloc(width)?;
-                let binding = binding.shifted(window.start);
+                let mut binding = binding.shifted(window.start);
+                // `AT i`: each row's position, in a register of its own
+                let position = match scan.at_key {
+                    Some(_) => Some(self.alloc_reg()?),
+                    None => None,
+                };
+                binding.at_slot = position;
                 let slots = ScanSlots {
                     scan_id,
                     expr: &scan.expr,
@@ -919,6 +939,7 @@ impl<'a> Lowerer<'a> {
                     cursor: self.add_cursor(scan_id, window.start)?,
                     window,
                     whole_row: binding.base_row_slot.is_some(),
+                    position,
                 };
                 Ok((ResolverKind::Pipeline(binding), Layout::Scan(slots)))
             }
@@ -982,6 +1003,7 @@ impl<'a> Lowerer<'a> {
                     open,
                     window: scan.window.clone(),
                     whole_row: scan.whole_row,
+                    position: scan.position,
                 }))
             }
             Layout::Join(join) => {
@@ -1111,6 +1133,7 @@ impl<'a> Lowerer<'a> {
                     open: Open::Bound,
                     window: row..row + 1,
                     whole_row: true,
+                    position: None,
                 }),
                 sorter,
                 row: vec![row],
@@ -1247,7 +1270,7 @@ impl<'a> Lowerer<'a> {
         let dst = self.alloc_reg()?;
         let mut outputs = vec![];
         match resolver {
-            ResolverKind::Pipeline(binding) => {
+            ResolverKind::Pipeline(binding) if binding.at_slot.is_none() => {
                 let row = ValueExpr::VarRef(
                     BindingsName::CaseInsensitive(binding.scan_alias.clone().into()),
                     VarRefType::Local,
@@ -1258,19 +1281,26 @@ impl<'a> Lowerer<'a> {
                 });
                 outputs.push(Output::CoerceToTuple(dst));
             }
-            ResolverKind::Multi(bindings) => {
-                // Concatenate each binding's fields, in FROM order
-                let srcs = bindings
-                    .iter()
-                    .map(|b| {
-                        b.base_row_slot.ok_or_else(|| {
-                            EngineError::InvalidPlan(format!(
-                                "SELECT * without the whole row of {}",
-                                b.scan_alias
-                            ))
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+            ResolverKind::Pipeline(_) | ResolverKind::Multi(_) => {
+                let bindings = match resolver {
+                    ResolverKind::Multi(bindings) => bindings.as_slice(),
+                    _ => std::slice::from_ref(match resolver {
+                        ResolverKind::Pipeline(binding) => binding,
+                        _ => unreachable!("matched above"),
+                    }),
+                };
+                // Concatenate each variable's fields, in FROM order: a binding's, then its AT
+                // variable's (a position is no tuple, so it is `_1`, as for any such value)
+                let mut srcs = Vec::with_capacity(bindings.len());
+                for b in bindings {
+                    srcs.push(b.base_row_slot.ok_or_else(|| {
+                        EngineError::InvalidPlan(format!(
+                            "SELECT * without the whole row of {}",
+                            b.scan_alias
+                        ))
+                    })?);
+                    srcs.extend(b.at_slot);
+                }
                 outputs.push(Output::ConcatTuples { dst, srcs });
             }
             ResolverKind::Empty => {
@@ -1379,6 +1409,7 @@ impl<'a> Lowerer<'a> {
             base_row_slot: None,
             scan_alias: String::new(),
             at_alias: None,
+            at_slot: None,
             table_name: None,
             column_slots,
             group_output: true,
@@ -1463,14 +1494,17 @@ impl<'a> Lowerer<'a> {
         ctx: &CompileContext,
     ) -> Result<(ScanId, PipelineSlotResolver, usize)> {
         // Literal collections are inlined at compile time
-        if let Some(values) = try_expr_to_inline_values(&scan.expr) {
-            if self.mode == EvaluationMode::Strict && !is_collection_expr(&scan.expr) {
+        if let Some((values, kind)) = try_expr_to_inline_values(&scan.expr) {
+            if self.mode == EvaluationMode::Strict && kind == InlineKind::Value {
                 return Err(EngineError::StrictModeViolation(
                     "FROM clause requires collection value".to_string(),
                 ));
             }
             let scan_id = self.whole_value_scan(ScanKind::Bound);
             self.inline_scans.insert(scan_id, values);
+            if kind == InlineKind::List {
+                self.ordered_scans.insert(scan_id);
+            }
             return Ok((scan_id, whole_row_binding(scan), 1));
         }
 
@@ -1527,6 +1561,9 @@ impl<'a> Lowerer<'a> {
         self.scan_metadata
             .insert(scan_id, ScanMetadata { layout, object_id });
         self.scans.insert(scan_id, ScanKind::Bound);
+        if reader_factory.is_ordered() {
+            self.ordered_scans.insert(scan_id);
+        }
         Ok((scan_id, binding, width))
     }
 
@@ -1624,6 +1661,7 @@ fn pushdown(
         base_row_slot: None,
         scan_alias: scan.as_key.clone(),
         at_alias: scan.at_key.clone(),
+        at_slot: None,
         table_name,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1655,6 +1693,7 @@ fn whole_row_binding(scan: &Scan) -> PipelineSlotResolver {
         base_row_slot: Some(0),
         scan_alias: scan.as_key.clone(),
         at_alias: scan.at_key.clone(),
+        at_slot: None,
         table_name: None,
         column_slots: FxHashMap::default(),
         group_output: false,
@@ -1688,13 +1727,6 @@ fn group_as_row(resolver: &ResolverKind) -> Result<Expr> {
     };
     let (mut attrs, mut values) = (vec![], vec![]);
     for binding in bindings {
-        // GROUP AS holds every FROM variable, so one the VM does not bind is an error rather
-        // than left out
-        if let Some(at) = &binding.at_alias {
-            return Err(EngineError::UnsupportedExpr(format!(
-                "GROUP AS over the AT variable {at}"
-            )));
-        }
         // GROUP AS reads every variable's whole value (`extract_fields`)
         let row = binding.base_row_slot.ok_or_else(|| {
             EngineError::InvalidPlan(format!(
@@ -1706,6 +1738,14 @@ fn group_as_row(resolver: &ResolverKind) -> Result<Expr> {
             binding.scan_alias.clone(),
         )));
         values.push(Expr::SlotRef(row));
+        // ... and its `AT` variable
+        if let Some(at) = &binding.at_alias {
+            let slot = binding.at_slot.ok_or_else(|| {
+                EngineError::InvalidPlan(format!("the AT variable {at} without a register"))
+            })?;
+            attrs.push(Expr::Literal(ValueOwned::String(at.clone())));
+            values.push(Expr::SlotRef(slot));
+        }
     }
     Ok(Expr::Tuple { attrs, values })
 }
@@ -1885,14 +1925,14 @@ impl SlotResolver for ResolverKind {
             ResolverKind::Pipeline(r) => r.resolve_var(name, scope),
             // A global (catalog) name never means a FROM binding of the same name
             ResolverKind::Multi(_) if scope == VarRefType::Global => None,
-            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
+            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.resolve_alias(name)),
             ResolverKind::Empty => None,
         }
     }
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_alias(name),
-            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
+            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.resolve_alias(name)),
             ResolverKind::Empty => None,
         }
     }
@@ -1971,7 +2011,7 @@ fn binding_for<'r>(
     match first_two(&|r| bindings_name_matches(name, &r.scan_alias)) {
         (Some(r), None) => Some(r),
         (Some(_), Some(_)) => None,
-        (None, _) => match first_two(&|r| r.matches_alias_or_table(name)) {
+        (None, _) => match first_two(&|r| r.matches_at(name) || r.matches_alias_or_table(name)) {
             (Some(r), None) => Some(r),
             _ => None,
         },
@@ -2051,8 +2091,9 @@ impl SlotResolver for ScopedResolver<'_> {
 struct PipelineSlotResolver {
     base_row_slot: Option<SlotId>,
     scan_alias: String,
-    /// The scan's `AT` variable, which the VM does not bind yet.
+    /// The scan's `AT` variable, and the register holding each row's position.
     at_alias: Option<String>,
+    at_slot: Option<SlotId>,
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
     /// GROUP BY's output instead: its keys and aggregates by name, with no alias.
@@ -2060,6 +2101,13 @@ struct PipelineSlotResolver {
 }
 
 impl PipelineSlotResolver {
+    /// Whether `name` is the binding's `AT` variable.
+    fn matches_at(&self, name: &BindingsName<'_>) -> bool {
+        self.at_alias
+            .as_ref()
+            .is_some_and(|at| bindings_name_matches(name, at))
+    }
+
     fn matches_alias_or_table(&self, name: &BindingsName<'_>) -> bool {
         if bindings_name_matches(name, &self.scan_alias) {
             return true;
@@ -2093,6 +2141,7 @@ impl PipelineSlotResolver {
         if whole_row {
             regs.extend(self.base_row_slot);
         }
+        regs.extend(self.at_slot);
         regs
     }
 
@@ -2112,7 +2161,8 @@ impl SlotResolver for PipelineSlotResolver {
         alias: &BindingsName<'_>,
         field: &BindingsName<'_>,
     ) -> Option<SlotId> {
-        if self.matches_alias_or_table(alias) {
+        // An AT variable is a position, with no pushed-down fields
+        if !self.matches_at(alias) && self.matches_alias_or_table(alias) {
             self.resolve_field(field)
         } else {
             None
@@ -2120,14 +2170,16 @@ impl SlotResolver for PipelineSlotResolver {
     }
 
     fn resolve_var(&self, name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
-        if self.matches_alias_or_table(name) {
-            return self.base_row_slot;
+        if self.matches_at(name) || self.matches_alias_or_table(name) {
+            return self.resolve_alias(name);
         }
         self.resolve_field(name)
     }
 
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
-        if self.matches_alias_or_table(name) {
+        if self.matches_at(name) {
+            self.at_slot
+        } else if self.matches_alias_or_table(name) {
             self.base_row_slot
         } else {
             None
@@ -2147,7 +2199,7 @@ impl SlotResolver for PipelineSlotResolver {
     }
 
     fn is_alias(&self, name: &BindingsName<'_>) -> bool {
-        self.matches_alias_or_table(name)
+        self.matches_at(name) || self.matches_alias_or_table(name)
     }
 }
 
@@ -2182,75 +2234,66 @@ fn extract_table_name(expr: &ValueExpr) -> Option<String> {
     }
 }
 
-/// Try to convert a scan expression to inline values.
-/// Returns Some(values) for literal lists/bags/structs, None otherwise.
-fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
+/// What a literal FROM source holds: a list's or bag's elements, or one value scanned as
+/// `<<value>>`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InlineKind {
+    List,
+    Bag,
+    Value,
+}
+
+/// Try to convert a scan expression to inline values: the rows of a literal list, bag or
+/// struct, and which it is. None for any other expression.
+fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<(Vec<ValueOwned>, InlineKind)> {
+    let all = |values: Vec<ValueOwned>, len: usize| (values.len() == len).then_some(values);
     match expr {
         ValueExpr::Lit(lit) => match lit.as_ref() {
             partiql_logical::Lit::List(elements) | partiql_logical::Lit::Bag(elements) => {
-                let values: Vec<ValueOwned> = elements
+                let values = elements
                     .iter()
                     .filter_map(|e| lit_to_value(e).ok())
                     .collect();
-                if values.len() == elements.len() {
-                    Some(values)
-                } else {
-                    None
-                }
+                let kind = match lit.as_ref() {
+                    partiql_logical::Lit::List(_) => InlineKind::List,
+                    _ => InlineKind::Bag,
+                };
+                Some((all(values, elements.len())?, kind))
             }
-            partiql_logical::Lit::Struct(_) => lit_to_value(lit).ok().map(|val| vec![val]),
+            partiql_logical::Lit::Struct(_) => lit_to_value(lit)
+                .ok()
+                .map(|val| (vec![val], InlineKind::Value)),
             // An Ion list literal is a collection of rows
             partiql_logical::Lit::Variant(bytes, _) => match variant::decode_owned(bytes).ok()? {
-                ValueOwned::List(items) | ValueOwned::Bag(items) => Some(items),
-                value => Some(vec![value]),
+                ValueOwned::List(items) => Some((items, InlineKind::List)),
+                ValueOwned::Bag(items) => Some((items, InlineKind::Bag)),
+                value => Some((vec![value], InlineKind::Value)),
             },
-            _ => lit_to_value(lit).ok().map(|val| vec![val]),
+            _ => lit_to_value(lit)
+                .ok()
+                .map(|val| (vec![val], InlineKind::Value)),
         },
         ValueExpr::ListExpr(list) => {
-            let values: Vec<ValueOwned> = list
+            let values = list
                 .elements
                 .iter()
                 .filter_map(try_expr_to_single_value)
                 .collect();
-            if values.len() == list.elements.len() {
-                Some(values)
-            } else {
-                None
-            }
+            Some((all(values, list.elements.len())?, InlineKind::List))
         }
         ValueExpr::BagExpr(bag) => {
-            let values: Vec<ValueOwned> = bag
+            let values = bag
                 .elements
                 .iter()
                 .filter_map(try_expr_to_single_value)
                 .collect();
-            if values.len() == bag.elements.len() {
-                Some(values)
-            } else {
-                None
-            }
+            Some((all(values, bag.elements.len())?, InlineKind::Bag))
         }
         ValueExpr::TupleExpr(_) => {
             // A tuple expression in FROM — treat as a single row
-            try_expr_to_single_value(expr).map(|val| vec![val])
+            try_expr_to_single_value(expr).map(|val| (vec![val], InlineKind::Value))
         }
         _ => None,
-    }
-}
-
-/// Whether a literal FROM source is a collection (rather than a value scanned as `<<value>>`).
-fn is_collection_expr(expr: &ValueExpr) -> bool {
-    match expr {
-        ValueExpr::Lit(lit) => match lit.as_ref() {
-            partiql_logical::Lit::List(_) | partiql_logical::Lit::Bag(_) => true,
-            partiql_logical::Lit::Variant(bytes, _) => matches!(
-                variant::decode_owned(bytes),
-                Ok(ValueOwned::List(_) | ValueOwned::Bag(_))
-            ),
-            _ => false,
-        },
-        ValueExpr::ListExpr(_) | ValueExpr::BagExpr(_) => true,
-        _ => false,
     }
 }
 
@@ -2352,6 +2395,7 @@ mod tests {
             base_row_slot: whole_row,
             scan_alias: alias.to_string(),
             at_alias: None,
+            at_slot: None,
             table_name: None,
             column_slots: fields.iter().map(|&(f, s)| (f.to_string(), s)).collect(),
             group_output: false,

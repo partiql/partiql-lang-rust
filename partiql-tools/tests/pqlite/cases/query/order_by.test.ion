@@ -213,7 +213,7 @@
     ORDER BY b.y NULLS FIRST
   ''',
   expect: [
-    { x: 1, y: $missing::null },
+    { x: 1 },
     { x: 2, y: "b" }
   ]
 }

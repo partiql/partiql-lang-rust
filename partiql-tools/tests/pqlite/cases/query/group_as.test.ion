@@ -94,15 +94,14 @@
   expect: $bag::[]
 }
 
-// GROUP AS holds every FROM variable, so one bound by AT (not supported yet) is an error, not
-// left out
+// GROUP AS holds every FROM variable, its AT variable too
 {
   sql: '''
     SELECT k, g
-    FROM [ {'k': 1} ] AS t AT i
+    FROM [ {'k': 1}, {'k': 1} ] AS t AT i
     GROUP BY t.k AS k GROUP AS g
   ''',
-  expect: { error: "AT variable" }
+  expect: $bag::[ { k: 1, g: $bag::[ { t: { k: 1 }, i: 0 }, { t: { k: 1 }, i: 1 } ] } ]
 }
 
 {
