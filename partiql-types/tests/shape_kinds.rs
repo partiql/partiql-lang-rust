@@ -3,8 +3,8 @@
 use indexmap::IndexSet;
 use partiql_types::{
     type_int32, type_string, type_struct, IntervalFamily, IntervalQualifier, IntervalType, MapType,
-    PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, Static, StaticCategory,
-    StructConstraint, StructField, StructType, TypeParams,
+    PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeResultError, Static,
+    StaticCategory, StructConstraint, StructField, StructType, TypeParams, VariantType,
 };
 use std::collections::HashSet;
 
@@ -20,15 +20,15 @@ fn new_scalar_kinds() -> Vec<(Static, &'static str)> {
         (Static::TimestampTz(6), "TimestampTz(6)"),
         (
             Static::Interval(IntervalType::new(IntervalQualifier::DayToSecond, 2, 6)),
-            "Interval(DayToSecond, 2, 6)",
+            "Interval(Day(2) To Second(6))",
         ),
         (
             Static::Interval(IntervalType::new(IntervalQualifier::YearToMonth, 2, 0)),
-            "Interval(YearToMonth, 2, 0)",
+            "Interval(Year(2) To Month)",
         ),
         (Static::Null, "Null"),
         (Static::Missing, "Missing"),
-        (Static::Variant("ion".to_string()), "Variant(ion)"),
+        (Static::Variant(VariantType::new("ion")), "Variant(ion)"),
     ]
 }
 
@@ -47,6 +47,9 @@ fn each_new_scalar_kind_constructs_displays_and_is_scalar() {
         assert!(st.params().is_default());
         assert!(matches!(kind.category(), StaticCategory::Scalar(k) if k == &kind));
 
+        if matches!(kind, Static::Null | Static::Missing) {
+            continue; // always nullable, see `absent_value_types_are_always_nullable`
+        }
         let not_null = bld.new_non_nullable_static(kind.clone());
         assert_eq!(format!("{not_null}"), format!("NOT NULL {display}"));
         assert_ne!(shape, not_null);
@@ -75,10 +78,6 @@ fn new_kinds_are_pairwise_distinct_and_distinct_from_existing_kinds() {
     );
     // Parameters take part in equality.
     assert_ne!(Static::Time(3), Static::Time(6));
-    assert_ne!(
-        Static::Variant("ion".into()),
-        Static::Variant("json".into())
-    );
     assert_ne!(Static::Null, Static::Missing);
 }
 
@@ -135,7 +134,7 @@ fn interval_qualifiers_belong_to_one_family() {
 fn map_is_a_non_scalar_container() {
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let (k, v) = (type_string!(bld), type_int32!(bld));
-    let map = bld.new_map(k.clone(), v.clone());
+    let map = bld.new_map(k.clone(), v.clone()).unwrap();
     assert_eq!(format!("{map}"), "Map<String, Int32>");
 
     let st = map.expect_static().unwrap();
@@ -148,8 +147,8 @@ fn map_is_a_non_scalar_container() {
     assert_eq!(m.key_type(), &k);
     assert_eq!(m.value_type(), &v);
     assert!(matches!(st.ty().category(), StaticCategory::Map(c) if c == m));
-    assert_eq!(m, &MapType::new(k.clone(), v.clone()));
-    assert_ne!(m, &MapType::new(v, k));
+    assert_eq!(m, &MapType::new(k.clone(), v.clone()).unwrap());
+    assert_ne!(m, &MapType::new(v, k).unwrap());
 }
 
 #[test]
@@ -162,7 +161,7 @@ fn row_keeps_order_and_duplicate_names() {
         StructField::new("a", a2),
         StructField::new("b", b),
     ]);
-    assert_eq!(format!("{row}"), "{a: Int32, a: Int32, b: String}");
+    assert_eq!(format!("{row}"), "Row{a: Int32, a: Int32, b: String}");
     let st = row.expect_struct().unwrap();
     assert!(st.is_row());
     assert!(st.is_closed());
@@ -302,4 +301,152 @@ fn no_id_builder_makes_nested_new_kinds_structurally_equal() {
     let (d1, d2) = (auto.new_static(Static::Date), auto.new_static(Static::Date));
     assert_ne!(d1, d2);
     assert!(matches!(d1, PartiqlShape::Static(_)));
+}
+
+#[test]
+fn map_key_must_not_be_dynamic() {
+    // As partiql-lang-kotlin's `PTypeMap`: "MAP key type must not be DYNAMIC".
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let err = MapType::new(PartiqlShape::Dynamic, type_int32!(bld)).expect_err("dynamic key");
+    assert!(
+        matches!(&err, ShapeResultError::UnexpectedType(m) if m == "MAP key type must not be DYNAMIC"),
+        "{err:?}"
+    );
+    assert!(bld
+        .new_map(PartiqlShape::Dynamic, PartiqlShape::Dynamic)
+        .is_err());
+    // A dynamic value, or a key that is a union, is fine.
+    let k = type_string!(bld);
+    assert!(bld.new_map(k, PartiqlShape::Dynamic).is_ok());
+    let (a, b) = (type_string!(bld), type_int32!(bld));
+    let union = bld.any_of([a, b]);
+    assert!(bld.new_map(union, PartiqlShape::Dynamic).is_ok());
+}
+
+#[test]
+fn variant_equality_ignores_the_encoding() {
+    // As partiql-lang-kotlin, where VARIANT compares only its type code.
+    let (ion, json) = (VariantType::new("ion"), VariantType::new("json"));
+    assert_eq!(ion, json);
+    assert_eq!(Static::Variant(ion.clone()), Static::Variant(json.clone()));
+    let set: HashSet<_> = [Static::Variant(ion.clone()), Static::Variant(json)].into();
+    assert_eq!(set.len(), 1);
+    assert_eq!(ion.encoding(), "ion");
+    assert_eq!(format!("{}", Static::Variant(ion)), "Variant(ion)");
+    assert_ne!(Static::Variant(VariantType::new("ion")), Static::String);
+}
+
+#[test]
+fn rows_have_their_own_display_and_set_based_structs_are_not_rows() {
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let a = type_int32!(bld);
+    let set_based = StructType::new(IndexSet::from([
+        StructConstraint::Fields(IndexSet::from([StructField::new("a", a.clone())])),
+        StructConstraint::Open(false),
+        StructConstraint::Ordered(true),
+    ]));
+    assert!(!set_based.is_row());
+    assert_eq!(format!("{set_based}"), "{a: Int32}");
+    // A closed, ordered struct with no field constraint is not a row either.
+    let no_fields = StructType::new(IndexSet::from([
+        StructConstraint::Open(false),
+        StructConstraint::Ordered(true),
+    ]));
+    assert!(!no_fields.is_row());
+    let row = StructType::new_row([StructField::new("a", a)]);
+    assert_eq!(format!("{row}"), "Row{a: Int32}");
+    assert_eq!(format!("{}", StructType::new_row([])), "Row{}");
+}
+
+#[test]
+fn equal_rows_hash_equally_whatever_the_constraint_order() {
+    use std::hash::{BuildHasher, RandomState};
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let fields = vec![
+        StructField::new("a", type_int32!(bld)),
+        StructField::new("a", type_string!(bld)),
+    ];
+    let row = StructType::new_row(fields.clone());
+    let reordered = StructType::new(IndexSet::from([
+        StructConstraint::FieldList(fields),
+        StructConstraint::DuplicateAttrs(true),
+        StructConstraint::Ordered(true),
+        StructConstraint::Open(false),
+    ]));
+    assert_eq!(row, reordered);
+    let state = RandomState::new();
+    assert_eq!(state.hash_one(&row), state.hash_one(&reordered));
+    let set: HashSet<_> = [row, reordered].into();
+    assert_eq!(set.len(), 1);
+}
+
+#[test]
+fn absent_value_types_are_always_nullable() {
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    for kind in [Static::Null, Static::Missing] {
+        let shape = bld.new_non_nullable_static(kind.clone());
+        assert!(shape.expect_static().unwrap().is_nullable());
+        assert_eq!(format!("{shape}"), format!("{kind}"));
+        let nullable = bld.new_static(kind.clone());
+        assert_eq!(shape, nullable);
+        let copy = bld.as_non_nullable(&nullable).unwrap();
+        assert!(copy.expect_static().unwrap().is_nullable());
+        assert!(kind.is_scalar());
+    }
+    // Other kinds are unaffected.
+    let d = bld.new_non_nullable_static(Static::Date);
+    assert!(d.expect_static().unwrap().is_not_nullable());
+}
+
+#[test]
+fn flags_are_kept_only_on_default_payloads() {
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let length = TypeParams::default().with_unspecified_length(true);
+    let kept = bld.new_static_with_params(Static::StringVarying(1), length);
+    assert!(kept.expect_static().unwrap().params().unspecified_length);
+    let cleared = bld.new_static_with_params(Static::StringVarying(50), length);
+    assert!(cleared.expect_static().unwrap().params().is_default());
+    // partiql-lang-kotlin's planner defaults: BLOB/CLOB i32::MAX, TIME 0, TIMESTAMP 6.
+    let blob = bld.new_static_with_params(Static::Blob(i32::MAX as usize), length);
+    assert!(blob.expect_static().unwrap().params().unspecified_length);
+    let blob_1 = bld.new_static_with_params(Static::Blob(1), length);
+    assert!(blob_1.expect_static().unwrap().params().is_default());
+    let precision = TypeParams::default().with_unspecified_precision(true);
+    for (kind, kept) in [
+        (Static::Time(0), true),
+        (Static::Time(6), false),
+        (Static::TimeTz(0), true),
+        (Static::Timestamp(6), true),
+        (Static::Timestamp(3), false),
+        (Static::TimestampTz(6), true),
+        (Static::DecimalP(38, 2), true),
+        (Static::NumericP(10, 0), false),
+    ] {
+        let shape = bld.new_static_with_params(kind.clone(), precision);
+        assert_eq!(
+            shape
+                .expect_static()
+                .unwrap()
+                .params()
+                .unspecified_precision,
+            kept,
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn interval_display_is_sql_like() {
+    use IntervalQualifier::*;
+    let cases = [
+        (Year, 2, 0, "Interval(Year(2))"),
+        (Month, 3, 6, "Interval(Month(3))"),
+        (Second, 2, 6, "Interval(Second(2,6))"),
+        (DayToHour, 2, 0, "Interval(Day(2) To Hour)"),
+        (HourToSecond, 2, 3, "Interval(Hour(2) To Second(3))"),
+        (MinuteToSecond, 1, 0, "Interval(Minute(1) To Second(0))"),
+    ];
+    for (q, p, fp, text) in cases {
+        assert_eq!(format!("{}", IntervalType::new(q, p, fp)), text);
+    }
 }
