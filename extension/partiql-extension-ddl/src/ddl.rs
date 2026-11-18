@@ -1,6 +1,7 @@
 use miette::Diagnostic;
 use partiql_types::{
-    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, Static, StaticType, StructType,
+    AnyOf, ArrayType, BagType, IntervalQualifier, IntervalType, MapType, PartiqlShape,
+    ShapeResultError, Static, StaticType, StructType, TypeParams,
 };
 use std::fmt::{Display, Formatter};
 use std::string::ToString;
@@ -115,16 +116,44 @@ impl PartiqlBasicDdlEncoder {
             Static::Int64 => out.push_str("INT8"),
             Static::Bool => out.push_str("BOOL"),
             Static::Decimal => out.push_str("DECIMAL"),
-            Static::DecimalP(p, s) => out.push_str(&format!("DECIMAL({p}, {s})")),
+            Static::DecimalP(p, s) => {
+                out.push_str(&with_precision_scale("DECIMAL", *p, *s, ty.params()))
+            }
             Static::DateTime => out.push_str("TIMESTAMP"),
             Static::Float32 => out.push_str("REAL"),
             Static::Float64 => out.push_str("DOUBLE"),
             Static::String => out.push_str("VARCHAR"),
+            Static::StringFixed(n) => out.push_str(&with_length("CHAR", *n, ty.params())),
+            Static::StringVarying(n) => out.push_str(&with_length("VARCHAR", *n, ty.params())),
+            Static::NumericP(p, s) => {
+                out.push_str(&with_precision_scale("NUMERIC", *p, *s, ty.params()))
+            }
+            Static::Blob(n) => out.push_str(&with_length("BLOB", *n, ty.params())),
+            Static::Clob(n) => out.push_str(&with_length("CLOB", *n, ty.params())),
+            Static::Date => out.push_str("DATE"),
+            Static::Time(p) => out.push_str(&with_precision("TIME", *p, ty.params())),
+            Static::TimeTz(p) => {
+                out.push_str(&with_precision("TIME", *p, ty.params()));
+                out.push_str(" WITH TIME ZONE");
+            }
+            Static::Timestamp(p) => out.push_str(&with_precision("TIMESTAMP", *p, ty.params())),
+            Static::TimestampTz(p) => {
+                out.push_str(&with_precision("TIMESTAMP", *p, ty.params()));
+                out.push_str(" WITH TIME ZONE");
+            }
+            Static::Interval(i) => out.push_str(&write_interval(i, ty.params())?),
+            Static::Variant(encoding) => {
+                out.push_str(&format!("VARIANT('{}')", checked_text(encoding, '\'')?))
+            }
             Static::Struct(s) => out.push_str(&self.write_struct(s)?),
             Static::Bag(b) => out.push_str(&self.write_type_bag(b)?),
             Static::Array(a) => out.push_str(&self.write_type_array(a)?),
-            // non-exhaustive catch-all
-            _ => todo!("handle type for {}", ty),
+            Static::Map(m) => out.push_str(&self.write_type_map(m)?),
+            // Also `Null` and `Missing`, which have no DDL form, and `Graph`; plus the
+            // non-exhaustive catch-all.
+            _ => Err(ShapeEncodingError::UnsupportedEncoding(format!(
+                "`{ty}` is unsupported"
+            )))?,
         }
 
         if !ty.is_nullable() {
@@ -145,12 +174,22 @@ impl PartiqlBasicDdlEncoder {
         Ok(format!("ARRAY<{}>", self.write_shape(arr.element_type())?))
     }
 
+    fn write_type_map(&self, map: &MapType) -> ShapeDdlEncodeResult<String> {
+        Ok(format!(
+            "MAP<{},{}>",
+            self.write_shape(map.key_type())?,
+            self.write_shape(map.value_type())?
+        ))
+    }
+
+    // Duplicate names are allowed in a nested struct type (a row may have them); only table
+    // columns must be unique (see `ddl`).
     fn write_struct(&self, strct: &StructType) -> ShapeDdlEncodeResult<String> {
         let mut struct_out = String::from("STRUCT<");
 
         let mut fields = strct.fields().peekable();
         while let Some(field) = fields.next() {
-            struct_out.push_str(&format!("\"{}\": ", field.name()));
+            struct_out.push_str(&format!("{}: ", quoted_identifier(field.name())?));
             struct_out.push_str(&self.write_shape(field.ty())?);
             if fields.peek().is_some() {
                 struct_out.push(',');
@@ -183,6 +222,103 @@ impl PartiqlBasicDdlEncoder {
     }
 }
 
+/// A delimited identifier: `name` in double quotes.
+fn quoted_identifier(name: &str) -> ShapeDdlEncodeResult<String> {
+    Ok(format!("\"{}\"", checked_text(name, '"')?))
+}
+
+/// `text` unchanged, or an error if it holds `quote`, a backslash or a control character.
+///
+/// SQL escapes a quote by doubling it while PartiQL's lexer uses backslash escapes, so no
+/// escaping reads back the same under both; such text is rejected rather than risk the output
+/// being read as different (e.g. extra) columns.
+fn checked_text(text: &str, quote: char) -> ShapeDdlEncodeResult<&str> {
+    if text
+        .chars()
+        .any(|c| c == quote || c == '\\' || c.is_control())
+    {
+        Err(ShapeEncodingError::UnsupportedEncoding(format!(
+            "{text:?} contains a quote, backslash or control character"
+        )))
+    } else {
+        Ok(text)
+    }
+}
+
+/// `NAME(n)`, or `NAME` when the length was not specified.
+fn with_length(name: &str, n: usize, params: &TypeParams) -> String {
+    if params.unspecified_length {
+        name.to_string()
+    } else {
+        format!("{name}({n})")
+    }
+}
+
+/// `NAME(p)`, or `NAME` when the precision was not specified.
+fn with_precision(name: &str, p: usize, params: &TypeParams) -> String {
+    if params.unspecified_precision {
+        name.to_string()
+    } else {
+        format!("{name}({p})")
+    }
+}
+
+/// `NAME(p, s)`, `NAME(p)` when the scale was not specified, or `NAME` when neither was. A
+/// specified scale cannot be written without a precision, so then both are written.
+fn with_precision_scale(name: &str, p: usize, s: usize, params: &TypeParams) -> String {
+    match (params.unspecified_precision, params.unspecified_scale) {
+        (true, true) => name.to_string(),
+        (false, true) => format!("{name}({p})"),
+        (_, false) => format!("{name}({p}, {s})"),
+    }
+}
+
+/// `INTERVAL <qualifier>` in SQL syntax, e.g. `INTERVAL DAY(2) TO SECOND(6)`.
+fn write_interval(i: &IntervalType, params: &TypeParams) -> ShapeDdlEncodeResult<String> {
+    let lead = |name: &str| {
+        if params.unspecified_precision {
+            name.to_string()
+        } else {
+            format!("{name}({})", i.precision())
+        }
+    };
+    let fraction = || {
+        if params.unspecified_fractional_precision {
+            "SECOND".to_string()
+        } else {
+            format!("SECOND({})", i.fractional_precision())
+        }
+    };
+    let qualifier = match i.qualifier() {
+        IntervalQualifier::Year => lead("YEAR"),
+        IntervalQualifier::Month => lead("MONTH"),
+        IntervalQualifier::YearToMonth => format!("{} TO MONTH", lead("YEAR")),
+        IntervalQualifier::Day => lead("DAY"),
+        IntervalQualifier::Hour => lead("HOUR"),
+        IntervalQualifier::Minute => lead("MINUTE"),
+        IntervalQualifier::Second => match (
+            params.unspecified_precision,
+            params.unspecified_fractional_precision,
+        ) {
+            // A specified fractional precision cannot be written without the leading one.
+            (true, true) => "SECOND".to_string(),
+            (false, true) => format!("SECOND({})", i.precision()),
+            (_, false) => format!("SECOND({}, {})", i.precision(), i.fractional_precision()),
+        },
+        IntervalQualifier::DayToHour => format!("{} TO HOUR", lead("DAY")),
+        IntervalQualifier::DayToMinute => format!("{} TO MINUTE", lead("DAY")),
+        IntervalQualifier::DayToSecond => format!("{} TO {}", lead("DAY"), fraction()),
+        IntervalQualifier::HourToMinute => format!("{} TO MINUTE", lead("HOUR")),
+        IntervalQualifier::HourToSecond => format!("{} TO {}", lead("HOUR"), fraction()),
+        IntervalQualifier::MinuteToSecond => format!("{} TO {}", lead("MINUTE"), fraction()),
+        // non-exhaustive catch-all
+        q => Err(ShapeEncodingError::UnsupportedEncoding(format!(
+            "interval qualifier `{q:?}` is unsupported"
+        )))?,
+    };
+    Ok(format!("INTERVAL {qualifier}"))
+}
+
 impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
     type Output = String;
 
@@ -192,9 +328,16 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
 
         if let Static::Bag(type_bag) = ty.ty() {
             let s = type_bag.element_type().expect_struct()?;
+            let mut names = std::collections::HashSet::new();
             let mut fields = s.fields().peekable();
             while let Some(field) = fields.next() {
-                output.push_str(&format!("\"{}\" ", field.name()));
+                if !names.insert(field.name()) {
+                    Err(ShapeEncodingError::UnsupportedEncoding(format!(
+                        "duplicate column name {:?}",
+                        field.name()
+                    )))?;
+                }
+                output.push_str(&format!("{} ", quoted_identifier(field.name())?));
 
                 if field.is_optional() {
                     output.push_str("OPTIONAL ");

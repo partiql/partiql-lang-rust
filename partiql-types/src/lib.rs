@@ -318,12 +318,14 @@ impl PartiqlShape {
             id,
             ty: Static::Bool,
             nullable: n,
+            ..
         }) = self
         {
             Ok(StaticType {
                 id: *id,
                 ty: Static::Bool,
                 nullable: *n,
+                params: TypeParams::default(),
             })
         } else {
             Err(ShapeResultError::UnexpectedType(format!("{self}")))
@@ -425,6 +427,7 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
             id,
             ty,
             nullable: true,
+            params: TypeParams::default(),
         })
     }
 
@@ -435,7 +438,38 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
             id,
             ty,
             nullable: false,
+            params: TypeParams::default(),
         })
+    }
+
+    /// Creates a nullable static type and records in `params` which of `ty`'s parameters were
+    /// left unspecified by the user (e.g. `VARCHAR` rather than `VARCHAR(1)`). `ty` still carries
+    /// the concrete (default) parameter values.
+    #[inline]
+    pub fn new_static_with_params(&mut self, ty: Static, params: TypeParams) -> PartiqlShape {
+        let id = self.id_gen.next_id();
+        PartiqlShape::Static(StaticType {
+            id,
+            ty,
+            nullable: true,
+            params,
+        })
+    }
+
+    /// Creates a closed, ordered struct whose fields keep their declaration order and any
+    /// duplicate names (see [`StructType::new_row`]).
+    #[inline]
+    pub fn new_row<I>(&mut self, fields: I) -> PartiqlShape
+    where
+        I: IntoIterator<Item = StructField>,
+    {
+        self.new_struct(StructType::new_row(fields))
+    }
+
+    /// Creates a nullable map type with the given key and value shapes.
+    #[inline]
+    pub fn new_map(&mut self, key: PartiqlShape, value: PartiqlShape) -> PartiqlShape {
+        self.new_static(Static::Map(MapType::new(key, value)))
     }
 
     #[inline]
@@ -590,7 +624,13 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
     #[inline]
     pub fn as_non_nullable(&mut self, shape: &PartiqlShape) -> Option<PartiqlShape> {
         if let PartiqlShape::Static(stype) = shape {
-            Some(self.new_non_nullable_static(stype.ty.clone()))
+            let id = self.id_gen.next_id();
+            Some(PartiqlShape::Static(StaticType {
+                id,
+                ty: stype.ty.clone(),
+                nullable: false,
+                params: stype.params,
+            }))
         } else {
             None
         }
@@ -682,11 +722,92 @@ impl FromIterator<PartiqlShape> for AnyOf {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Educe, Clone, Eq)]
+#[educe(PartialEq, Hash)]
 pub struct StaticType {
     id: NodeId,
     ty: Static,
     nullable: bool,
+    /// Which of `ty`'s parameters the user left unspecified. Like PLK's PType metas, these do
+    /// not take part in equality or hashing.
+    #[educe(PartialEq(ignore), Hash(ignore))]
+    params: TypeParams,
+}
+
+/// Records which parameters of a parameterized type were not written by the user, so that a
+/// consumer can tell `VARCHAR` from `VARCHAR(1)` although both carry length 1.
+///
+/// The [`Static`] payload always carries the concrete (default) values; these flags are
+/// metadata only and are ignored by [`StaticType`]'s `PartialEq` and `Hash`. A consequence is that
+/// collections that de-duplicate shapes (e.g. [`AnyOf`] or a set of [`StructField`]s) treat
+/// `VARCHAR` and `VARCHAR(1)` as the same shape and keep whichever was inserted first.
+///
+/// A set flag means the payload holds the default for that parameter (e.g. length 1 for `VARCHAR`,
+/// scale 0 for `DECIMAL(p)`). This is not checked; consumers such as DDL encoders rely on it and
+/// omit the parameter when its flag is set.
+///
+/// Build one from [`TypeParams::default`] with the `with_*` methods; more flags may be added.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub struct TypeParams {
+    /// The length of `CHAR(n)`, `VARCHAR(n)`, `BLOB(n)` or `CLOB(n)` was not specified.
+    pub unspecified_length: bool,
+    /// The precision of a decimal, numeric, time, timestamp or interval type was not specified.
+    pub unspecified_precision: bool,
+    /// The scale of `DECIMAL(p,s)` or `NUMERIC(p,s)` was not specified.
+    pub unspecified_scale: bool,
+    /// The fractional seconds precision of an interval type was not specified.
+    pub unspecified_fractional_precision: bool,
+}
+
+impl TypeParams {
+    /// Returns `true` if every parameter was specified (all flags `false`).
+    #[inline]
+    pub fn is_default(&self) -> bool {
+        *self == TypeParams::default()
+    }
+
+    /// Sets [`TypeParams::unspecified_length`].
+    #[inline]
+    pub const fn with_unspecified_length(mut self, unspecified: bool) -> Self {
+        self.unspecified_length = unspecified;
+        self
+    }
+
+    /// Sets [`TypeParams::unspecified_precision`].
+    #[inline]
+    pub const fn with_unspecified_precision(mut self, unspecified: bool) -> Self {
+        self.unspecified_precision = unspecified;
+        self
+    }
+
+    /// Sets [`TypeParams::unspecified_scale`].
+    #[inline]
+    pub const fn with_unspecified_scale(mut self, unspecified: bool) -> Self {
+        self.unspecified_scale = unspecified;
+        self
+    }
+
+    /// Sets [`TypeParams::unspecified_fractional_precision`].
+    #[inline]
+    pub const fn with_unspecified_fractional_precision(mut self, unspecified: bool) -> Self {
+        self.unspecified_fractional_precision = unspecified;
+        self
+    }
+}
+
+// Hand-written so that the Debug text of every pre-existing shape is unchanged.
+impl Debug for StaticType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("StaticType");
+        d.field("id", &self.id)
+            .field("ty", &self.ty)
+            .field("nullable", &self.nullable);
+        if !self.params.is_default() {
+            d.field("params", &self.params);
+        }
+        d.finish()
+    }
 }
 
 impl StaticType {
@@ -702,6 +823,12 @@ impl StaticType {
     #[inline]
     pub fn is_nullable(&self) -> bool {
         self.nullable
+    }
+
+    /// Which of this type's parameters were left unspecified by the user.
+    #[inline]
+    pub fn params(&self) -> &TypeParams {
+        &self.params
     }
 
     #[inline]
@@ -761,28 +888,61 @@ pub enum Static {
 
     DateTime,
 
+    /// SQL `NUMERIC(p,s)`, distinct from `DECIMAL(p,s)` as in SQL and PLK.
+    NumericP(usize, usize),
+    /// `BLOB(n)`
+    Blob(usize),
+    /// `CLOB(n)`
+    Clob(usize),
+
+    Date,
+    /// `TIME(p)` without time zone
+    Time(usize),
+    /// `TIME(p) WITH TIME ZONE`
+    TimeTz(usize),
+    /// `TIMESTAMP(p)` without time zone
+    Timestamp(usize),
+    /// `TIMESTAMP(p) WITH TIME ZONE`
+    TimestampTz(usize),
+    /// `INTERVAL <qualifier>`, a year-month or day-time interval.
+    Interval(IntervalType),
+
+    /// The type of the `NULL` literal (absent value).
+    Null,
+    /// The type of the `MISSING` literal (absent value).
+    Missing,
+    /// A value of an embedded document format, named by its encoding (e.g. `ion`), whose type
+    /// is not known statically.
+    Variant(String),
+
     // Container Types
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
+    /// A map from keys of one shape to values of another.
+    Map(MapType),
 
     Graph(
         /* TODO: https://github.com/partiql/partiql-lang/blob/main/RFCs/0025-graph-data-model.md */
     ),
-    // TODO Add BitString, ByteString, Blob, Clob, and Graph types
+    // TODO Add BitString and ByteString types
 }
 
 #[non_exhaustive]
 pub enum StaticCategory<'a> {
     Graph(),
     Tuple(),
+    Map(&'a MapType),
     Sequence(&'a PartiqlShape),
     Scalar(&'a Static),
 }
 
 impl Static {
     pub fn is_scalar(&self) -> bool {
-        !matches!(self, Static::Struct(_) | Static::Bag(_) | Static::Array(_))
+        !matches!(
+            self,
+            Static::Struct(_) | Static::Bag(_) | Static::Array(_) | Static::Map(_)
+        )
     }
 
     pub fn is_sequence(&self) -> bool {
@@ -799,6 +959,7 @@ impl Static {
             Static::Bag(b) => StaticCategory::Sequence(b.element_type()),
             Static::Array(b) => StaticCategory::Sequence(b.element_type()),
             Static::Graph() => StaticCategory::Graph(),
+            Static::Map(m) => StaticCategory::Map(m),
             _ => StaticCategory::Scalar(self),
         }
     }
@@ -821,13 +982,22 @@ impl Display for Static {
             Static::Float32 => write!(f, "Float32"),
             Static::Float64 => write!(f, "Float64"),
             Static::String => write!(f, "String"),
-            Static::StringFixed(_) => {
-                todo!()
-            }
-            Static::StringVarying(_) => {
-                todo!()
-            }
+            Static::StringFixed(n) => write!(f, "Char({n})"),
+            Static::StringVarying(n) => write!(f, "Varchar({n})"),
             Static::DateTime => write!(f, "DateTime"),
+            Static::NumericP(p, s) => write!(f, "Numeric({p},{s})"),
+            Static::Blob(n) => write!(f, "Blob({n})"),
+            Static::Clob(n) => write!(f, "Clob({n})"),
+            Static::Date => write!(f, "Date"),
+            Static::Time(p) => write!(f, "Time({p})"),
+            Static::TimeTz(p) => write!(f, "TimeTz({p})"),
+            Static::Timestamp(p) => write!(f, "Timestamp({p})"),
+            Static::TimestampTz(p) => write!(f, "TimestampTz({p})"),
+            Static::Interval(i) => std::fmt::Display::fmt(i, f),
+            Static::Null => write!(f, "Null"),
+            Static::Missing => write!(f, "Missing"),
+            Static::Variant(enc) => write!(f, "Variant({enc})"),
+            Static::Map(m) => std::fmt::Display::fmt(m, f),
             Static::Struct(inner) => std::fmt::Display::fmt(inner, f),
             Static::Bag(inner) => std::fmt::Display::fmt(inner, f),
             Static::Array(inner) => std::fmt::Display::fmt(inner, f),
@@ -859,30 +1029,45 @@ impl StructType {
         }
     }
 
+    /// The struct's fields as a set: equal fields (same name and shape) appear once, so a row
+    /// with two equal no-id fields yields one. Use [`StructType::fields`] to see every field.
     pub fn fields_set(&self) -> IndexSet<StructField> {
-        self.constraints
-            .iter()
-            .flat_map(|c| {
-                if let StructConstraint::Fields(fields) = c.clone() {
-                    fields
-                } else {
-                    Default::default()
-                }
-            })
-            .collect()
+        self.fields().cloned().collect()
     }
 
     pub fn fields(&self) -> impl Iterator<Item = &StructField> {
-        self.constraints
-            .iter()
-            .filter_map(|c| {
-                if let StructConstraint::Fields(fields) = c {
-                    Some(fields)
-                } else {
-                    None
-                }
-            })
-            .flat_map(|f| f.iter())
+        use itertools::Either;
+        self.constraints.iter().flat_map(|c| match c {
+            StructConstraint::Fields(fields) => Either::Left(fields.iter()),
+            StructConstraint::FieldList(fields) => Either::Right(fields.iter()),
+            _ => Either::Right([].iter()),
+        })
+    }
+
+    /// A closed, ordered struct whose fields keep their declaration order and allow duplicate
+    /// names, e.g. the type of the rows of `SELECT a, a, b FROM t`. Its fields are held in a
+    /// [`StructConstraint::FieldList`], so no-id shapes with the same name and type are kept.
+    pub fn new_row<I>(fields: I) -> Self
+    where
+        I: IntoIterator<Item = StructField>,
+    {
+        StructType {
+            constraints: IndexSet::from([
+                StructConstraint::Open(false),
+                StructConstraint::Ordered(true),
+                StructConstraint::DuplicateAttrs(true),
+                StructConstraint::FieldList(fields.into_iter().collect()),
+            ]),
+        }
+    }
+
+    /// Returns `true` if the struct is closed and ordered. Every struct built by
+    /// [`StructType::new_row`] is; so is any other struct with both constraints, whichever
+    /// constraint holds its fields. Note that only [`StructConstraint::FieldList`] fields take part
+    /// in equality in order; [`StructConstraint::Fields`] is a set.
+    #[inline]
+    pub fn is_row(&self) -> bool {
+        self.is_closed() && self.constraints.contains(&StructConstraint::Ordered(true))
     }
 
     #[inline]
@@ -931,6 +1116,8 @@ pub enum StructConstraint {
     Ordered(bool),
     DuplicateAttrs(bool),
     Fields(#[educe(Hash(method(indexset_hash)))] IndexSet<StructField>),
+    /// Fields in declaration order, duplicate names kept (see [`StructType::new_row`]).
+    FieldList(Vec<StructField>),
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -1072,6 +1259,162 @@ impl Display for ArrayType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let ty = &self.element_type;
         write!(f, "[{ty}]")
+    }
+}
+
+/// The type of a map: keys of one shape, values of another.
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
+pub struct MapType {
+    key: Box<PartiqlShape>,
+    value: Box<PartiqlShape>,
+}
+
+impl MapType {
+    #[inline]
+    pub fn new(key: PartiqlShape, value: PartiqlShape) -> Self {
+        MapType {
+            key: Box::new(key),
+            value: Box::new(value),
+        }
+    }
+
+    #[inline]
+    pub fn key_type(&self) -> &PartiqlShape {
+        &self.key
+    }
+
+    #[inline]
+    pub fn value_type(&self) -> &PartiqlShape {
+        &self.value
+    }
+}
+
+impl Display for MapType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Map<{}, {}>", self.key, self.value)
+    }
+}
+
+/// The SQL interval qualifiers.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub enum IntervalQualifier {
+    Year,
+    Month,
+    YearToMonth,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    DayToHour,
+    DayToMinute,
+    DayToSecond,
+    HourToMinute,
+    HourToSecond,
+    MinuteToSecond,
+}
+
+/// Year-month and day-time intervals are different, mutually incomparable types.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub enum IntervalFamily {
+    YearMonth,
+    DayTime,
+}
+
+impl IntervalQualifier {
+    /// The interval family (year-month or day-time) this qualifier belongs to.
+    pub fn family(&self) -> IntervalFamily {
+        match self {
+            IntervalQualifier::Year | IntervalQualifier::Month | IntervalQualifier::YearToMonth => {
+                IntervalFamily::YearMonth
+            }
+            IntervalQualifier::Day
+            | IntervalQualifier::Hour
+            | IntervalQualifier::Minute
+            | IntervalQualifier::Second
+            | IntervalQualifier::DayToHour
+            | IntervalQualifier::DayToMinute
+            | IntervalQualifier::DayToSecond
+            | IntervalQualifier::HourToMinute
+            | IntervalQualifier::HourToSecond
+            | IntervalQualifier::MinuteToSecond => IntervalFamily::DayTime,
+        }
+    }
+
+    /// Returns `true` if the qualifier ends in a SECOND field (which may have a fractional
+    /// precision).
+    pub fn has_seconds(&self) -> bool {
+        matches!(
+            self,
+            IntervalQualifier::Second
+                | IntervalQualifier::DayToSecond
+                | IntervalQualifier::HourToSecond
+                | IntervalQualifier::MinuteToSecond
+        )
+    }
+}
+
+/// The type of an interval value: its qualifier and precisions.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct IntervalType {
+    qualifier: IntervalQualifier,
+    /// Leading field precision.
+    precision: usize,
+    /// Fractional seconds precision; 0 when the qualifier has no SECOND field.
+    fractional_precision: usize,
+}
+
+impl IntervalType {
+    /// An interval type. `fractional_precision` is ignored (stored as 0) when `qualifier` has no
+    /// SECOND field, so that e.g. `INTERVAL YEAR(2)` has a single representation.
+    #[inline]
+    pub fn new(
+        qualifier: IntervalQualifier,
+        precision: usize,
+        fractional_precision: usize,
+    ) -> Self {
+        let fractional_precision = if qualifier.has_seconds() {
+            fractional_precision
+        } else {
+            0
+        };
+        IntervalType {
+            qualifier,
+            precision,
+            fractional_precision,
+        }
+    }
+
+    #[inline]
+    pub fn qualifier(&self) -> IntervalQualifier {
+        self.qualifier
+    }
+
+    #[inline]
+    pub fn precision(&self) -> usize {
+        self.precision
+    }
+
+    #[inline]
+    pub fn fractional_precision(&self) -> usize {
+        self.fractional_precision
+    }
+
+    #[inline]
+    pub fn family(&self) -> IntervalFamily {
+        self.qualifier.family()
+    }
+}
+
+impl Display for IntervalType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Interval({:?}, {}, {})",
+            self.qualifier, self.precision, self.fractional_precision
+        )
     }
 }
 

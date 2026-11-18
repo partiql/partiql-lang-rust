@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical: `ValueExpr::DBRef(DBRef)`, a reference to a catalog-registered database object, emitted by `VarRefResolution::Static`.
 - partiql-logical-planner: `VarRefResolution` (`#[non_exhaustive]`) and `LogicalPlanner::with_var_resolution`. The default is `Dynamic`, which keeps the existing `DynamicLookup` lowering. `Static` resolves variable references at plan time, emitting `VarRef`, `Path`, or `DBRef`; the VM needs this mode.
 - New unpublished (`publish = false`) crates: `partiql-vm`, the experimental bytecode VM, and `partiql-tools`, the `pqlite` CLI.
+- partiql-types: new `Static` kinds `NumericP(p, s)`, `Blob(n)`, `Clob(n)`, `Date`, `Time(p)`, `TimeTz(p)`, `Timestamp(p)`, `TimestampTz(p)`, `Interval(IntervalType)` (with `IntervalQualifier` and `IntervalFamily`; the fractional precision is 0 for qualifiers without SECOND), `Null`, `Missing`, `Variant(encoding)` and `Map(MapType)` (with `StaticCategory::Map`).
+- partiql-types: `StructType::new_row` / `ShapeBuilder::new_row` build a closed, ordered struct that keeps field order and duplicate names, held in the new `StructConstraint::FieldList`; `StructType::is_row` recognizes closed, ordered structs. `fields()` and `fields_set()` include `FieldList` fields.
+- partiql-types: `TypeParams` (`#[non_exhaustive]`, built with its `with_*` methods), `StaticType::params` and `ShapeBuilder::new_static_with_params` record which type parameters were left unspecified (e.g. `VARCHAR` vs `VARCHAR(1)`). The flags do not take part in equality or hashing, and `Debug` shows them only when set, so existing shapes print as before.
+- partiql-extension-ddl: DDL output for `CHAR(n)`, `VARCHAR(n)` and the new kinds; parameters flagged as unspecified are omitted (also for `DECIMAL(p, s)`).
+
+### Fixed
+- partiql-types: `Display` for `Static::StringFixed` and `Static::StringVarying` no longer panics (`todo!()`); they print `Char(n)` and `Varchar(n)`.
+- partiql-extension-ddl: a shape with no DDL form (e.g. `Graph`, `Null`, `Missing`) returns `ShapeEncodingError::UnsupportedEncoding` instead of panicking.
+- partiql-extension-ddl: a field name containing `"`, `\` or a control character, a `Variant` encoding containing `'`, `\` or a control character, and duplicate top-level column names are `UnsupportedEncoding` errors; a name such as `a" INT,"b` used to produce an extra column.
 
 ### Removed
 
