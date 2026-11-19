@@ -458,6 +458,15 @@ pub enum Token<'input> {
     Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
+    // `OVER`, `PARTITION`, `IGNORE` and `RESPECT` are non-reserved: they may still name variables
+    #[regex("(?i:Over)", |lex| lex.slice())]
+    Over(&'input str),
+    #[regex("(?i:Partition)", |lex| lex.slice())]
+    Partition(&'input str),
+    #[regex("(?i:Ignore)", |lex| lex.slice())]
+    Ignore(&'input str),
+    #[regex("(?i:Respect)", |lex| lex.slice())]
+    Respect(&'input str),
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -566,12 +575,28 @@ pub enum Token<'input> {
 impl Token<'_> {
     #[inline]
     pub fn is_var_non_reserved(&self) -> bool {
-        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
+        matches!(
+            self,
+            Token::Any(_)
+                | Token::Simple(_)
+                | Token::Over(_)
+                | Token::Partition(_)
+                | Token::Ignore(_)
+                | Token::Respect(_)
+        ) || self.is_graph_non_reserved()
     }
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
-        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
+        matches!(
+            self,
+            Token::Any(_)
+                | Token::Simple(_)
+                | Token::Over(_)
+                | Token::Partition(_)
+                | Token::Ignore(_)
+                | Token::Respect(_)
+        ) || self.is_graph_non_reserved()
     }
 
     #[inline]
@@ -673,7 +698,6 @@ impl Token<'_> {
                 | Token::Natural
                 | Token::Not
                 | Token::Null
-                | Token::Nulls
                 | Token::Offset
                 | Token::On
                 | Token::Or

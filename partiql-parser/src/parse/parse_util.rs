@@ -241,3 +241,31 @@ pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstN
         _ => illegal_literal(),
     }
 }
+
+/// Whether `call` is a window function PartiQL Kotlin's `windowFunctionType` allows (any case):
+/// `RANK()`, `DENSE_RANK()`, `PERCENT_RANK()`, `CUME_DIST()` or `ROW_NUMBER()`, or `LEAD` or
+/// `LAG` of an expression with an optional integer-literal offset and an optional default.
+/// Only `LEAD` and `LAG` take a null treatment (`with_null_treatment`).
+pub(crate) fn is_window_function(call: &ast::Call, with_null_treatment: bool) -> bool {
+    // a quoted name such as `"LAG"` is a user function, as in PartiQL Kotlin, where these are keywords
+    if call.func_name.case != ast::CaseSensitivity::CaseInsensitive {
+        return false;
+    }
+    let positional = call
+        .args
+        .iter()
+        .all(|a| matches!(a.node, ast::CallArg::Positional(_)));
+    match call.func_name.value.to_ascii_uppercase().as_str() {
+        "RANK" | "DENSE_RANK" | "PERCENT_RANK" | "CUME_DIST" | "ROW_NUMBER" => {
+            call.args.is_empty() && !with_null_treatment
+        }
+        "LEAD" | "LAG" => {
+            let offset_ok = call.args.get(1).is_none_or(|a| {
+                matches!(&a.node, ast::CallArg::Positional(e)
+                    if matches!(e.as_ref(), Expr::Lit(l) if matches!(l.node, Lit::Int64Lit(_))))
+            });
+            positional && (1..=3).contains(&call.args.len()) && offset_ok
+        }
+        _ => false,
+    }
+}

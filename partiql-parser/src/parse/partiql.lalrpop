@@ -16,6 +16,7 @@ use crate::parse::parse_util::{
     struct_to_lit,
     bag_to_lit,
     list_to_lit,
+    is_window_function,
     CallSite,
     Attrs,
     Synth
@@ -1418,7 +1419,53 @@ ExprPrecedence01: Synth<ast::Expr> = {
         };
         Synth::empty(call)
     },
+    // A window function, as in PartiQL Kotlin's `windowFunction`
+    <lo:@L> <call:FunctionCall> <call_hi:@R> <null_treatment:NullTreatment?> "OVER" <window:WindowNameOrSpec> <hi:@R> =>? {
+        let call = match call {
+            CallSite::Call(call) => Some(call),
+            CallSite::CallAgg(_) => None,
+        }
+        .filter(|call| is_window_function(call, null_treatment.is_some()))
+        .ok_or_else(|| lpop::ParseError::User{
+            error: ParseError::SyntaxError(
+                "expected a window function: RANK(), DENSE_RANK(), PERCENT_RANK(), CUME_DIST(), ROW_NUMBER(), or LEAD/LAG(<expr> [, <offset> [, <default>]]) [RESPECT NULLS | IGNORE NULLS]"
+                    .to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+        })?;
+        let call = state.node(call, lo..call_hi);
+        Ok(Synth::empty(ast::Expr::WindowCall(
+            state.node(ast::WindowCall{ call, null_treatment, window }, lo..hi)
+        )))
+    },
     <ExprTerm>,
+}
+
+NullTreatment: ast::NullTreatment = {
+    "RESPECT" "NULLS" => ast::NullTreatment::RespectNulls,
+    "IGNORE" "NULLS" => ast::NullTreatment::IgnoreNulls,
+}
+
+WindowNameOrSpec: ast::WindowNameOrSpec = {
+    <name:SymbolPrimitive> => ast::WindowNameOrSpec::Name(name),
+    <lo:@L> "(" <existing_name:SymbolPrimitive?> <partition_by:WindowPartitionBy?> <order_by:OrderByClause?> ")" <hi:@R> =>? {
+        // `ORDER BY PRESERVE` orders a query's output, not a window
+        if order_by.as_ref().is_some_and(|o| o.node.sort_specs.is_empty()) {
+            return Err(lpop::ParseError::User{
+                error: ParseError::SyntaxError(
+                    "ORDER BY PRESERVE is not allowed in a window specification".to_string()
+                        .to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+            });
+        }
+        Ok(ast::WindowNameOrSpec::Spec(state.node(ast::WindowSpec{
+            existing_name,
+            partition_by: partition_by.unwrap_or_default(),
+            order_by,
+        }, lo..hi)))
+    },
+}
+
+#[inline]
+WindowPartitionBy: Vec<Box<ast::Expr>> = {
+    "PARTITION" "BY" <CommaSepPlus<ExprQuery>>,
 }
 
 ExprTerm: Synth<ast::Expr> = {
@@ -1680,7 +1727,9 @@ FunctionArgName: ast::SymbolPrimitive = {
             value: name.to_owned(),
             case: ast::CaseSensitivity::CaseInsensitive
         }
-    }
+    },
+    // a non-reserved keyword may name an argument; the `:` tells the name from a variable
+    <VarNonReservedKeyword>,
 }
 
 // ------------------------------------------------------------------------------ //
@@ -2072,6 +2121,10 @@ FnNonReservedKeyword: ast::SymbolPrimitive = {
 NonReservedKeyword: &'input str = {
     "ANY",
     "SIMPLE",
+    "OVER",
+    "PARTITION",
+    "IGNORE",
+    "RESPECT",
     <GraphNonReservedKeyword>
 }
 
@@ -2284,6 +2337,10 @@ extern {
         "TIMESTAMP" => lexer::Token::Timestamp,
         "SIMPLE" => lexer::Token::Simple(<&'input str>),
         "THEN" => lexer::Token::Then,
+        "OVER" => lexer::Token::Over(<&'input str>),
+        "PARTITION" => lexer::Token::Partition(<&'input str>),
+        "IGNORE" => lexer::Token::Ignore(<&'input str>),
+        "RESPECT" => lexer::Token::Respect(<&'input str>),
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,

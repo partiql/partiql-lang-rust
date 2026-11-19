@@ -422,6 +422,8 @@ pub enum Expr {
     Path(AstNode<Path>),
     Call(AstNode<Call>),
     CallAgg(AstNode<CallAgg>),
+    /// A window function, `<call> [RESPECT | IGNORE NULLS] OVER <window>`
+    WindowCall(AstNode<WindowCall>),
     /// <expr> MATCH <graph_pattern>
     GraphMatch(Box<AstNode<GraphMatch>>),
 
@@ -450,6 +452,7 @@ impl IdAnnotated<NodeId> for Expr {
             Expr::Path(p) => p.id(),
             Expr::Call(c) => c.id(),
             Expr::CallAgg(c) => c.id(),
+            Expr::WindowCall(w) => w.id(),
             Expr::GraphMatch(g) => g.id(),
             Expr::Query(q) => q.id(),
             Expr::Error => unreachable!(),
@@ -701,6 +704,49 @@ pub struct Call {
     #[visit(skip)]
     pub func_name: SymbolPrimitive,
     pub args: Vec<AstNode<CallArg>>,
+}
+
+/// A window function call, `<call> [RESPECT | IGNORE NULLS] OVER <window>`, e.g.
+/// `LAG(a, 1) IGNORE NULLS OVER (PARTITION BY b ORDER BY c)`. As in PartiQL Kotlin, `call` is
+/// one of `RANK()`, `DENSE_RANK()`, `PERCENT_RANK()`, `CUME_DIST()`, `ROW_NUMBER()`, or
+/// `LEAD`/`LAG(<expr> [, <offset> [, <default>]])`; only `LEAD` and `LAG` take a null treatment.
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WindowCall {
+    pub call: AstNode<Call>,
+    #[visit(skip)]
+    pub null_treatment: Option<NullTreatment>,
+    pub window: WindowNameOrSpec,
+}
+
+/// `RESPECT NULLS` or `IGNORE NULLS` of a `LEAD` or `LAG` window function
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum NullTreatment {
+    RespectNulls,
+    IgnoreNulls,
+}
+
+/// The window of a window function: a window name (`OVER w`) or an in-line specification
+/// (`OVER (...)`)
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum WindowNameOrSpec {
+    #[visit(skip)]
+    Name(SymbolPrimitive),
+    Spec(AstNode<WindowSpec>),
+}
+
+/// A window specification, `( [<existing window name>] [PARTITION BY <expr>, ...] [ORDER BY ...] )`
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WindowSpec {
+    #[visit(skip)]
+    pub existing_name: Option<SymbolPrimitive>,
+    pub partition_by: Vec<Box<Expr>>,
+    pub order_by: Option<Box<AstNode<OrderByExpr>>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]

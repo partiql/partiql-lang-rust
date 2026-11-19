@@ -120,6 +120,10 @@ fn category(tok: &Token<'_>) -> Category {
         }
         Any(_)
         | Simple(_)
+        | Over(_)
+        | Partition(_)
+        | Ignore(_)
+        | Respect(_)
         | Acyclic(_)
         | Bindings(_)
         | Bound(_)
