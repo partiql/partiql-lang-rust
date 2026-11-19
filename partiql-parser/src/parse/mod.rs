@@ -202,8 +202,87 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
+
+        // A backslash in a string stands for itself, as in SQL; only
+        // `''` is an escape. The literal keeps the text between the quotes as written.
+        #[test]
+        fn string_backslash() {
+            let string = |q: &str| match parse_expr(q) {
+                ast::Expr::Lit(l) => match l.node {
+                    ast::Lit::CharStringLit(s) => s,
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            // A string ending in a backslash followed later by another quote: a lexing error
+            // before, as `\'` kept the string open.
+            for query in [
+                r"SELECT 'C:\dir\' AS p FROM t",
+                r"SELECT REPLACE(t.c, '\', '/') AS v FROM T AS t",
+                r"SELECT TRIM(BOTH '\' FROM t.c) AS v FROM T AS t",
+                r"SELECT POSITION('\' IN t.c) AS v FROM T AS t",
+                r"SELECT {'k\': t.c} AS v FROM T AS t",
+                r"SELECT 'a\''' || t.c AS v FROM T AS t",
+                r"SELECT t.c AS c FROM T AS t WHERE t.c IN ('a\', 'b')",
+                r"SELECT ['a\', t.c] AS v FROM T AS t",
+                r"SELECT split(c, '\') FROM T",
+                r"SELECT '\' AS v FROM T",
+            ] {
+                parse!(query);
+            }
+            // A later quote in a line comment no longer continues the string: this is a query
+            // over `t`, where it was a single string.
+            let stmt = format!("{:?}", parse!(r"SELECT '\' FROM t --'"));
+            assert!(stmt.contains(r#"CharStringLit("\\")"#), "{stmt}");
+            assert!(stmt.contains("from: Some(AstNode"), "{stmt}");
+            // The value is the text between the quotes as written; these literals parsed
+            // before as well.
+            for (query, raw) in [
+                (r"'\'", r"\"),
+                (r"'it''s \'", r"it''s \"),
+                (r"'a\'''", r"a\''"),
+                (r"'\\'", r"\\"),
+                (r"'a\nb\tc\u0041'", r"a\nb\tc\u0041"),
+                (r"'C:\dir\'", r"C:\dir\"),
+                ("''''", "''"),
+                ("'a'''", "a''"),
+                ("''", ""),
+            ] {
+                assert_eq!(string(query), raw, "{query}");
+            }
+            // `\'` no longer escapes a quote: the string ends at the quote, and what follows
+            // is an unterminated string, which is an error wherever it is.
+            assert!(parse_partiql(r"'it\'s'").is_err());
+            assert!(parse_partiql(r"'\''").is_err());
+            assert!(parse_partiql(r"SELECT 'O\'Brien' AS v FROM t").is_err());
+        }
+
+        // A lexing error right after an identifier is reported, not dropped by the look-ahead
+        // for a special form such as `TRIM(`, which used to end the input there silently.
+        #[test]
+        fn lex_error_after_identifier() {
+            for query in [
+                "SELECT a ' FROM t",
+                r#"SELECT a " FROM t"#,
+                "SELECT t.a ' FROM t",
+                "SELECT trim ' FROM t",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
 
         #[test]
         fn null() {

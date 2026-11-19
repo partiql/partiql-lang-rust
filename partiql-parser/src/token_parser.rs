@@ -11,6 +11,9 @@ pub(crate) struct TokenParser<'input, 'tracker> {
     lexer: PartiqlLexer<'input, 'tracker>,
     buffered: VecDeque<BufferedToken<'input>>,
     consumed_c: usize,
+    /// A lexing error met while peeking ahead, kept until a [`consume`](Self::consume) reaches
+    /// it, so that a look-ahead cannot drop it.
+    error: Option<Spanned<LexError<'input>, ByteOffset>>,
 }
 
 const TOKEN_BUFFER_INIT_CAPACITY: usize = 20;
@@ -21,13 +24,14 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
             lexer,
             buffered: VecDeque::with_capacity(TOKEN_BUFFER_INIT_CAPACITY),
             consumed_c: 0,
+            error: None,
         }
     }
 
     /// Consume the least-recently buffered [`Token`], buffering one first if necessary.
     #[inline]
     pub fn consume(&mut self) -> Option<Result<(), Spanned<LexError<'input>, ByteOffset>>> {
-        match self.buffer(1) {
+        match self.buffer(1, true) {
             Some(Ok(())) => {
                 self.consumed_c += 1;
                 Some(Ok(()))
@@ -95,7 +99,7 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
     /// first if necessary.
     #[inline]
     pub fn peek_n(&mut self, i: usize) -> Option<&BufferedToken<'input>> {
-        self.buffer(i + 1);
+        let _ = self.buffer(i + 1, false);
         self.get(i)
     }
 
@@ -108,12 +112,31 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
 
     /// Buffer [`Token`]s until `upto` have are buffered; If at least `upto` are already buffered,
     /// this is a no-op.
+    ///
+    /// A lexing error stops the buffering and is returned; it is also kept and returned again
+    /// by later calls that need more tokens, until a call with `take_error` returns it.
     #[inline]
-    fn buffer(&mut self, upto: usize) -> Option<Result<(), Spanned<LexError<'input>, ByteOffset>>> {
+    fn buffer(
+        &mut self,
+        upto: usize,
+        take_error: bool,
+    ) -> Option<Result<(), Spanned<LexError<'input>, ByteOffset>>> {
         while upto > self.buffered.len() - self.consumed_c {
+            if self.error.is_some() {
+                return if take_error {
+                    self.error.take().map(Err)
+                } else {
+                    self.error.clone().map(Err)
+                };
+            }
             match self.lexer.next_internal()? {
                 Ok(tok) => self.buffered.push_back((tok, self.lexer.slice())),
-                Err(e) => return Some(Err(e)),
+                Err(e) => {
+                    if !take_error {
+                        self.error = Some(e.clone());
+                    }
+                    return Some(Err(e));
+                }
             }
         }
         Some(Ok(()))
