@@ -274,6 +274,7 @@ impl ToDot<ast::BinOp> for AstToDot {
             BinOpKind::Lte => "<=",
             BinOpKind::Ne => "<>",
             BinOpKind::Is => "IS",
+            BinOpKind::Overlaps => "OVERLAPS",
             _ => "Unknown binary operator",
         };
         let id = out.node_auto_labelled(lbl).id();

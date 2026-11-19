@@ -1289,6 +1289,15 @@ ExprPrecedence09: Synth<ast::Expr> = {
            }, lo..hi)
        ))
     },
+    // `<period> OVERLAPS <period>`, at the level of PartiQL Kotlin's `PredicateOverlaps`
+    <lo:@L> <l:ExprPrecedence09> "OVERLAPS" <r:ExprPrecedence08> <hi:@R> =>
+       Synth::empty(ast::Expr::BinOp(
+           state.node(ast::BinOp {
+               kind: ast::BinOpKind::Overlaps,
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
+           }, lo..hi)
+       )),
     // PartiQL extension to treat `(<g>MATCH <patt>)` as an expression.
     <gm:ParenGraphMatch> => Synth::empty(gm),
     <ExprPrecedence08>,
@@ -1680,7 +1689,9 @@ FunctionArgName: ast::SymbolPrimitive = {
             value: name.to_owned(),
             case: ast::CaseSensitivity::CaseInsensitive
         }
-    }
+    },
+    // a non-reserved keyword may name an argument; the `:` tells the name from a variable
+    <VarNonReservedKeyword>,
 }
 
 // ------------------------------------------------------------------------------ //
@@ -2072,6 +2083,7 @@ FnNonReservedKeyword: ast::SymbolPrimitive = {
 NonReservedKeyword: &'input str = {
     "ANY",
     "SIMPLE",
+    "OVERLAPS",
     <GraphNonReservedKeyword>
 }
 
@@ -2284,6 +2296,7 @@ extern {
         "TIMESTAMP" => lexer::Token::Timestamp,
         "SIMPLE" => lexer::Token::Simple(<&'input str>),
         "THEN" => lexer::Token::Then,
+        "OVERLAPS" => lexer::Token::Overlaps(<&'input str>),
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,

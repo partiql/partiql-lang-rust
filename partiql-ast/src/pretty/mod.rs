@@ -654,6 +654,7 @@ impl PrettyDoc for BinOp {
             BinOpKind::Lte => (0, "<="),
             BinOpKind::Ne => (0, "<>"),
             BinOpKind::Is => (0, "IS"),
+            BinOpKind::Overlaps => (0, "OVERLAPS"),
         };
         let op = arena.text(sym);
         let lhs = lhs.pretty_doc(arena).nest(nest);

@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases and lateral joins resolve per the spec. With `VarRefResolution::Static`, an unqualified name with several candidate FROM bindings is a new `AstTransformError::AmbiguousReference`; `Dynamic` still picks the first non-`MISSING` candidate at evaluation time.
 - partiql-logical-planner: aggregate arguments resolve against the names visible before `GROUP BY` (`SUM(c) ... GROUP BY c` sums the input's `c`).
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
+- *BREAKING* partiql-parser: `OVERLAPS` is now a non-reserved keyword. It still names variables and named arguments (`SELECT t.overlaps FROM t`), but like the other non-reserved keywords it can no longer be an alias or the name of a table or `WITH` query unless quoted (`AS "overlaps"`).
 
 ### Added
+- partiql-parser: Parsing support for the `OVERLAPS` predicate, `<period> OVERLAPS <period>` (new `BinOpKind::Overlaps`), at the precedence of `BETWEEN`/`IN`/`LIKE`, left-associative with a right operand at the level of `||`, as in PartiQL Kotlin's `PredicateOverlaps` (which also puts comparisons and `IS` on that level; PLR keeps its own levels for those, as for `IN`). A period is any expression, e.g. `(DATE '2023-01-01', DATE '2023-01-10')`. Lowering does not support it yet.
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
 - partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
 - partiql-parser: `Parser::parse_statements` parses a `;`-separated script into multiple statements (optional trailing `;`). Single-statement `Parser::parse` is unchanged and still rejects `;`.

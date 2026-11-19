@@ -202,6 +202,17 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
 
@@ -271,6 +282,74 @@ mod tests {
                               */
                       'b':1} ` "#
             );
+        }
+    }
+
+    mod overlaps {
+        use super::*;
+
+        fn bin(q: &str) -> ast::BinOp {
+            match parse_expr(q) {
+                ast::Expr::BinOp(b) => b.node,
+                other => panic!("{q}: {other:?}"),
+            }
+        }
+
+        // `<period> OVERLAPS <period>`, as in PartiQL Kotlin's `PredicateOverlaps`
+        #[test]
+        fn overlaps() {
+            for query in [
+                "(DATE '2023-01-01', DATE '2023-01-10') OVERLAPS (DATE '2023-01-05', DATE '2023-01-15')",
+                "(TIME '10:00:00', TIME '12:00:00') OVERLAPS (TIME '11:00:00', TIME '13:00:00')",
+                "(t.a, t.b) overlaps (t.c, t.d)",
+                "[DATE '2023-01-01', DATE '2023-01-10'] OVERLAPS <<DATE '2023-01-05', DATE '2023-01-15'>>",
+            ] {
+                assert_eq!(bin(query).kind, ast::BinOpKind::Overlaps, "{query}");
+            }
+            // binds tighter than `AND` and `=`, looser than `||`
+            let b = bin("(a, b) OVERLAPS (c, d) AND x");
+            assert_eq!(b.kind, ast::BinOpKind::And);
+            assert!(
+                matches!(*b.lhs, ast::Expr::BinOp(ref l) if l.node.kind == ast::BinOpKind::Overlaps)
+            );
+            let b = bin("(a, b) OVERLAPS (c, d) = TRUE");
+            assert_eq!(b.kind, ast::BinOpKind::Eq);
+            let b = bin("a || b OVERLAPS c || d");
+            assert_eq!(b.kind, ast::BinOpKind::Overlaps);
+            assert!(
+                matches!(*b.lhs, ast::Expr::BinOp(ref l) if l.node.kind == ast::BinOpKind::Concat)
+            );
+            assert!(
+                matches!(*b.rhs, ast::Expr::BinOp(ref r) if r.node.kind == ast::BinOpKind::Concat)
+            );
+            // left-associative
+            let b = bin("a OVERLAPS b OVERLAPS c");
+            assert!(
+                matches!(*b.lhs, ast::Expr::BinOp(ref l) if l.node.kind == ast::BinOpKind::Overlaps)
+            );
+            for query in [
+                "SELECT (DATE '2023-01-01', DATE '2023-01-10') OVERLAPS (DATE '2023-01-05', DATE '2023-01-15') FROM T",
+                "SELECT * FROM T WHERE (T.a, T.b) OVERLAPS (T.c, T.d) AND T.e",
+                "SELECT (T.col_date, T.col_date) OVERLAPS (DATE '2023-01-01', DATE '2023-12-31') FROM T_INTERVALS as T",
+            ] {
+                parse!(query);
+            }
+            // `OVERLAPS` is non-reserved: it still names a variable.
+            parse!("SELECT overlaps FROM t");
+            parse!("(overlaps, b) OVERLAPS (c, overlaps)");
+            parse!("SELECT CAST(t.overlaps AS INT), COUNT(DISTINCT t.overlaps) FROM t");
+            parse!("SELECT f(overlaps: 1) FROM t");
+            assert!(parse_partiql("(a, b) OVERLAPS").is_err());
+        }
+
+        // The pretty-printed predicate parses back to the same operator.
+        #[test]
+        fn overlaps_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            let printed = parse_expr("(a, b) OVERLAPS (c, d)")
+                .to_pretty_string(80)
+                .unwrap();
+            assert_eq!(bin(&printed).kind, ast::BinOpKind::Overlaps, "{printed}");
         }
     }
 
