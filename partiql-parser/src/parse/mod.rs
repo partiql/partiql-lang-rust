@@ -316,7 +316,7 @@ mod tests {
             }
         }
 
-        // `INTERVAL <string> <qualifier>`, as in PartiQL Kotlin's `intervalLiteral`
+        // `INTERVAL <string> <qualifier>`
         #[test]
         fn interval_literal() {
             for (query, text, qualifier) in [
@@ -391,7 +391,7 @@ mod tests {
             parse!("SELECT t.a + INTERVAL '1-6' YEAR TO MONTH FROM t WHERE t.b > INTERVAL '5' DAY");
         }
 
-        // `INTERVAL <qualifier>` as a type, as in PartiQL Kotlin's `intervalType`
+        // `INTERVAL <qualifier>` as a type
         #[test]
         fn interval_type() {
             let cast_type = |q: &str| match parse_expr(q) {
@@ -432,7 +432,8 @@ mod tests {
             }
         }
 
-        // Precisions PartiQL Kotlin's grammar does not allow, and unknown fields, are errors.
+        // Malformed qualifiers are errors: a missing or unknown field, SECOND as a range start,
+        // a precision where none is allowed or too many, and a precision beyond 32 bits.
         #[test]
         fn interval_errors() {
             for query in [
@@ -450,7 +451,7 @@ mod tests {
             }
         }
 
-        // `INTERVAL` is reserved, as in PartiQL Kotlin; `TO` is non-reserved and still names
+        // `INTERVAL` is reserved; `TO` is non-reserved and still names
         // a variable, also inside special forms and as a named argument.
         #[test]
         fn interval_keywords() {
@@ -476,8 +477,8 @@ mod tests {
         }
 
         // A minus sign before the string applies to the literal: `INTERVAL -'1' DAY` is
-        // `-(INTERVAL '1' DAY)`. This differs from PartiQL Kotlin on purpose, which accepts the
-        // sign and drops it; a plus sign is dropped here too.
+        // `-(INTERVAL '1' DAY)`, the same as a minus sign before INTERVAL; a plus sign is
+        // dropped.
         #[test]
         fn interval_signed() {
             match parse_expr("INTERVAL -'1' DAY") {
@@ -499,7 +500,7 @@ mod tests {
             parse!("SELECT INTERVAL -'1' DAY AS d FROM t");
         }
 
-        // Precisions in the ranges PartiQL Kotlin's `IntervalQualifier` allows: a single
+        // Precisions in their allowed ranges: a single
         // field's precision at least 1, a range's start precision 1 to 9 and its end
         // fractional precision 0 to 9, and every precision a 32-bit integer.
         #[test]
@@ -605,7 +606,7 @@ mod tests {
                     "INTERVAL '10-3' YEAR TO MONTH",
                     "INTERVAL '10-3' YEAR TO MONTH",
                 ),
-                // no field-order check, as in PartiQL Kotlin
+                // no field-order check
                 ("INTERVAL '1' MONTH TO YEAR", "INTERVAL '1' MONTH TO YEAR"),
                 ("INTERVAL -'1' DAY", "-INTERVAL '1' DAY"),
                 (

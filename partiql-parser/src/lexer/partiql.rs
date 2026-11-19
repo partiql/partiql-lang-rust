@@ -458,7 +458,7 @@ pub enum Token<'input> {
     Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
-    // `INTERVAL` is reserved, as in PartiQL Kotlin: `INTERVAL -'1' DAY` must not read as a
+    // `INTERVAL` is reserved: `INTERVAL -'1' DAY` must not read as a
     // subtraction from a variable named `interval`
     #[regex("(?i:Interval)")]
     Interval,

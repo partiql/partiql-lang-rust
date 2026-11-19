@@ -1427,8 +1427,8 @@ ExprTerm: Synth<ast::Expr> = {
     <s:SubQuery> => Synth::empty(s),
     <lo:@L> <lit:Literal> <hi:@R> => Synth::lit(ast::Expr::Lit( state.node(lit, lo..hi) )),
     <v:VarRefExpr> => Synth::empty(v),
-    // `INTERVAL <sign> <string> <qualifier>`: the sign PartiQL Kotlin's `intervalLiteral`
-    // allows before the string (and drops); here it applies to the literal
+    // `INTERVAL <sign> <string> <qualifier>`: a minus sign before the string
+    // applies to the literal, a plus sign is dropped
     <lo:@L> "INTERVAL" <neg:IntervalSign> <ls:@L> <s:"String"> <q:IntervalQualifier> <hi:@R> => {
         let lit = ast::Lit::TypedLit(s.to_owned(), ast::Type::IntervalType(q));
         // the literal spans `INTERVAL` too when the sign is dropped
@@ -1927,7 +1927,7 @@ TypeName: ast::Type = {
     <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts } ),
 }
 
-// `INTERVAL <qualifier>`, as in PartiQL Kotlin's `intervalType`
+// `INTERVAL <qualifier>`
 IntervalTypeName: ast::Type = {
     "INTERVAL" <q:IntervalQualifier> => ast::Type::IntervalType(q),
 }
@@ -1968,7 +1968,7 @@ IntervalPrecision: (u32, Option<u32>) = {
 }
 
 IntervalPrecisionValue: u32 = {
-    // a 32-bit integer, as PartiQL Kotlin reads it with `toInt()`
+    // a 32-bit integer
     <lo:@L> <n:"Int"> <hi:@R> =>? n.parse::<i32>().ok().and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| lpop::ParseError::User{
             error: ParseError::SyntaxError(
@@ -1979,7 +1979,7 @@ IntervalPrecisionValue: u32 = {
 #[inline]
 TypedLiteral: ast::Lit = {
     <ty:TypeName> <s:"String"> => ast::Lit::TypedLit(s.to_owned(), ty),
-    // `INTERVAL <string> <qualifier>`, as in PartiQL Kotlin's `intervalLiteral`; for the
+    // `INTERVAL <string> <qualifier>`; for the
     // optional sign before the string, see `ExprTerm`
     "INTERVAL" <s:"String"> <q:IntervalQualifier> => ast::Lit::TypedLit(s.to_owned(), ast::Type::IntervalType(q)),
     // TODO we could support postgres-style literals with the following:

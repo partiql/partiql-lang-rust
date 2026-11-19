@@ -257,19 +257,18 @@ pub(crate) fn datetime_field(name: &str) -> Option<ast::DatetimeField> {
     .find_map(|(n, f)| n.eq_ignore_ascii_case(name).then_some(f))
 }
 
-/// The largest start precision and end fractional seconds precision of an interval range, as
-/// in PartiQL Kotlin's `IntervalQualifier`.
+/// The largest start precision and end fractional seconds precision of an interval range.
 const MAX_INTERVAL_PRECISION: u32 = 9;
 
 /// The parenthesized `(<precision> [, <fractional precision>])` after an interval field.
 pub(crate) type FieldPrecision = (u32, Option<u32>);
 
-/// Builds an interval qualifier as PartiQL Kotlin's grammar allows it: a single field takes a
+/// Builds an interval qualifier: a single field takes a
 /// precision, and `SECOND` also a fractional precision; in a range, the start field is not
 /// `SECOND` and takes a precision, and the end field takes a (fractional) precision only when
-/// it is `SECOND`. The values are bounded as in PartiQL Kotlin's `IntervalQualifier`: a single
+/// it is `SECOND`. The values are bounded: a single
 /// field's precision is at least 1, and a range's start precision is 1 to 9 and its end
-/// fractional seconds precision 0 to 9. Like PartiQL Kotlin, it does not check the order of the fields of a range.
+/// fractional seconds precision 0 to 9. It does not check the order of the fields of a range.
 pub(crate) fn interval_qualifier(
     start: ast::DatetimeField,
     start_precision: Option<FieldPrecision>,

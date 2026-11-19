@@ -1004,8 +1004,8 @@ pub enum Type {
     CustomType(CustomType),
 }
 
-/// The `<interval qualifier>` of an interval type or literal (SQL:2023 10.1), as parsed by
-/// PartiQL Kotlin: e.g. `DAY(2)`, `SECOND(2, 3)` or `HOUR TO SECOND(3)`. A single field's
+/// The `<interval qualifier>` of an interval type or literal (SQL:2023 10.1),
+/// e.g. `DAY(2)`, `SECOND(2, 3)` or `HOUR TO SECOND(3)`. A single field's
 /// `fractional_precision` is only set together with its `precision`, and a range's
 /// `end_fractional_precision` only when its `end` is `SECOND`.
 #[derive(Clone, Debug, PartialEq, Eq)]
