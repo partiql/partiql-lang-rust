@@ -1,7 +1,5 @@
-//! Typed catalogs: tables with [`PartiqlShape`] schemas, and routine signatures.
-//!
-//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.spi.catalog.{Catalog, RoutineCatalog,
-//! Table, Catalogs, System}`.
+//! Typed catalogs: tables with [`PartiqlShape`] schemas, routine signatures, the set of catalogs
+//! a session can see, and the system catalog.
 
 use super::identifier::{Identifier, Name};
 use super::routine::{AggOverload, FnOverload, RoutineBinding};
@@ -26,7 +24,7 @@ impl Table {
         Table { name, schema }
     }
 
-    /// A table whose schema is `DYNAMIC`, partiql-lang-kotlin's default.
+    /// A table whose schema is `DYNAMIC`, for a table whose schema is not known.
     #[must_use]
     pub fn dynamic(name: Name) -> Self {
         Table::new(name, PartiqlShape::Dynamic)
@@ -43,7 +41,7 @@ impl Table {
     }
 }
 
-/// A catalog for typed planning (partiql-lang-kotlin `Catalog`).
+/// A catalog for typed planning: its tables and, by text, its routines.
 ///
 /// The catalog decides how an [`Identifier`] matches its names, in [`TypedCatalog::resolve_table`];
 /// the convention is that a regular part matches ignoring case and a delimited part exactly (see
@@ -69,30 +67,32 @@ pub trait TypedCatalog: Debug + Send + Sync {
 
     /// Whether the catalog's names can have namespaces. As the current catalog, one without
     /// them (`false`) is searched by [`super::resolve_table`] with the identifier as written
-    /// rather than with the session namespace prepended. The default is `true`, as every
-    /// partiql-lang-kotlin catalog is treated. A catalog that wraps another must forward this.
+    /// rather than with the session namespace prepended. The default is `true`: the session
+    /// namespace is prepended. A catalog that wraps another must forward this.
     fn has_namespaces(&self) -> bool {
         true
     }
 
-    /// The scalar function overloads named `name` (partiql-lang-kotlin's legacy lookup by text).
+    /// The scalar function overloads named `name` (lookup by text, for catalogs that do not
+    /// resolve routines by identifier).
     fn get_functions(&self, _session: &Session, _name: &str) -> Vec<Arc<dyn FnOverload>> {
         vec![]
     }
 
-    /// The aggregation overloads named `name` (partiql-lang-kotlin's legacy lookup by text).
+    /// The aggregation overloads named `name` (lookup by text, for catalogs that do not resolve
+    /// routines by identifier).
     fn get_aggregations(&self, _session: &Session, _name: &str) -> Vec<Arc<dyn AggOverload>> {
         vec![]
     }
 
-    /// This catalog as a [`RoutineCatalog`], if it is one; partiql-lang-kotlin resolves routines
-    /// in a `RoutineCatalog` by identifier and in any other catalog by text.
+    /// This catalog as a [`RoutineCatalog`], if it is one. Routines are resolved by identifier in
+    /// a `RoutineCatalog` and by text in any other catalog.
     fn as_routine_catalog(&self) -> Option<&dyn RoutineCatalog> {
         None
     }
 }
 
-/// A catalog that resolves routines by identifier (partiql-lang-kotlin `RoutineCatalog`).
+/// A catalog that resolves routines by identifier.
 ///
 /// An implementor must also return `Some(self)` from [`TypedCatalog::as_routine_catalog`];
 /// otherwise its routines are looked up only by text, through [`TypedCatalog::get_functions`]
@@ -159,7 +159,7 @@ pub struct CatalogNameAmbiguous {
 impl CatalogNameAmbiguous {
     #[must_use]
     pub fn new(mut catalog_names: Vec<String>) -> Self {
-        // Java's String order: by UTF-16 code unit.
+        // Ordered by UTF-16 code unit, not by Unicode scalar value.
         catalog_names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
         CatalogNameAmbiguous { catalog_names }
     }
@@ -170,7 +170,7 @@ impl CatalogNameAmbiguous {
     }
 }
 
-/// The catalogs of a session, by name (partiql-lang-kotlin `Catalogs`). Its `Debug` output lists
+/// The catalogs of a session, by name. Its `Debug` output lists
 /// the catalogs' names only.
 #[derive(Clone, Default)]
 pub struct Catalogs {

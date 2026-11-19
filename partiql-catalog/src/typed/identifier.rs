@@ -1,20 +1,17 @@
-//! Identifiers as written in a query, and the canonical names a catalog resolves them to.
-//!
-//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.spi.catalog.{Identifier, Name, Namespace,
-//! Path}`.
+//! Identifiers as written in a query, the canonical names a catalog resolves them to, and the
+//! namespaces and paths those names live in.
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-/// Whether `a` and `b` are equal ignoring case, with the semantics of partiql-lang-kotlin's
-/// `String.equals(other, ignoreCase = true)`, i.e. Java's `String.equalsIgnoreCase`.
+/// Whether `a` and `b` are equal ignoring case, by per-character simple case mapping.
 ///
 /// The strings are compared character by character, without full Unicode case folding: two
 /// characters are equal if they are the same, if their uppercase forms are the same, or if the
 /// lowercase forms of their uppercase forms are the same. So `"Ä"` matches `"ä"`, and the
 /// dotless `"ı"` matches `"I"`, but `"ß"` does not match `"SS"`. Characters are compared as
-/// Unicode scalar values (as JDK 16 and later compare supplementary characters), using the case
-/// mappings of the Unicode version Rust's standard library implements.
+/// Unicode scalar values (a supplementary character is one character, not two UTF-16 code units),
+/// using the case mappings of the Unicode version Rust's standard library implements.
 #[must_use]
 pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     let mut a = a.chars();
@@ -38,9 +35,9 @@ pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     }
 }
 
-/// Java's `Character.toUpperCase(int)`: the single-character uppercase mapping. Rust's
-/// `char::to_uppercase` is the full mapping; where that is several characters (e.g. `ß` to `SS`)
-/// Java keeps the character unchanged.
+/// The simple (single-character) uppercase mapping. Rust's `char::to_uppercase` is the full
+/// mapping; where that is several characters (e.g. `ß` to `SS`) the character is kept
+/// unchanged.
 fn simple_upper(c: char) -> char {
     let mut up = c.to_uppercase();
     match (up.next(), up.next()) {
@@ -49,7 +46,7 @@ fn simple_upper(c: char) -> char {
     }
 }
 
-/// Java's `Character.toLowerCase(int)`: the single-character lowercase mapping. The only
+/// The simple (single-character) lowercase mapping. The only
 /// character whose full lowercase mapping is several characters is U+0130 (LATIN CAPITAL LETTER
 /// I WITH DOT ABOVE), whose single-character mapping is `i`.
 fn simple_lower(c: char) -> char {
@@ -66,8 +63,8 @@ fn simple_lower(c: char) -> char {
 /// One part of an [`Identifier`]: its text and whether it was written regular (unquoted) or
 /// delimited (double-quoted).
 ///
-/// As in partiql-lang-kotlin (`Identifier.Simple`), equality and hashing use only the text, not
-/// whether the part is regular.
+/// Equality and hashing use only the text, not whether the part is regular: `a` and `"a"` are
+/// equal.
 #[derive(Debug, Clone, Eq)]
 pub struct IdentPart {
     text: String,
@@ -456,7 +453,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple_mappings_follow_java() {
+    fn simple_mappings_are_single_character() {
         assert_eq!(simple_upper('a'), 'A');
         assert_eq!(simple_upper('\u{DF}'), '\u{DF}'); // ß has no single-character uppercase
         assert_eq!(simple_lower('\u{130}'), 'i');

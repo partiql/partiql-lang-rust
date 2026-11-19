@@ -1,6 +1,4 @@
 //! The planning session: the current catalog and namespace, the catalogs, and the routine path.
-//!
-//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.spi.catalog.Session`.
 
 use super::catalog::{Catalogs, SystemCatalog, TypedCatalog};
 use super::identifier::{Namespace, Path};
@@ -18,7 +16,7 @@ pub enum SessionError {
     DuplicateCatalogName(String),
 }
 
-/// A planning session (partiql-lang-kotlin `Session`). Build one with [`Session::builder`].
+/// A planning session. Build one with [`Session::builder`].
 ///
 /// Its `Debug` output omits the identity and the property values, which may be sensitive;
 /// property keys are shown, so they should not hold secrets.
@@ -160,8 +158,8 @@ impl SessionBuilder {
         self
     }
 
-    /// Adds catalogs, whose names must be unique. As in partiql-lang-kotlin, the system catalog
-    /// replaces a catalog with the same name.
+    /// Adds catalogs, whose names must be unique. The system catalog replaces a catalog with the
+    /// same name.
     #[must_use]
     pub fn catalogs(mut self, catalogs: impl IntoIterator<Item = Arc<dyn TypedCatalog>>) -> Self {
         self.catalogs.extend(catalogs);

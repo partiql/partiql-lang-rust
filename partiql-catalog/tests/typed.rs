@@ -1,6 +1,5 @@
-//! Tests of `partiql_catalog::typed`, ported from partiql-lang-kotlin v1.6.1 where it has them
-//! (`CatalogsTest`, `SessionPathTest`, `RoutineBindingTest`) and otherwise derived from the
-//! behavior of its `Identifier`, `Env.resolveTable` and `StandardCatalog`.
+//! Tests of `partiql_catalog::typed`: identifier matching, table resolution order, catalogs,
+//! sessions and their routine paths, routine signatures, and the adapter over existing catalogs.
 
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog, TypeEnvEntry};
 use partiql_catalog::typed::{
@@ -60,11 +59,10 @@ fn delimited_non_ascii_matches_exactly() {
     assert!(!part.matches("cafe\u{301}"));
 }
 
-/// The regular comparison is Java's `String.equalsIgnoreCase` (partiql-lang-kotlin
-/// `Identifier.Simple.matches`), which maps one character to one character and does no full
-/// case folding.
+/// The regular comparison is per-character simple case mapping, which maps one character to one
+/// character and does no full case folding.
 #[test]
-fn regular_matching_follows_java_equals_ignore_case() {
+fn regular_matching_uses_simple_case_mapping() {
     // ß uppercases to "SS" only under full case mapping.
     assert!(!equals_ignore_case("stra\u{df}e", "STRASSE"));
     assert!(!equals_ignore_case("\u{df}", "ss"));
@@ -117,7 +115,7 @@ fn identifier_parts_and_display() {
     assert!(Identifier::regular_parts(Vec::<String>::new()).is_none());
 }
 
-/// partiql-lang-kotlin's `Identifier.Simple.equals` compares the text only.
+/// Identifier equality compares the text only.
 #[test]
 fn identifier_equality_ignores_regular_flag() {
     assert_eq!(IdentPart::regular("a"), IdentPart::delimited("a"));
@@ -154,7 +152,7 @@ fn name_namespace_and_path_display() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// A namespaced test catalog (partiql-lang-kotlin planner `TestCatalog`)
+// A namespaced test catalog
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
@@ -276,7 +274,7 @@ fn strs(v: &[&str]) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Table resolution order (partiql-lang-kotlin `Env.resolveTable`)
+// Table resolution order (`resolve_table`)
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -564,7 +562,7 @@ fn system_catalog_has_no_tables() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Catalogs (partiql-lang-kotlin `CatalogsTest`)
+// Catalogs
 // ---------------------------------------------------------------------------------------------
 
 fn names(catalogs: &Catalogs) -> Vec<String> {
@@ -625,7 +623,7 @@ fn catalogs_of_replaces_same_name_in_place() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Session (partiql-lang-kotlin `Session.Builder`, `SessionPathTest`)
+// Session builder and routine path
 // ---------------------------------------------------------------------------------------------
 
 fn ns(levels: &[&str]) -> Namespace {
@@ -797,7 +795,7 @@ fn custom_system_is_independent_of_builder_order_and_appended_when_missing() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Routine signatures (partiql-lang-kotlin `RoutineBindingTest`, `FnOverload.Builder`)
+// Routine signatures and bindings
 // ---------------------------------------------------------------------------------------------
 
 fn pow() -> Arc<dyn FnOverload> {
@@ -994,7 +992,7 @@ fn adapter_in_a_session_resolves_through_env_order() {
 }
 
 /// The adapter matches by the inner catalog's case rules: PartiqlCatalog folds case fully, so
-/// `STRASSE` finds `stra\u{df}e`, which `equals_ignore_case` (Java's rules) would not match.
+/// `STRASSE` finds `stra\u{df}e`, which `equals_ignore_case` (simple case mapping) would not match.
 #[test]
 fn adapter_follows_partiql_catalog_full_folding() {
     let mut catalog = PartiqlCatalog::default();
@@ -1057,7 +1055,7 @@ fn step3_ambiguity_not_raised_when_earlier_step_resolves() {
     );
 }
 
-/// As in partiql-lang-kotlin, the system catalog replaces a catalog with the same name.
+/// The system catalog replaces a catalog with the same name.
 #[test]
 fn system_catalog_replaces_same_named_catalog() {
     let s = Session::builder()
@@ -1136,7 +1134,7 @@ fn adapter_namespace_does_not_match_table_named_like_it() {
 
 #[test]
 fn namespaced_catalog_keeps_step1_with_namespace() {
-    // The default `has_namespaces` is true: the PLK order is unchanged for other catalogs.
+    // The default `has_namespaces` is true: the session namespace is still prepended in step 1.
     let s = session(
         "main",
         &["shop"],
@@ -1193,8 +1191,8 @@ fn fixed_agg_overload_has_one_instance() {
     assert_eq!(binding.overloads().len(), 1);
 }
 
-/// A wrapper that does not forward `has_namespaces` gets partiql-lang-kotlin's order, where the
-/// namespace can match a table named like it; one that forwards it does not.
+/// A wrapper that does not forward `has_namespaces` gets the default (namespace prepended), where
+/// the namespace can match a table named like it; one that forwards it does not.
 #[test]
 fn wrapper_must_forward_has_namespaces() {
     #[derive(Debug)]
@@ -1231,7 +1229,7 @@ fn wrapper_must_forward_has_namespaces() {
 }
 
 /// A table in the current catalog named like a catalog shadows the qualifier (step 1 before
-/// step 3), with or without a namespace, as in partiql-lang-kotlin.
+/// step 3), with or without a namespace.
 #[test]
 fn table_named_like_current_catalog_shadows_qualifier() {
     for namespace in [&[][..], &["shop"][..]] {

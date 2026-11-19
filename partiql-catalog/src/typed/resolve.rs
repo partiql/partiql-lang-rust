@@ -1,6 +1,4 @@
 //! Resolving a table identifier against a session's catalogs.
-//!
-//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.planner.internal.Env.resolveTable`.
 
 use super::catalog::{CatalogNameAmbiguous, Table, TypedCatalog};
 use super::identifier::{IdentPart, Identifier, Name};
@@ -51,15 +49,14 @@ impl ResolvedTable {
 /// 1. in the current catalog, with the session namespace prepended to `identifier` (as
 ///    delimited parts), or, if the current catalog has no namespaces
 ///    ([`TypedCatalog::has_namespaces`]), as written, so the namespace is never matched against
-///    a table name as partiql-lang-kotlin would;
+///    a table name;
 /// 2. if `identifier` is qualified, in the current catalog as written (schema-qualified);
 /// 3. if `identifier` is qualified, in the catalog its first part names, matched as that part
 ///    is written (regular: ignoring case, an error if that matches several; delimited:
 ///    exactly), with the remaining parts (catalog-qualified).
 ///
 /// The first lookup whose catalog resolves a name that it also has a table for wins, so a table
-/// in the current catalog named like a catalog shadows that catalog's qualifier (as in
-/// partiql-lang-kotlin). The path is the parts of the looked-up identifier after as many parts
+/// in the current catalog named like a catalog shadows that catalog's qualifier. The path is the parts of the looked-up identifier after as many parts
 /// as the table's name has (none if the name has as many or more).
 pub fn resolve_table(
     session: &Session,

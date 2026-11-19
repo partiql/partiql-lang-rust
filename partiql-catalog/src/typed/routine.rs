@@ -1,9 +1,7 @@
 //! Typed routine signatures: what a catalog says about its scalar functions and aggregations.
 //!
-//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.spi.function.{Parameter,
-//! RoutineOverloadSignature, RoutineSignature, FnOverload, AggOverload}` and
-//! `org.partiql.spi.catalog.RoutineBinding`, with [`PartiqlShape`] in place of `PType`. These
-//! types carry signatures only; choosing an overload for a call is the planner's job.
+//! Parameter and return types are [`PartiqlShape`]s. These types carry signatures only; choosing
+//! an overload for a call is the planner's job.
 
 use super::identifier::Name;
 use partiql_types::PartiqlShape;
@@ -68,7 +66,7 @@ impl RoutineOverloadSignature {
 }
 
 /// The concrete signature of a routine instance: its parameters, its return type, and two flags
-/// (partiql-lang-kotlin's IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument
+/// (IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument
 /// makes the call return NULL without invoking it; with `is_missing_call`, a MISSING argument
 /// makes it return MISSING. NULL and MISSING are absent values, not types.
 #[derive(Debug, Clone)]
@@ -81,7 +79,7 @@ pub struct RoutineSignature {
 }
 
 impl RoutineSignature {
-    /// A signature that is both null-call and missing-call, as partiql-lang-kotlin's default.
+    /// A signature that is both null-call and missing-call, the default.
     pub fn new(name: impl Into<String>, parameters: Vec<Parameter>, returns: PartiqlShape) -> Self {
         RoutineSignature {
             name: name.into(),
@@ -92,8 +90,7 @@ impl RoutineSignature {
         }
     }
 
-    /// Parameters named `arg0`, `arg1`, ... of the given types, as partiql-lang-kotlin's builders
-    /// name them.
+    /// Parameters named `arg0`, `arg1`, ... of the given types.
     pub fn with_types(
         name: impl Into<String>,
         parameter_types: impl IntoIterator<Item = PartiqlShape>,
@@ -159,7 +156,7 @@ impl RoutineSignature {
     }
 }
 
-/// A scalar function overload (partiql-lang-kotlin `FnOverload`).
+/// A scalar function overload: a declared signature and, for given argument types, an instance.
 pub trait FnOverload: Debug + Send + Sync {
     /// The signature the overload is declared with.
     fn signature(&self) -> &RoutineOverloadSignature;
@@ -170,7 +167,7 @@ pub trait FnOverload: Debug + Send + Sync {
     fn instance(&self, args: &[PartiqlShape]) -> Option<RoutineSignature>;
 }
 
-/// An aggregation overload (partiql-lang-kotlin `AggOverload`).
+/// An aggregation overload: a declared signature and, for given argument types, an instance.
 pub trait AggOverload: Debug + Send + Sync {
     /// The signature the overload is declared with.
     fn signature(&self) -> &RoutineOverloadSignature;
@@ -181,8 +178,7 @@ pub trait AggOverload: Debug + Send + Sync {
     fn instance(&self, args: &[PartiqlShape]) -> Option<RoutineSignature>;
 }
 
-/// A scalar function overload with one instance for any arguments, as partiql-lang-kotlin's
-/// `FnOverload.Builder` builds.
+/// A scalar function overload with one instance for any arguments.
 #[derive(Debug, Clone)]
 pub struct FixedFnOverload {
     signature: RoutineOverloadSignature,
@@ -209,8 +205,7 @@ impl FnOverload for FixedFnOverload {
     }
 }
 
-/// An aggregation overload with one instance for any arguments, as partiql-lang-kotlin's
-/// `AggOverload.Builder` builds.
+/// An aggregation overload with one instance for any arguments.
 #[derive(Debug, Clone)]
 pub struct FixedAggOverload {
     signature: RoutineOverloadSignature,
