@@ -11,6 +11,11 @@ use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 use thiserror::Error;
 
+mod kind;
+pub mod lattice;
+
+pub use kind::ShapeKind;
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Diagnostic)]
 #[error("ShapeResult Error")]
 #[non_exhaustive]
