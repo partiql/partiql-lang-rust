@@ -30,26 +30,25 @@ pub trait Type {}
 impl Type for StaticType {}
 
 /// Hashes an `IndexSet` independently of insertion order, as `IndexSet`'s `PartialEq` ignores
-/// order: each element is hashed on its own, and the sorted element hashes are fed to `state`
-/// (so the caller's hasher, keyed or not, still sees every element hash).
+/// order: each element is hashed on its own and the element hashes are combined commutatively
+/// (their wrapping sum and their xor), together with the length, without allocating.
+///
+/// The element hashes use a fixed-key hasher, so this is not resistant to hash flooding; shapes
+/// are built at plan time from a query's names, which bounds the number of elements.
 fn indexset_hash<H, T>(set: &IndexSet<T>, state: &mut H)
 where
     H: Hasher,
     T: Hash,
 {
-    let mut hashes: Vec<u64> = set
-        .iter()
-        .map(|val| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            val.hash(&mut hasher);
-            hasher.finish()
-        })
-        .collect();
-    hashes.sort_unstable();
-    state.write_usize(hashes.len());
-    for h in hashes {
-        state.write_u64(h);
-    }
+    let (sum, xor) = set.iter().fold((0u64, 0u64), |(sum, xor), val| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        val.hash(&mut hasher);
+        let h = hasher.finish();
+        (sum.wrapping_add(h), xor ^ h)
+    });
+    state.write_usize(set.len());
+    state.write_u64(sum);
+    state.write_u64(xor);
 }
 
 #[macro_export]
@@ -208,6 +207,15 @@ pub enum PartiqlShape {
     Dynamic,
     AnyOf(AnyOf),
     Static(StaticType),
+    /// No present value: the static type of an expression that can only evaluate to an absent
+    /// value, such as the `NULL` and `MISSING` literals.
+    ///
+    /// Types describe present values, and per the PartiQL specification every type's domain also
+    /// admits the absent values `NULL` and `MISSING` (a [`StaticType`]'s `nullable` flag is
+    /// unchanged by this). `NULL` and `MISSING` are therefore not kinds of their own; whether an
+    /// absent value is `NULL` or `MISSING` is a property of the literal value, not of its type.
+    /// This is how partiql-logical-planner's typer types `NULL` and `MISSING` literals, and it
+    /// plays the role of partiql-lang-kotlin's `UNKNOWN` type.
     Undefined,
 }
 
@@ -447,25 +455,28 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
         })
     }
 
-    /// Creates a non-nullable static type. The absent-value types [`Static::Null`] and
-    /// [`Static::Missing`] have no non-nullable form and stay nullable.
+    /// Creates a non-nullable static type.
     #[inline]
     pub fn new_non_nullable_static(&mut self, ty: Static) -> PartiqlShape {
         let id = self.id_gen.next_id();
         PartiqlShape::Static(StaticType {
-            nullable: ty.is_absent(),
             id,
             ty,
+            nullable: false,
             params: TypeParams::default(),
         })
     }
 
+    /// EXPERIMENTAL: may change until the typed-plan RFC settles (see [`TypeParams`]).
+    ///
     /// Creates a nullable static type and records in `params` which of `ty`'s parameters were
     /// left unspecified by the user (e.g. `VARCHAR` rather than `VARCHAR(1)`). `ty` carries the
     /// concrete value, which for an unspecified parameter is its default (see [`TypeParams`]).
     ///
     /// A flag is kept only if `ty` has that parameter and carries its default value; any other
-    /// flag is cleared, so a specified value is never mistaken for an unspecified one.
+    /// flag is cleared, so a specified value is never mistaken for an unspecified one. The one
+    /// exception, following partiql-lang-kotlin, is an interval's fractional precision flag,
+    /// which is kept for every qualifier (see the table on [`TypeParams`]).
     #[inline]
     pub fn new_static_with_params(&mut self, ty: Static, params: TypeParams) -> PartiqlShape {
         let id = self.id_gen.next_id();
@@ -477,6 +488,8 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
         })
     }
 
+    /// EXPERIMENTAL: may change until the typed-plan RFC settles.
+    ///
     /// Creates a closed, ordered struct whose fields keep their declaration order and any
     /// duplicate names (see [`StructType::new_row`]).
     #[inline]
@@ -487,8 +500,10 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
         self.new_struct(StructType::new_row(fields))
     }
 
+    /// EXPERIMENTAL: see [`MapType`].
+    ///
     /// Creates a nullable map type with the given key and value shapes; an error if the key is
-    /// [`PartiqlShape::Dynamic`] (see [`MapType::new`]).
+    /// or contains [`PartiqlShape::Dynamic`] (see [`MapType::new`]).
     #[inline]
     pub fn new_map(&mut self, key: PartiqlShape, value: PartiqlShape) -> ShapeResult<PartiqlShape> {
         Ok(self.new_static(Static::Map(MapType::new(key, value)?)))
@@ -644,7 +659,7 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
     }
 
     /// A non-nullable copy of a static shape, keeping its parameter flags; `None` for other
-    /// shapes. [`Static::Null`] and [`Static::Missing`] stay nullable.
+    /// shapes.
     #[inline]
     pub fn as_non_nullable(&mut self, shape: &PartiqlShape) -> Option<PartiqlShape> {
         if let PartiqlShape::Static(stype) = shape {
@@ -652,7 +667,7 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
             Some(PartiqlShape::Static(StaticType {
                 id,
                 ty: stype.ty.clone(),
-                nullable: stype.ty.is_absent(),
+                nullable: false,
                 params: stype.params,
             }))
         } else {
@@ -766,23 +781,38 @@ pub struct StaticType {
 /// collections that de-duplicate shapes (e.g. [`AnyOf`] or a set of [`StructField`]s) treat
 /// `VARCHAR` and `VARCHAR(1)` as the same shape and keep whichever was inserted first.
 ///
-/// A set flag means the payload holds the default for that parameter. The defaults are the
-/// ones partiql-lang-kotlin's planner uses for a type written without the parameter:
+/// A set flag means the payload holds a default for that parameter. The defaults are the ones
+/// partiql-lang-kotlin uses for a type written without the parameter (its planner's, plus the
+/// `TIME` factory precision described below):
 ///
 /// | Kind | Default |
 /// |---|---|
 /// | `StringFixed`, `StringVarying` (`CHAR`, `VARCHAR`) | length 1 |
 /// | `Blob`, `Clob` | length 2147483647 (`i32::MAX`) |
 /// | `DecimalP`, `NumericP` | precision 38, scale 0 |
-/// | `Time`, `TimeTz` | precision 0 |
+/// | `Time`, `TimeTz` | precision 0 or 6 (see below) |
 /// | `Timestamp`, `TimestampTz` | precision 6 |
-/// | `Interval` | leading precision 2, fractional seconds precision 6 |
+/// | `Interval` | leading precision 2; fractional seconds precision 6, or 0 without a SECOND field (see below) |
+///
+/// The defaults are also public constants ([`DEFAULT_CHAR_LENGTH`] and the others).
 ///
 /// [`ShapeBuilder::new_static_with_params`] keeps a flag only where the kind has that parameter
 /// and carries its default, so consumers such as DDL encoders can omit a flagged parameter
-/// without losing a specified value.
+/// without losing a specified value. Two cases follow partiql-lang-kotlin rather than that rule:
+///
+/// - `TIME` and `TIME WITH TIME ZONE` keep the precision flag on precision 0 and on precision 6.
+///   partiql-lang-kotlin's planner types a written `TIME` as `TIME(0)` with the
+///   unspecified-precision meta, while its `PType.time()` / `PType.timez()` factories build
+///   `TIME(6)` with the same meta; `Time(0)` stands for the former and `Time(6)` for the latter.
+///   Both print as a bare `TIME` in DDL, which a planner reads back as `TIME(0)`, so a flagged
+///   `Time(6)` does not round-trip through DDL text.
+/// - An interval keeps the fractional precision flag for every qualifier, as
+///   partiql-lang-kotlin's `IntervalUtils.kt` sets the meta whenever no fractional precision was
+///   written; without a SECOND field the stored fractional precision is 0.
 ///
 /// Build one from [`TypeParams::default`] with the `with_*` methods; more flags may be added.
+///
+/// EXPERIMENTAL: the flags and their defaults may change until the typed-plan RFC settles.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct TypeParams {
@@ -796,14 +826,24 @@ pub struct TypeParams {
     pub unspecified_fractional_precision: bool,
 }
 
-const DEFAULT_LENGTH: usize = 1;
-const DEFAULT_LOB_LENGTH: usize = i32::MAX as usize;
-const DEFAULT_DECIMAL_PRECISION: usize = 38;
-const DEFAULT_DECIMAL_SCALE: usize = 0;
-const DEFAULT_TIME_PRECISION: usize = 0;
-const DEFAULT_TIMESTAMP_PRECISION: usize = 6;
-const DEFAULT_INTERVAL_PRECISION: usize = 2;
-const DEFAULT_INTERVAL_FRACTIONAL_PRECISION: usize = 6;
+/// Default length of `CHAR` and `VARCHAR` (see [`TypeParams`]).
+pub const DEFAULT_CHAR_LENGTH: usize = 1;
+/// Default length of `BLOB` and `CLOB`: partiql-lang-kotlin's `Integer.MAX_VALUE`.
+pub const DEFAULT_LOB_LENGTH: usize = i32::MAX as usize;
+/// Default precision of `DECIMAL` and `NUMERIC`.
+pub const DEFAULT_DECIMAL_PRECISION: usize = 38;
+/// Default scale of `DECIMAL` and `NUMERIC`.
+pub const DEFAULT_DECIMAL_SCALE: usize = 0;
+/// Precision partiql-lang-kotlin's planner gives a `TIME` written without one.
+pub const DEFAULT_TIME_PRECISION: usize = 0;
+/// Precision of partiql-lang-kotlin's `PType.time()` and `PType.timez()` factories.
+pub const DEFAULT_TIME_FACTORY_PRECISION: usize = 6;
+/// Default precision of `TIMESTAMP` and `TIMESTAMP WITH TIME ZONE`.
+pub const DEFAULT_TIMESTAMP_PRECISION: usize = 6;
+/// Default leading field precision of an interval.
+pub const DEFAULT_INTERVAL_PRECISION: usize = 2;
+/// Default fractional seconds precision of an interval with a SECOND field.
+pub const DEFAULT_INTERVAL_FRACTIONAL_PRECISION: usize = 6;
 
 impl TypeParams {
     /// These flags with every flag cleared that `ty` has no such parameter for, or whose
@@ -811,7 +851,7 @@ impl TypeParams {
     fn normalized_for(self, ty: &Static) -> TypeParams {
         let (length, precision, scale, fraction) = match ty {
             Static::StringFixed(n) | Static::StringVarying(n) => {
-                (*n == DEFAULT_LENGTH, false, false, false)
+                (*n == DEFAULT_CHAR_LENGTH, false, false, false)
             }
             Static::Blob(n) | Static::Clob(n) => (*n == DEFAULT_LOB_LENGTH, false, false, false),
             Static::DecimalP(p, s) | Static::NumericP(p, s) => (
@@ -820,9 +860,12 @@ impl TypeParams {
                 *s == DEFAULT_DECIMAL_SCALE,
                 false,
             ),
-            Static::Time(p) | Static::TimeTz(p) => {
-                (false, *p == DEFAULT_TIME_PRECISION, false, false)
-            }
+            Static::Time(p) | Static::TimeTz(p) => (
+                false,
+                *p == DEFAULT_TIME_PRECISION || *p == DEFAULT_TIME_FACTORY_PRECISION,
+                false,
+                false,
+            ),
             Static::Timestamp(p) | Static::TimestampTz(p) => {
                 (false, *p == DEFAULT_TIMESTAMP_PRECISION, false, false)
             }
@@ -961,6 +1004,7 @@ pub enum Static {
     Int64,
     Bool,
     Decimal,
+    /// `DECIMAL(p,s)`. Not validated here (e.g. `s <= p`); the planner validates the parameters.
     DecimalP(usize, usize),
 
     Float32,
@@ -974,12 +1018,14 @@ pub enum Static {
 
     /// SQL `NUMERIC(p,s)`, distinct from `DECIMAL(p,s)` as in SQL and PLK's type codes. Note that
     /// partiql-lang-kotlin's planner (v1.6.1) types a `NUMERIC` written in a query as `DECIMAL`.
+    /// Not validated here (e.g. `s <= p`); the planner validates the parameters.
     NumericP(usize, usize),
     /// `BLOB(n)`
     Blob(usize),
     /// `CLOB(n)`
     Clob(usize),
 
+    /// `DATE`
     Date,
     /// `TIME(p)` without time zone
     Time(usize),
@@ -992,31 +1038,22 @@ pub enum Static {
     /// `INTERVAL <qualifier>`, a year-month or day-time interval.
     Interval(IntervalType),
 
-    /// The type of the `NULL` literal (an absent value).
-    ///
-    /// partiql-lang-kotlin types both the `NULL` and the `MISSING` literal as `UNKNOWN`; its
-    /// counterpart here is `Null` for a `NULL` literal and [`Static::Missing`] for a `MISSING`
-    /// literal (and for expressions that evaluate to `MISSING`, such as an unresolved path). Both
-    /// map back to `UNKNOWN`. They are scalars (`is_scalar()` is `true`) and always nullable.
-    Null,
-    /// The type of the `MISSING` literal (an absent value); see [`Static::Null`].
-    Missing,
     /// A value of an embedded document format, named by its encoding (e.g. `ion`), whose type
-    /// is not known statically. As in partiql-lang-kotlin, the encoding does not take part in
-    /// equality or hashing (see [`VariantType`]).
+    /// is not known statically. The encoding takes part in equality and hashing (see
+    /// [`VariantType`]).
     Variant(VariantType),
 
     // Container Types
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-    /// A map from keys of one shape to values of another.
+    /// A map from keys of one shape to values of another. EXPERIMENTAL: see [`MapType`].
     Map(MapType),
 
     Graph(
         /* TODO: https://github.com/partiql/partiql-lang/blob/main/RFCs/0025-graph-data-model.md */
     ),
-    // TODO Add BitString and ByteString types
+    // TODO Add BitString and ByteString types (no tracking issue yet)
 }
 
 #[non_exhaustive]
@@ -1042,11 +1079,6 @@ impl Static {
 
     pub fn is_struct(&self) -> bool {
         matches!(self, Static::Struct(_))
-    }
-
-    /// The absent-value types `Null` and `Missing`.
-    fn is_absent(&self) -> bool {
-        matches!(self, Static::Null | Static::Missing)
     }
 
     pub fn category(&self) -> StaticCategory<'_> {
@@ -1090,8 +1122,6 @@ impl Display for Static {
             Static::Timestamp(p) => write!(f, "Timestamp({p})"),
             Static::TimestampTz(p) => write!(f, "TimestampTz({p})"),
             Static::Interval(i) => std::fmt::Display::fmt(i, f),
-            Static::Null => write!(f, "Null"),
-            Static::Missing => write!(f, "Missing"),
             Static::Variant(v) => std::fmt::Display::fmt(v, f),
             Static::Map(m) => std::fmt::Display::fmt(m, f),
             Static::Struct(inner) => std::fmt::Display::fmt(inner, f),
@@ -1143,9 +1173,17 @@ impl StructType {
         })
     }
 
+    /// EXPERIMENTAL: may change until the typed-plan RFC settles.
+    ///
     /// A closed, ordered struct whose fields keep their declaration order and allow duplicate
     /// names, e.g. the type of the rows of `SELECT a, a, b FROM t`. Its fields are held in a
     /// [`StructConstraint::FieldList`], so no-id shapes with the same name and type are kept.
+    ///
+    /// A row's positions are the positions of its declared fields: field `i` of the type
+    /// describes the `i`-th attribute of each row value. partiql-lang-kotlin's row fields have no
+    /// optionality, so a typer that matches it builds rows from [`StructField::new`] only; a
+    /// field built with [`StructField::new_optional`] (an attribute that may be absent, and so
+    /// shift the later positions) has no partiql-lang-kotlin counterpart.
     pub fn new_row<I>(fields: I) -> Self
     where
         I: IntoIterator<Item = StructField>,
@@ -1224,6 +1262,7 @@ pub enum StructConstraint {
     DuplicateAttrs(bool),
     Fields(#[educe(Hash(method(indexset_hash)))] IndexSet<StructField>),
     /// Fields in declaration order, duplicate names kept (see [`StructType::new_row`]).
+    /// EXPERIMENTAL: may change until the typed-plan RFC settles.
     FieldList(Vec<StructField>),
 }
 
@@ -1370,6 +1409,11 @@ impl Display for ArrayType {
 }
 
 /// The type of a map: keys of one shape, values of another.
+///
+/// EXPERIMENTAL: MAP is specified by the PartiQL MAP type RFC
+/// (<https://github.com/partiql/partiql-lang/blob/main/RFCs/0104-RFC-Map-Type.md>), and
+/// partiql-lang-kotlin v1.6.1 marks its MAP type deprecated/experimental; this type may change
+/// until both settle.
 #[derive(Educe, Eq, Debug, Clone)]
 #[educe(PartialEq, Hash)]
 pub struct MapType {
@@ -1379,10 +1423,13 @@ pub struct MapType {
 
 impl MapType {
     /// A map type. As in partiql-lang-kotlin, the key shape must not be
-    /// [`PartiqlShape::Dynamic`]; that is an error.
+    /// [`PartiqlShape::Dynamic`]; neither may it be a union with a `Dynamic` member, which would
+    /// admit any key as well. Either is an error. Any other key shape is accepted, collections
+    /// such as `MAP<ARRAY<INT>, STRING>` included, as in partiql-lang-kotlin (the MAP RFC lists
+    /// collection keys as future work).
     #[inline]
     pub fn new(key: PartiqlShape, value: PartiqlShape) -> ShapeResult<Self> {
-        if key.is_dynamic() {
+        if contains_dynamic(&key) {
             return Err(ShapeResultError::DynamicMapKey);
         }
         Ok(MapType {
@@ -1391,14 +1438,25 @@ impl MapType {
         })
     }
 
+    /// The shape of the map's keys.
     #[inline]
     pub fn key_type(&self) -> &PartiqlShape {
         &self.key
     }
 
+    /// The shape of the map's values.
     #[inline]
     pub fn value_type(&self) -> &PartiqlShape {
         &self.value
+    }
+}
+
+/// `shape` is [`PartiqlShape::Dynamic`] or a union with a member that is or contains it.
+fn contains_dynamic(shape: &PartiqlShape) -> bool {
+    match shape {
+        PartiqlShape::Dynamic => true,
+        PartiqlShape::AnyOf(any_of) => any_of.types().any(contains_dynamic),
+        _ => false,
     }
 }
 
@@ -1412,18 +1470,31 @@ impl Display for MapType {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub enum IntervalQualifier {
+    /// `YEAR`
     Year,
+    /// `MONTH`
     Month,
+    /// `YEAR TO MONTH`
     YearToMonth,
+    /// `DAY`
     Day,
+    /// `HOUR`
     Hour,
+    /// `MINUTE`
     Minute,
+    /// `SECOND`
     Second,
+    /// `DAY TO HOUR`
     DayToHour,
+    /// `DAY TO MINUTE`
     DayToMinute,
+    /// `DAY TO SECOND`
     DayToSecond,
+    /// `HOUR TO MINUTE`
     HourToMinute,
+    /// `HOUR TO SECOND`
     HourToSecond,
+    /// `MINUTE TO SECOND`
     MinuteToSecond,
 }
 
@@ -1431,7 +1502,9 @@ pub enum IntervalQualifier {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub enum IntervalFamily {
+    /// `YEAR`, `MONTH` and `YEAR TO MONTH` intervals.
     YearMonth,
+    /// Intervals of days, hours, minutes and seconds.
     DayTime,
 }
 
@@ -1481,6 +1554,9 @@ pub struct IntervalType {
 impl IntervalType {
     /// An interval type. `fractional_precision` is ignored (stored as 0) when `qualifier` has no
     /// SECOND field, so that e.g. `INTERVAL YEAR(2)` has a single representation.
+    ///
+    /// The precisions are not validated here (e.g. SQL requires a leading precision greater than
+    /// 0); the planner validates them.
     #[inline]
     pub fn new(
         qualifier: IntervalQualifier,
@@ -1499,21 +1575,25 @@ impl IntervalType {
         }
     }
 
+    /// The interval qualifier, e.g. `DAY TO SECOND`.
     #[inline]
     pub fn qualifier(&self) -> IntervalQualifier {
         self.qualifier
     }
 
+    /// The leading field precision.
     #[inline]
     pub fn precision(&self) -> usize {
         self.precision
     }
 
+    /// The fractional seconds precision; 0 when the qualifier has no SECOND field.
     #[inline]
     pub fn fractional_precision(&self) -> usize {
         self.fractional_precision
     }
 
+    /// The interval family (year-month or day-time) of the qualifier.
     #[inline]
     pub fn family(&self) -> IntervalFamily {
         self.qualifier.family()
@@ -1545,12 +1625,12 @@ impl Display for IntervalType {
 
 /// The payload of [`Static::Variant`]: the name of the value's encoding (e.g. `ion`).
 ///
-/// As in partiql-lang-kotlin (whose `VARIANT` type compares only its type code), the encoding
-/// does not take part in equality or hashing: every `VARIANT` type equals every other.
-#[derive(Educe, Eq, Debug, Clone)]
-#[educe(PartialEq, Hash)]
+/// The encoding takes part in equality and hashing, so `VARIANT` types of different encodings
+/// differ. This deliberately diverges from partiql-lang-kotlin v1.6.1, whose `PTypeVariant`
+/// compares only its type code (its encoding field is marked `TODO: Use this somehow`): there,
+/// a union of `ion` and `json` variants would collapse to one encoding.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct VariantType {
-    #[educe(PartialEq(ignore), Hash(ignore))]
     encoding: String,
 }
 

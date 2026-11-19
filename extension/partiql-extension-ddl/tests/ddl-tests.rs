@@ -4,7 +4,7 @@ use partiql_types::{
     struct_fields, type_bag, type_int, type_string, type_struct, PartiqlShapeBuilder,
     StructConstraint, StructField,
 };
-use partiql_types::{Static, StructType, VariantType};
+use partiql_types::{PartiqlShape, Static, StructType, VariantType, DEFAULT_LOB_LENGTH};
 
 #[test]
 fn basic_ddl_test() {
@@ -74,7 +74,6 @@ fn ddl_of_new_kinds() {
         (Static::TimeTz(3), "TIME(3) WITH TIME ZONE"),
         (Static::Timestamp(6), "TIMESTAMP(6)"),
         (Static::TimestampTz(6), "TIMESTAMP(6) WITH TIME ZONE"),
-        (Static::Variant(VariantType::new("ion")), "VARIANT('ion')"),
         (interval(IntervalQualifier::Year, 4, 0), "INTERVAL YEAR(4)"),
         (
             interval(IntervalQualifier::Month, 2, 0),
@@ -131,14 +130,22 @@ fn ddl_of_new_kinds() {
     }
 
     let (k, v) = (type_string!(bld), type_int!(bld));
-    assert_eq!(
-        column_ddl(bld.new_map(k, v).unwrap()),
-        r#""c" MAP<VARCHAR,INT>"#
-    );
+    let map = bld.new_map(k, v).unwrap();
+    assert_eq!(column_ddl(map.clone()), r#""c" MAP<VARCHAR,INT>"#);
+    let not_null_map = bld.as_non_nullable(&map).unwrap();
+    assert_eq!(column_ddl(not_null_map), r#""c" MAP<VARCHAR,INT> NOT NULL"#);
 
     let (a1, a2) = (type_int!(bld), type_string!(bld));
     let row = bld.new_row([StructField::new("a", a1), StructField::new("a", a2)]);
-    assert_eq!(column_ddl(row), r#""c" STRUCT<"a": INT,"a": VARCHAR>"#);
+    assert_eq!(
+        column_ddl(row.clone()),
+        r#""c" STRUCT<"a": INT,"a": VARCHAR>"#
+    );
+    let not_null_row = bld.as_non_nullable(&row).unwrap();
+    assert_eq!(
+        column_ddl(not_null_row),
+        r#""c" STRUCT<"a": INT,"a": VARCHAR> NOT NULL"#
+    );
 }
 
 #[test]
@@ -155,9 +162,9 @@ fn ddl_omits_unspecified_parameters() {
     let cases = [
         (Static::StringVarying(1), length, "VARCHAR"),
         (Static::StringFixed(1), length, "CHAR"),
-        // partiql-lang-kotlin's planner defaults: BLOB/CLOB length i32::MAX, TIME precision 0.
-        (Static::Blob(i32::MAX as usize), length, "BLOB"),
-        (Static::Clob(i32::MAX as usize), length, "CLOB"),
+        // partiql-lang-kotlin's defaults: BLOB/CLOB length i32::MAX, TIME precision 0 or 6.
+        (Static::Blob(DEFAULT_LOB_LENGTH), length, "BLOB"),
+        (Static::Clob(DEFAULT_LOB_LENGTH), length, "CLOB"),
         (Static::NumericP(38, 0), precision, "NUMERIC"),
         (Static::NumericP(10, 0), scale, "NUMERIC(10)"),
         (Static::NumericP(38, 2), precision_only, "NUMERIC(38, 2)"),
@@ -170,6 +177,7 @@ fn ddl_omits_unspecified_parameters() {
             "DECIMAL(10, 2)",
         ),
         (Static::Time(0), precision, "TIME"),
+        (Static::Time(6), precision, "TIME"),
         (Static::TimeTz(0), precision, "TIME WITH TIME ZONE"),
         (Static::Timestamp(6), precision, "TIMESTAMP"),
         (
@@ -232,7 +240,7 @@ fn ddl_keeps_parameters_whose_flag_does_not_match_the_payload() {
         (Static::Clob(16), "CLOB(16)"),
         (Static::DecimalP(10, 2), "DECIMAL(10, 2)"),
         (Static::NumericP(38, 2), "NUMERIC(38, 2)"),
-        (Static::Time(6), "TIME(6)"),
+        (Static::Time(3), "TIME(3)"),
         (Static::Timestamp(3), "TIMESTAMP(3)"),
         (Static::TimestampTz(0), "TIMESTAMP(0) WITH TIME ZONE"),
         (
@@ -248,16 +256,18 @@ fn ddl_keeps_parameters_whose_flag_does_not_match_the_payload() {
     // Flags a kind does not have are dropped.
     let int = bld.new_static_with_params(Static::Int32, all);
     assert!(int.expect_static().unwrap().params().is_default());
+    // The exception: as in partiql-lang-kotlin (IntervalUtils.kt), an interval keeps the
+    // fractional flag for every qualifier, even YEAR, which has no fractional field.
     let year = Static::Interval(IntervalType::new(IntervalQualifier::Year, 2, 0));
     let year = bld.new_static_with_params(year, all);
     let params = *year.expect_static().unwrap().params();
-    // As in partiql-lang-kotlin, the fractional flag is kept for any qualifier.
     assert!(params.unspecified_precision && params.unspecified_fractional_precision);
 }
 
 #[test]
-fn ddl_of_string_and_datetime_is_lossy_as_before() {
-    // `String` and `DateTime` print as on main, the same text as unspecified VARCHAR/TIMESTAMP.
+fn ddl_of_legacy_string_datetime_and_decimal_matches_their_unspecified_forms() {
+    // `String`, `DateTime` and `Decimal` print the same text as an unspecified VARCHAR,
+    // TIMESTAMP and DECIMAL.
     use partiql_types::TypeParams;
     let mut bld = PartiqlShapeBuilder::default();
     let unspecified_varchar = bld.new_static_with_params(
@@ -275,6 +285,16 @@ fn ddl_of_string_and_datetime_is_lossy_as_before() {
     assert_eq!(
         column_ddl(bld.new_static(Static::DateTime)),
         column_ddl(unspecified_ts)
+    );
+    let unspecified_decimal = bld.new_static_with_params(
+        Static::DecimalP(38, 0),
+        TypeParams::default()
+            .with_unspecified_precision(true)
+            .with_unspecified_scale(true),
+    );
+    assert_eq!(
+        column_ddl(bld.new_static(Static::Decimal)),
+        column_ddl(unspecified_decimal)
     );
 }
 
@@ -296,7 +316,18 @@ fn ddl_of_an_unsupported_kind_is_an_error() {
     let err = PartiqlBasicDdlEncoder::new(DdlFormat::Compact)
         .ddl(&shape)
         .expect_err("graph has no DDL");
-    assert!(err.to_string().contains("Graph"), "{err}");
+    assert!(err.to_string().contains("`Graph` has no DDL form"), "{err}");
+}
+
+#[test]
+fn ddl_of_variant_is_an_error_until_a_syntax_is_agreed() {
+    let mut bld = PartiqlShapeBuilder::default();
+    let variant = bld.new_static(Static::Variant(VariantType::new("ion")));
+    let err = try_column_ddl("c", variant).expect_err("no VARIANT DDL");
+    assert!(
+        err.to_string().contains("`Variant(ion)` has no DDL form"),
+        "{err}"
+    );
 }
 
 /// DDL of a one-column table whose column has the given shape, or the encoding error.
@@ -320,22 +351,6 @@ fn try_column_ddl(
 }
 
 #[test]
-fn ddl_of_absent_value_types_is_an_error() {
-    // The absent-value types have no DDL form: e.g. `NULL` after a column name would read as a
-    // constraint, not a type. This holds wherever they appear, including inside a UNION.
-    let mut bld = PartiqlShapeBuilder::default();
-    for kind in [Static::Null, Static::Missing] {
-        for shape in [
-            bld.new_static(kind.clone()),
-            bld.new_non_nullable_static(kind.clone()),
-        ] {
-            let err = try_column_ddl("c", shape).expect_err("no DDL");
-            assert!(err.to_string().contains("unsupported"), "{err}");
-        }
-    }
-}
-
-#[test]
 fn ddl_of_nested_maps_and_rows() {
     let mut bld = PartiqlShapeBuilder::default();
     let (k, v) = (type_string!(bld), type_int!(bld));
@@ -351,7 +366,7 @@ fn ddl_of_nested_maps_and_rows() {
 }
 
 #[test]
-fn ddl_rejects_text_it_cannot_quote_unambiguously() {
+fn ddl_rejects_field_names_it_cannot_quote_unambiguously() {
     let mut bld = PartiqlShapeBuilder::default();
     // Spaces and commas are fine inside a quoted name.
     assert_eq!(
@@ -369,29 +384,37 @@ fn ddl_rejects_text_it_cannot_quote_unambiguously() {
     // (e.g. `a" INT,"b` used to produce two columns).
     for name in [r#"a" INT,"b"#, r"a\", r#"q"uote"#] {
         let err = try_column_ddl(name, type_int!(bld)).expect_err(name);
-        assert!(err.to_string().contains("quote or backslash"), "{err}");
+        assert!(
+            err.to_string().contains("field name")
+                && err.to_string().contains("double quote or backslash"),
+            "{err}"
+        );
         let inner = struct_fields![(name, type_int!(bld))];
         let nested = type_struct![bld, IndexSet::from([inner])];
         let err = try_column_ddl("s", nested).expect_err(name);
-        assert!(err.to_string().contains("quote or backslash"), "{err}");
+        assert!(
+            err.to_string().contains("field name")
+                && err.to_string().contains("double quote or backslash"),
+            "{err}"
+        );
         let i = type_int!(bld);
         let row = bld.new_row([StructField::new(name, i)]);
         let (k, a) = (type_string!(bld), bld.new_array_of(row));
         let err = try_column_ddl("m", bld.new_map(k, a).unwrap()).expect_err(name);
-        assert!(err.to_string().contains("quote or backslash"), "{err}");
-    }
-    for encoding in ["it's", r"x\"] {
-        let variant = bld.new_static(Static::Variant(VariantType::new(encoding)));
-        let err = try_column_ddl("c", variant).expect_err(encoding);
-        assert!(err.to_string().contains("quote or backslash"), "{err}");
+        assert!(
+            err.to_string().contains("field name")
+                && err.to_string().contains("double quote or backslash"),
+            "{err}"
+        );
     }
 }
 
 #[test]
-fn ddl_writes_duplicate_column_names_as_main_does() {
+fn ddl_writes_duplicate_column_names() {
     let encoder = PartiqlBasicDdlEncoder::new(DdlFormat::Compact);
     let mut bld = PartiqlShapeBuilder::default();
-    // A row with a repeated name (`SELECT a, a`) encodes like a set-based struct does on main.
+    // A row with a repeated name (`SELECT a, a`) encodes its columns as declared, like a
+    // set-based struct with two same-named fields.
     let (a1, a2) = (type_int!(bld), type_string!(bld));
     let row = bld.new_row([StructField::new("a", a1), StructField::new("a", a2)]);
     let table = type_bag![bld, row];
@@ -413,21 +436,24 @@ fn ddl_writes_duplicate_column_names_as_main_does() {
 }
 
 #[test]
-fn ddl_of_nested_absent_value_types_is_an_error() {
+fn ddl_of_undefined_is_an_error_wherever_it_appears() {
+    // `Undefined` is the type of the NULL and MISSING literals (no present value); it has no DDL
+    // form as a column type or nested in a union, array, map or struct.
     let mut bld = PartiqlShapeBuilder::default();
-    for kind in [Static::Null, Static::Missing] {
-        let i = type_int!(bld);
-        let absent = bld.new_static(kind.clone());
-        let union = bld.any_of([i, absent]);
-        let absent = bld.new_static(kind.clone());
-        let array = bld.new_array_of(absent);
-        let (k, absent) = (type_string!(bld), bld.new_static(kind.clone()));
-        let map = bld.new_map(k, absent).unwrap();
-        let absent = bld.new_static(kind.clone());
-        let nested = type_struct![bld, IndexSet::from([struct_fields![("x", absent)]])];
-        for shape in [union, array, map, nested] {
-            let err = try_column_ddl("c", shape).expect_err("no DDL");
-            assert!(err.to_string().contains("unsupported"), "{err}");
-        }
+    let i = type_int!(bld);
+    let union = bld.any_of([i, PartiqlShape::Undefined]);
+    let array = bld.new_array_of(PartiqlShape::Undefined);
+    let k = type_string!(bld);
+    let map = bld.new_map(k, PartiqlShape::Undefined).unwrap();
+    let nested = type_struct![
+        bld,
+        IndexSet::from([struct_fields![("x", PartiqlShape::Undefined)]])
+    ];
+    for shape in [PartiqlShape::Undefined, union, array, map, nested] {
+        let err = try_column_ddl("c", shape.clone()).expect_err("no DDL");
+        assert!(
+            err.to_string().contains("`Undefined` is unsupported"),
+            "{shape}: {err}"
+        );
     }
 }
