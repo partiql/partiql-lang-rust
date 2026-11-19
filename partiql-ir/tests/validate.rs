@@ -301,23 +301,23 @@ fn rejects_shapes_outside_the_type_set() {
         [
             (
                 "action.rex.values[0].type".to_string(),
-                ViolationKind::NoPlkEquivalent
+                ViolationKind::NoCanonicalForm
             ),
             (
                 "action.rex.values[1].type".to_string(),
-                ViolationKind::NoPlkEquivalent
+                ViolationKind::NoCanonicalForm
             ),
             (
                 "action.rex.values[2].type.fields[0:o]".to_string(),
-                ViolationKind::NoPlkEquivalent
+                ViolationKind::NoCanonicalForm
             ),
             (
                 "action.rex.values[3].type".to_string(),
-                ViolationKind::NoPlkEquivalent
+                ViolationKind::NoCanonicalForm
             ),
             (
                 "action.rex.values[4].type".to_string(),
-                ViolationKind::NoPlkEquivalent
+                ViolationKind::NoCanonicalForm
             ),
         ]
     );
@@ -500,7 +500,7 @@ fn only_the_canonical_open_struct_is_accepted() {
         kinds(&plan),
         [(
             "action.rex.values[0].type".to_string(),
-            ViolationKind::NoPlkEquivalent
+            ViolationKind::NoCanonicalForm
         )]
     );
 }
@@ -521,7 +521,7 @@ fn rejects_a_row_with_extra_constraints() {
     let plan = Plan::query(Rex::var(mixed, 0, 0));
     assert!(kinds(&plan).contains(&(
         "action.rex.type".to_string(),
-        ViolationKind::NoPlkEquivalent
+        ViolationKind::NoCanonicalForm
     )));
 }
 

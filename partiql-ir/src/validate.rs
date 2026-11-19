@@ -109,8 +109,9 @@ pub enum ViolationKind {
     ErrorNotDynamic,
     /// A non-nullable shape.
     NotNullable,
-    /// A shape outside the typed planner's type set (see the module docs).
-    NoPlkEquivalent,
+    /// A shape with no canonical form in the typed plan: outside the typed planner's type set
+    /// (see the module docs), e.g. `Int`, a non-row closed struct, or an optional field.
+    NoCanonicalForm,
     /// A shape kind this crate does not know (`PartiqlShape` and `Static` are non-exhaustive).
     UnsupportedShape,
     /// A `RexCast` whose type is not its target.
@@ -140,8 +141,8 @@ impl Display for ViolationKind {
             ),
             ViolationKind::ErrorNotDynamic => write!(f, "error node is not typed Dynamic"),
             ViolationKind::NotNullable => write!(f, "non-nullable shape"),
-            ViolationKind::NoPlkEquivalent => {
-                write!(f, "shape has no partiql-lang-kotlin counterpart")
+            ViolationKind::NoCanonicalForm => {
+                write!(f, "shape has no canonical form in the typed plan")
             }
             ViolationKind::UnsupportedShape => write!(f, "unsupported shape kind"),
             ViolationKind::CastTypeNotTarget => write!(f, "cast type is not its target"),
@@ -559,18 +560,18 @@ fn check_shape(shape: &PartiqlShape, path: &str, out: &mut Vec<Violation>) {
                 | Static::Interval(_)
                 | Static::Variant(_) => {}
                 Static::Int | Static::Decimal | Static::DateTime | Static::Graph() => {
-                    here(out, ViolationKind::NoPlkEquivalent)
+                    here(out, ViolationKind::NoCanonicalForm)
                 }
                 Static::Struct(s) => {
                     // `STRUCT` is the one canonical open struct, `StructType::new_any()`.
                     let canonical_struct = is_canonical_struct(s);
                     if !canonical_struct {
-                        here(out, ViolationKind::NoPlkEquivalent);
+                        here(out, ViolationKind::NoCanonicalForm);
                     }
                     for (i, f) in s.fields().enumerate() {
                         let p = format!("{path}.fields[{i}:{}]", name_text(f.name()));
                         if f.is_optional() {
-                            push(out, p.clone(), ViolationKind::NoPlkEquivalent);
+                            push(out, p.clone(), ViolationKind::NoCanonicalForm);
                         }
                         check_shape(f.ty(), &p, out);
                     }
