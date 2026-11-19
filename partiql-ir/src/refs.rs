@@ -47,14 +47,20 @@ impl QualifiedName {
 }
 
 impl Display for QualifiedName {
-    /// `catalog.ns1.ns2.name`, parts written as stored (not quoted).
+    /// `"catalog"."ns1"."ns2"."name"`: every part double-quoted, a `"` in a part doubled, so
+    /// distinct names print distinctly (e.g. namespace `["s.x"]` vs `["s", "x"]`).
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.catalog)?;
+        write!(f, "{}", quote(&self.catalog))?;
         for part in &self.namespace {
-            write!(f, ".{part}")?;
+            write!(f, ".{}", quote(part))?;
         }
-        write!(f, ".{}", self.name)
+        write!(f, ".{}", quote(&self.name))
     }
+}
+
+/// `part` double-quoted, a `"` in it doubled.
+pub(crate) fn quote(part: &str) -> String {
+    format!("\"{}\"", part.replace('"', "\"\""))
 }
 
 /// A resolved routine (scalar function or aggregation) together with the signature it was
@@ -105,7 +111,7 @@ impl RoutineRef {
         &self.returns
     }
 
-    pub(crate) fn into_parts(self) -> (QualifiedName, String, Vec<PartiqlShape>, PartiqlShape) {
+    pub fn into_parts(self) -> (QualifiedName, String, Vec<PartiqlShape>, PartiqlShape) {
         (self.name, self.specific, self.params, self.returns)
     }
 }

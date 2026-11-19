@@ -43,7 +43,7 @@ impl RelType {
         self.ordered
     }
 
-    pub(crate) fn into_parts(self) -> (Vec<RelField>, bool) {
+    pub fn into_parts(self) -> (Vec<RelField>, bool) {
         (self.fields, self.ordered)
     }
 }
@@ -68,7 +68,7 @@ impl RelField {
     pub fn ty(&self) -> &PartiqlShape {
         &self.ty
     }
-    pub(crate) fn into_parts(self) -> (String, PartiqlShape) {
+    pub fn into_parts(self) -> (String, PartiqlShape) {
         (self.name, self.ty)
     }
 }
@@ -218,7 +218,7 @@ impl Collation {
     pub fn nulls(&self) -> Nulls {
         self.nulls
     }
-    pub(crate) fn into_parts(self) -> (Rex, Order, Nulls) {
+    pub fn into_parts(self) -> (Rex, Order, Nulls) {
         (self.column, self.order, self.nulls)
     }
 }
@@ -265,7 +265,7 @@ impl Measure {
     pub fn is_distinct(&self) -> bool {
         self.distinct
     }
-    pub(crate) fn into_parts(self) -> (RoutineRef, Vec<Rex>, bool) {
+    pub fn into_parts(self) -> (RoutineRef, Vec<Rex>, bool) {
         (self.agg, self.args, self.distinct)
     }
 }
@@ -288,7 +288,7 @@ impl Exclusion {
     pub fn items(&self) -> &[ExclusionItem] {
         &self.items
     }
-    pub(crate) fn into_parts(self) -> (Rex, Vec<ExclusionItem>) {
+    pub fn into_parts(self) -> (Rex, Vec<ExclusionItem>) {
         (self.var, self.items)
     }
 }
@@ -375,7 +375,7 @@ impl WindowFunction {
     pub fn args(&self) -> &[Rex] {
         &self.args
     }
-    pub(crate) fn into_parts(self) -> (WindowSignature, Vec<Rex>) {
+    pub fn into_parts(self) -> (WindowSignature, Vec<Rex>) {
         (self.signature, self.args)
     }
 }
@@ -415,7 +415,7 @@ impl WindowSignature {
     pub fn is_ignore_nulls(&self) -> bool {
         self.ignore_nulls
     }
-    pub(crate) fn into_parts(self) -> (String, Vec<PartiqlShape>, PartiqlShape, bool) {
+    pub fn into_parts(self) -> (String, Vec<PartiqlShape>, PartiqlShape, bool) {
         (self.name, self.params, self.returns, self.ignore_nulls)
     }
 }
@@ -440,7 +440,7 @@ impl WithElement {
     pub fn representation(&self) -> &Rex {
         &self.representation
     }
-    pub(crate) fn into_parts(self) -> (String, Rex) {
+    pub fn into_parts(self) -> (String, Rex) {
         (self.name, self.representation)
     }
 }

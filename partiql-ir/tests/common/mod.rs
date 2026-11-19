@@ -57,7 +57,7 @@ pub fn int_lit(v: i64) -> Rex {
     Rex::lit(int(), Value::from(v))
 }
 
-/// The shape of scribe's `default.T` subset used by the design's probe: a bag of
+/// The shape of a test table `default.s.T`: a bag of
 /// `ROW{a: BOOL, b: INTEGER, ts: TIMESTAMP(6)}` with an unspecified timestamp precision.
 pub fn t_row() -> PartiqlShape {
     let ts = b().new_static_with_params(
@@ -93,7 +93,14 @@ pub fn select_from_t() -> Plan {
 pub fn routine(name: &str, params: Vec<PartiqlShape>, returns: PartiqlShape) -> RoutineRef {
     RoutineRef::new(
         QualifiedName::new("$system", Vec::<String>::new(), name),
-        format!("{name}__{}", params.len()),
+        format!(
+            "{name}__{}",
+            params
+                .iter()
+                .map(render_shape)
+                .collect::<Vec<_>>()
+                .join("_")
+        ),
         params,
         returns,
     )
@@ -229,7 +236,7 @@ pub fn every_node() -> Plan {
             dynamic(),
             "abs",
             vec![abs_int, abs_str],
-            vec![Rex::var(dynamic(), 1, 0)],
+            vec![Rex::var(dynamic(), 0, 1)],
         ),
         Rex::error(dynamic()),
         Rex::map(
@@ -270,7 +277,15 @@ pub fn every_node() -> Plan {
         ),
         Rex::subquery_in(bool_(), scan(), vec![int_lit(1)]),
     ];
-    let out = rel_type(&[("_1", dynamic())]);
+    let names: Vec<String> = (1..=projections.len()).map(|i| format!("_{i}")).collect();
+    let out = RelType::new(
+        projections
+            .iter()
+            .zip(&names)
+            .map(|(p, n)| RelField::new(n.as_str(), p.ty().clone()))
+            .collect(),
+        false,
+    );
     let project = Rel::project(out, with, projections);
     Plan::query(Rex::select(
         bag(dynamic()),

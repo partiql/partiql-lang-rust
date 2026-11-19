@@ -1,8 +1,9 @@
-//! The visitor reaches every node kind; the test plan uses every one.
+//! The test plan uses every node kind, and the visitor reaches every node of it.
 mod common;
 
 use common::*;
-use partiql_ir::{tree, TreeNode};
+use partiql_ir::visit::{walk_rel, walk_rex};
+use partiql_ir::{tree, Rel, Rex, TreeNode, Visitor};
 use std::collections::BTreeSet;
 
 fn kinds<'a>(n: &TreeNode<'a>, out: &mut BTreeSet<&'static str>) {
@@ -71,4 +72,33 @@ fn every_node_plan_covers_the_plk_node_set() {
         .filter(|k| !PLK_NODES.contains(k))
         .collect();
     assert!(extra.is_empty(), "not a PLK node {extra:?}");
+}
+
+fn count_sources(n: &TreeNode<'_>) -> usize {
+    usize::from(n.source.is_some())
+        + n.children
+            .iter()
+            .map(|(_, c)| count_sources(c))
+            .sum::<usize>()
+}
+
+#[derive(Default)]
+struct Count(usize);
+impl Visitor for Count {
+    fn visit_rex(&mut self, rex: &Rex) {
+        self.0 += 1;
+        walk_rex(self, rex)
+    }
+    fn visit_rel(&mut self, rel: &Rel) {
+        self.0 += 1;
+        walk_rel(self, rel)
+    }
+}
+
+#[test]
+fn visitor_reaches_every_rex_and_rel() {
+    let plan = every_node();
+    let mut c = Count::default();
+    c.visit_plan(&plan);
+    assert_eq!(c.0, count_sources(&tree(&plan)));
 }

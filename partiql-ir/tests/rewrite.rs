@@ -2,7 +2,8 @@
 mod common;
 
 use common::*;
-use partiql_ir::walk::{rewrite_rex, walk_rex};
+use partiql_ir::rewrite::walk_rex as rewrite_rex;
+use partiql_ir::visit::walk_rex;
 use partiql_ir::{render_shape, Plan, Rewriter, Rex, RexOp, Visitor};
 use partiql_types::PartiqlShape;
 use partiql_value::Value;

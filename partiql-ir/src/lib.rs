@@ -13,10 +13,15 @@
 //!
 //! - Nodes are immutable: private fields, constructors, getters; build a changed copy with
 //!   `into_parts` / `from_parts` or a [`Rewriter`].
-//! - [`Visitor`] walks a plan; [`Rewriter`] rebuilds one.
+//! - [`Visitor`] walks a plan; [`Rewriter`] rebuilds one. An overriding method calls the
+//!   default traversal as [`visit::walk_rex`] / [`rewrite::walk_rex`] (and `walk_rel`,
+//!   `walk_plan`).
 //! - [`Plan::dump`] prints a plan as an indented tree; [`tree`] gives the same tree as data.
 //! - [`validate`] checks the invariants of a typed planner's output (no-id, non-union,
-//!   nullable shapes).
+//!   nullable shapes with a partiql-lang-kotlin counterpart).
+//!
+//! Plans are not `Send`/`Sync`: a literal holds a `partiql_value::Value`, which is not (the
+//! same holds for `partiql-logical`'s plan).
 //!
 //! Catalog objects are referenced by name ([`QualifiedName`]) and, for routines, by the
 //! resolved signature ([`RoutineRef`]), so this crate does not depend on a catalog API.
@@ -25,13 +30,15 @@ mod plan;
 mod print;
 mod refs;
 mod rel;
-mod rewrite;
+pub mod rewrite;
 mod rex;
 mod validate;
-mod visit;
+pub mod visit;
 
 pub use plan::{Action, Plan, Version};
-pub use print::{rel_tree, render_shape, rex_tree, tree, Attr, NodeType, TreeNode};
+pub use print::{
+    name_text, rel_tree, render_shape, rex_tree, tree, value_text, Attr, NodeType, Source, TreeNode,
+};
 pub use refs::{QualifiedName, RoutineRef};
 pub use rel::{
     Collation, Exclusion, ExclusionItem, JoinType, Measure, Nulls, Order, Rel, RelField, RelOp,
@@ -43,12 +50,3 @@ pub use rex::{
 };
 pub use validate::{validate, Violation, ViolationKind};
 pub use visit::Visitor;
-
-/// The default `walk_*` functions of [`Visitor`] and [`Rewriter`], for overriding methods to
-/// call.
-pub mod walk {
-    pub use crate::rewrite::{
-        walk_plan as rewrite_plan, walk_rel as rewrite_rel, walk_rex as rewrite_rex,
-    };
-    pub use crate::visit::{walk_plan, walk_rel, walk_rex};
-}

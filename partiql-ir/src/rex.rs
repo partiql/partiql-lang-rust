@@ -135,7 +135,9 @@ pub enum RexOp {
     /// A catalog table, by name; its shape is the [`Rex`]'s. `rex/RexTable.java:16`
     #[non_exhaustive]
     Table { table: QualifiedName },
-    /// A table by catalog and table id (a plan's symbol table). `rex/RexTableRef.java:13`
+    /// A table by catalog and table id, indexes into a symbol table that the planner returns
+    /// beside the plan (partiql-lang-kotlin's `SymbolTable.java:18`, not part of this crate).
+    /// `rex/RexTableRef.java:13`
     #[non_exhaustive]
     TableRef { catalog_id: u32, table_id: u32 },
     /// A variable: field `offset` of the scope `scope` levels out (0 = innermost).
@@ -161,7 +163,7 @@ impl CaseBranch {
     pub fn result(&self) -> &Rex {
         &self.result
     }
-    pub(crate) fn into_parts(self) -> (Rex, Rex) {
+    pub fn into_parts(self) -> (Rex, Rex) {
         (self.condition, self.result)
     }
 }
@@ -183,7 +185,7 @@ impl StructEntry {
     pub fn value(&self) -> &Rex {
         &self.value
     }
-    pub(crate) fn into_parts(self) -> (Rex, Rex) {
+    pub fn into_parts(self) -> (Rex, Rex) {
         (self.key, self.value)
     }
 }
@@ -205,7 +207,7 @@ impl MapEntry {
     pub fn value(&self) -> &Rex {
         &self.value
     }
-    pub(crate) fn into_parts(self) -> (Rex, Rex) {
+    pub fn into_parts(self) -> (Rex, Rex) {
         (self.key, self.value)
     }
 }

@@ -9,8 +9,8 @@
 use crate::plan::{Action, Plan, Version};
 use crate::refs::RoutineRef;
 use crate::rel::{Collation, ExclusionItem, JoinType, Nulls, Order, Rel, RelOp, RelType};
-use crate::rex::{Comparison, Quantifier, Rex, RexOp, SubqueryTest};
-use partiql_types::{PartiqlShape, Static};
+use crate::rex::{Comparison, MapEntry, Quantifier, Rex, RexOp, SubqueryTest};
+use partiql_types::{PartiqlShape, Static, StructType};
 use partiql_value::Value;
 use std::fmt::Write;
 
@@ -26,6 +26,16 @@ pub struct TreeNode<'a> {
     pub attrs: Vec<(String, Attr<'a>)>,
     /// The node's children, in field order, each with its role (field name, `[i]` for a list).
     pub children: Vec<(String, TreeNode<'a>)>,
+    /// The `Rex` or `Rel` this node shows, for checks that need the typed node.
+    pub source: Option<Source<'a>>,
+}
+
+/// The plan node a [`TreeNode`] shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum Source<'a> {
+    Rex(&'a Rex),
+    Rel(&'a Rel),
 }
 
 /// The type of a [`TreeNode`].
@@ -52,6 +62,7 @@ impl<'a> TreeNode<'a> {
             ty,
             attrs: vec![],
             children: vec![],
+            source: None,
         }
     }
 
@@ -106,7 +117,7 @@ pub fn tree(plan: &Plan) -> TreeNode<'_> {
 fn routine_tree(r: &RoutineRef) -> TreeNode<'_> {
     let n = TreeNode::new("RoutineRef", None)
         .text("name", r.name())
-        .text("specific", r.specific());
+        .text("specific", name_text(r.specific()));
     let n = r
         .params()
         .iter()
@@ -137,14 +148,20 @@ fn exclusion_item_tree(item: &ExclusionItem) -> TreeNode<'_> {
         }
         ExclusionItem::CollWildcard { .. } => TreeNode::new("Exclusion.CollWildcard", None),
         ExclusionItem::StructKey { key, .. } => {
-            TreeNode::new("Exclusion.StructKey", None).text("key", key)
+            TreeNode::new("Exclusion.StructKey", None).text("key", name_text(key))
         }
         ExclusionItem::StructSymbol { symbol, .. } => {
-            TreeNode::new("Exclusion.StructSymbol", None).text("symbol", symbol)
+            TreeNode::new("Exclusion.StructSymbol", None).text("symbol", name_text(symbol))
         }
         ExclusionItem::StructWildcard { .. } => TreeNode::new("Exclusion.StructWildcard", None),
     };
     n.list("items", item.items(), exclusion_item_tree)
+}
+
+fn map_entry_tree(e: &MapEntry) -> TreeNode<'_> {
+    TreeNode::new("RexMap.Entry", None)
+        .rex("key", e.key())
+        .rex("value", e.value())
 }
 
 fn join_type(j: JoinType) -> &'static str {
@@ -159,7 +176,10 @@ fn join_type(j: JoinType) -> &'static str {
 /// The tree view of one expression.
 pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
     let ty = Some(NodeType::Rex(rex.ty()));
-    let n = |kind| TreeNode::new(kind, ty);
+    let n = |kind| TreeNode {
+        source: Some(Source::Rex(rex)),
+        ..TreeNode::new(kind, ty)
+    };
     match rex.op() {
         RexOp::Array { values } => n("RexArray").rexes("values", values),
         RexOp::Bag { values } => n("RexBag").rexes("values", values),
@@ -194,7 +214,7 @@ pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
             functions,
             args,
         } => n("RexDispatch")
-            .text("name", name)
+            .text("name", name_text(name))
             .list("functions", functions, routine_tree)
             .rexes("args", args),
         RexOp::Error {} => n("RexError"),
@@ -210,23 +230,17 @@ pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
         } => n("RexMap")
             .shape("key_type", key_type)
             .shape("value_type", value_type)
-            .list("entries", entries, |e| {
-                TreeNode::new("RexMap.Entry", None)
-                    .rex("key", e.key())
-                    .rex("value", e.value())
-            }),
-        RexOp::MapDynamic { entries } => n("RexMapDynamic").list("entries", entries, |e| {
-            TreeNode::new("RexMap.Entry", None)
-                .rex("key", e.key())
-                .rex("value", e.value())
-        }),
+            .list("entries", entries, map_entry_tree),
+        RexOp::MapDynamic { entries } => {
+            n("RexMapDynamic").list("entries", entries, map_entry_tree)
+        }
         RexOp::NullIf { v1, v2 } => n("RexNullIf").rex("v1", v1).rex("v2", v2),
         RexOp::PathIndex { operand, index } => n("RexPathIndex")
             .rex("operand", operand)
             .rex("index", index),
         RexOp::PathKey { operand, key } => n("RexPathKey").rex("operand", operand).rex("key", key),
         RexOp::PathSymbol { operand, symbol } => n("RexPathSymbol")
-            .text("symbol", symbol)
+            .text("symbol", name_text(symbol))
             .rex("operand", operand),
         RexOp::Pivot { input, key, value } => n("RexPivot")
             .rel("input", input)
@@ -298,7 +312,10 @@ pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
 /// The tree view of one relational operator.
 pub fn rel_tree(rel: &Rel) -> TreeNode<'_> {
     let ty = Some(NodeType::Rel(rel.ty()));
-    let n = |kind| TreeNode::new(kind, ty);
+    let n = |kind| TreeNode {
+        source: Some(Source::Rel(rel)),
+        ..TreeNode::new(kind, ty)
+    };
     match rel.op() {
         RelOp::Aggregate {
             input,
@@ -381,17 +398,16 @@ pub fn rel_tree(rel: &Rel) -> TreeNode<'_> {
         } => {
             let mut w = n("RelWindow");
             if let Some(name) = name {
-                w = w.text("name", name);
+                w = w.text("name", name_text(name));
             }
-            let w = bindings
-                .iter()
-                .enumerate()
-                .fold(w, |w, (i, b)| w.text(&format!("bindings[{i}]"), b));
+            let w = bindings.iter().enumerate().fold(w, |w, (i, b)| {
+                w.text(&format!("bindings[{i}]"), name_text(b))
+            });
             w.rel("input", input)
                 .list("functions", functions, |f| {
                     let sig = f.signature();
                     let s = TreeNode::new("WindowFunctionNode", None)
-                        .text("name", sig.name())
+                        .text("name", name_text(sig.name()))
                         .text("ignore_nulls", sig.is_ignore_nulls());
                     let s = sig
                         .params()
@@ -408,7 +424,7 @@ pub fn rel_tree(rel: &Rel) -> TreeNode<'_> {
                 .rel("input", input)
                 .list("elements", elements, |e| {
                     TreeNode::new("WithListElement", None)
-                        .text("name", e.name())
+                        .text("name", name_text(e.name()))
                         .rex("representation", e.representation())
                 })
         }
@@ -431,6 +447,11 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
                 out.push_str("NOT NULL ");
             }
             match st.ty() {
+                // Only rows and `new_any()` (`{...}`) are written compactly; any other struct
+                // shows its constraints, so that unequal structs print differently.
+                Static::Struct(s) if !is_plk_struct(s) => {
+                    let _ = write!(out, "{s:?}");
+                }
                 Static::Struct(s) => {
                     out.push_str(if s.is_row() { "Row{" } else { "{" });
                     for (i, f) in s.fields().enumerate() {
@@ -438,7 +459,7 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
                             out.push_str(", ");
                         }
                         let opt = if f.is_optional() { "?" } else { "" };
-                        let _ = write!(out, "{}{opt}: ", f.name());
+                        let _ = write!(out, "{}{opt}: ", name_text(f.name()));
                         write_shape(out, f.ty());
                     }
                     if s.is_partial() {
@@ -483,6 +504,12 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
                 .into_iter()
                 .filter_map(|(set, name)| set.then_some(name))
                 .collect();
+                // `TypeParams` is non-exhaustive: name a flag added later generically.
+                let flags = if flags.is_empty() {
+                    vec!["other"]
+                } else {
+                    flags
+                };
                 let _ = write!(out, " {{unspecified: {}}}", flags.join(", "));
             }
             let id = st.ty_id().0;
@@ -506,11 +533,48 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
     }
 }
 
+/// Whether `s` is one of partiql-lang-kotlin's two struct kinds: a row exactly as built by
+/// `StructType::new_row`, or `StructType::new_any()` (`STRUCT`).
+pub(crate) fn is_plk_struct(s: &StructType) -> bool {
+    *s == StructType::new_row(s.fields().cloned()) || *s == StructType::new_any()
+}
+
+/// A name as written in a dump: bare if it is a non-empty run of ASCII letters, digits, `_` and
+/// `$`, otherwise double-quoted with `"` doubled, so that names holding `, `, `: ` or `}` cannot
+/// be mistaken for dump syntax.
+pub fn name_text(name: &str) -> String {
+    let simple = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$');
+    if simple {
+        name.to_string()
+    } else {
+        crate::refs::quote(name)
+    }
+}
+
+/// A literal as written in a dump: its kind, then its value, with strings and other values
+/// whose text could hold dump syntax escaped as a Rust string literal. E.g. `Integer 1`,
+/// `Real 1.0`, `String "a"`.
+pub fn value_text(v: &Value) -> String {
+    match v {
+        Value::Null => "NULL".to_string(),
+        Value::Missing => "MISSING".to_string(),
+        Value::Boolean(b) => format!("Boolean {b}"),
+        Value::Integer(i) => format!("Integer {i}"),
+        Value::Real(r) => format!("Real {:?}", r.0),
+        Value::Decimal(d) => format!("Decimal {d}"),
+        Value::String(s) => format!("String {:?}", s.as_str()),
+        other => format!("Value {:?}", format!("{other:?}")),
+    }
+}
+
 fn render_rel_type(ty: &RelType, shape: &dyn Fn(&PartiqlShape) -> String) -> String {
     let fields: Vec<String> = ty
         .fields()
         .iter()
-        .map(|f| format!("{}: {}", f.name(), shape(f.ty())))
+        .map(|f| format!("{}: {}", name_text(f.name()), shape(f.ty())))
         .collect();
     let ordered = if ty.is_ordered() { " ordered" } else { "" };
     format!("Rel[{}]{ordered}", fields.join(", "))
@@ -553,7 +617,7 @@ impl TreeNode<'_> {
                 .map(|(k, v)| match v {
                     Attr::Text(s) => format!("{k}: {s}"),
                     Attr::Shape(s) => format!("{k}: {}", shape(s)),
-                    Attr::Value(v) => format!("{k}: {v:?}"),
+                    Attr::Value(v) => format!("{k}: {}", value_text(v)),
                 })
                 .collect();
             let _ = write!(out, " {{{}}}", attrs.join(", "));
