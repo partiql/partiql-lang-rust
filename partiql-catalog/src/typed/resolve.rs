@@ -57,7 +57,9 @@ impl ResolvedTable {
 ///    is written (regular: ignoring case, an error if that matches several; delimited:
 ///    exactly), with the remaining parts (catalog-qualified).
 ///
-/// The first lookup whose catalog resolves a name that it also has a table for wins. The path
+/// The first lookup whose catalog resolves a name that it also has a table for wins, so a table
+/// in the current catalog named like a catalog shadows that catalog's qualifier (as in
+/// partiql-lang-kotlin). The path
 /// is the parts of the looked-up identifier after as many parts as the table's name has (none
 /// if the name has as many or more).
 pub fn resolve_table(

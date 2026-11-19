@@ -1229,3 +1229,24 @@ fn wrapper_must_forward_has_namespaces() {
         Some(("default".into(), "\"shop\"".into(), strs(&["orders"])))
     );
 }
+
+/// A table in the current catalog named like a catalog shadows the qualifier (step 1 before
+/// step 3), with or without a namespace, as in partiql-lang-kotlin.
+#[test]
+fn table_named_like_current_catalog_shadows_qualifier() {
+    for namespace in [&[][..], &["shop"][..]] {
+        let s = session(
+            "default",
+            namespace,
+            vec![adapter_over(&["orders", "default"])],
+        );
+        assert_eq!(
+            resolved(&s, &reg(&["default", "orders"])),
+            Some(("default".into(), "\"default\"".into(), strs(&["orders"])))
+        );
+        assert_eq!(
+            resolved(&s, &reg(&["orders"])),
+            Some(("default".into(), "\"orders\"".into(), vec![]))
+        );
+    }
+}
