@@ -880,7 +880,7 @@ fn adapter_name_and_tables() {
 
     // Aliases resolve too.
     assert!(adapter.resolve_table(&s, &reg(&["purchases"])).is_some());
-    // Non-ASCII: PartiqlCatalog ignores case by Unicode simple folding.
+    // Non-ASCII: PartiqlCatalog ignores case by full Unicode case folding.
     assert!(adapter.resolve_table(&s, &reg(&["CAF\u{c9}"])).is_some());
     assert!(adapter.resolve_table(&s, &reg(&["missing"])).is_none());
     // Only the first part is matched; namespaced names have no table.
@@ -991,4 +991,77 @@ fn adapter_in_a_session_resolves_through_env_order() {
         resolved(&s, &reg(&["DEFAULT", "orders"])),
         Some(("default".into(), "\"orders\"".into(), vec![]))
     );
+}
+
+/// The adapter matches by the inner catalog's case rules: PartiqlCatalog folds case fully, so
+/// `STRASSE` finds `stra\u{df}e`, which `equals_ignore_case` (Java's rules) would not match.
+#[test]
+fn adapter_follows_partiql_catalog_full_folding() {
+    let mut catalog = PartiqlCatalog::default();
+    catalog
+        .add_type_entry(TypeEnvEntry::new("stra\u{df}e", &[], PartiqlShape::Dynamic))
+        .unwrap();
+    let shared: Arc<dyn SharedCatalog> = Arc::new(catalog.to_shared_catalog());
+    let adapter = LegacyCatalogAdapter::new(shared);
+    let s = Session::empty();
+    assert!(!equals_ignore_case("stra\u{df}e", "STRASSE"));
+    assert!(adapter.resolve_table(&s, &reg(&["STRASSE"])).is_some());
+    assert!(adapter
+        .resolve_table(&s, &Identifier::delimited("STRASSE"))
+        .is_some());
+}
+
+/// With a session namespace, step 1 prepends it, and the adapter matches only the first part.
+#[test]
+fn adapter_with_session_namespace() {
+    let adapter: Arc<dyn TypedCatalog> = Arc::new(LegacyCatalogAdapter::new(legacy()));
+    let s = session("default", &["shop"], vec![adapter]);
+    assert_eq!(resolved(&s, &reg(&["orders"])), None);
+    // Qualified, step 2 looks the identifier up as written.
+    assert_eq!(
+        resolved(&s, &reg(&["orders", "total"])),
+        Some(("default".into(), "\"orders\"".into(), strs(&["total"])))
+    );
+}
+
+/// An ambiguous catalog name matters only when step 3 is reached.
+#[test]
+fn step3_ambiguity_not_raised_when_earlier_step_resolves() {
+    let catalogs = |main: Arc<dyn TypedCatalog>| {
+        vec![
+            main,
+            TestCatalog::shared("archive", &[&["orders"]]),
+            TestCatalog::shared("ARCHIVE", &[&["orders"]]),
+        ]
+    };
+    let s = session(
+        "main",
+        &[],
+        catalogs(TestCatalog::shared("main", &[&["archive", "orders"]])),
+    );
+    assert_eq!(
+        resolved(&s, &reg(&["Archive", "orders"])),
+        Some(("main".into(), "\"archive\".\"orders\"".into(), vec![]))
+    );
+    let s = session(
+        "main",
+        &["other"],
+        catalogs(TestCatalog::shared("main", &[&["archive", "orders"]])),
+    );
+    assert_eq!(
+        resolved(&s, &reg(&["Archive", "orders"])),
+        Some(("main".into(), "\"archive\".\"orders\"".into(), vec![]))
+    );
+}
+
+/// As in partiql-lang-kotlin, the system catalog replaces a catalog with the same name.
+#[test]
+fn system_catalog_replaces_same_named_catalog() {
+    let s = Session::builder()
+        .catalog(SYSTEM_CATALOG_NAME)
+        .catalogs([TestCatalog::shared(SYSTEM_CATALOG_NAME, &[&["orders"]])])
+        .build()
+        .unwrap();
+    assert_eq!(names(s.catalogs()), strs(&[SYSTEM_CATALOG_NAME]));
+    assert_eq!(resolved(&s, &reg(&["orders"])), None);
 }

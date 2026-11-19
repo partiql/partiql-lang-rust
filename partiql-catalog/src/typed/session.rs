@@ -156,7 +156,8 @@ impl SessionBuilder {
         self
     }
 
-    /// Adds catalogs, whose names must be unique.
+    /// Adds catalogs, whose names must be unique. As in partiql-lang-kotlin, the system catalog
+    /// replaces a catalog with the same name.
     #[must_use]
     pub fn catalogs(mut self, catalogs: impl IntoIterator<Item = Arc<dyn TypedCatalog>>) -> Self {
         self.catalogs.extend(catalogs);

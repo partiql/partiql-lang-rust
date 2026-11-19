@@ -57,7 +57,7 @@ pub trait TypedCatalog: Debug + Send + Sync {
         None
     }
 
-    /// The canonical name of the table that `identifier`, or the longest prefix of it, names.
+    /// The canonical name of the table that `identifier`, or a prefix of it, names.
     /// The parts of `identifier` after the matched name become a path into the table.
     fn resolve_table(&self, _session: &Session, _identifier: &Identifier) -> Option<Name> {
         None
@@ -82,7 +82,9 @@ pub trait TypedCatalog: Debug + Send + Sync {
 
 /// A catalog that resolves routines by identifier (partiql-lang-kotlin `RoutineCatalog`).
 ///
-/// An implementor also returns `Some(self)` from [`TypedCatalog::as_routine_catalog`].
+/// An implementor must also return `Some(self)` from [`TypedCatalog::as_routine_catalog`];
+/// otherwise its routines are looked up only by text, through [`TypedCatalog::get_functions`]
+/// and [`TypedCatalog::get_aggregations`].
 pub trait RoutineCatalog: TypedCatalog {
     /// The scalar function bindings that `identifier` names.
     fn resolve_functions(

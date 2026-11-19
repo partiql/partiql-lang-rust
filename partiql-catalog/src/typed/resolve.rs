@@ -55,7 +55,9 @@ impl ResolvedTable {
 ///    is written (regular: ignoring case, an error if that matches several; delimited:
 ///    exactly), with the remaining parts (catalog-qualified).
 ///
-/// The first lookup whose catalog resolves a name that it also has a table for wins.
+/// The first lookup whose catalog resolves a name that it also has a table for wins. The path
+/// is the parts of the looked-up identifier after as many parts as the table's name has (none
+/// if the name has as many or more).
 pub fn resolve_table(
     session: &Session,
     identifier: &Identifier,
@@ -77,9 +79,11 @@ pub fn resolve_table(
         return Ok(None);
     }
 
-    // 2. A schema-qualified identifier.
-    if let Some(found) = lookup(session, &default, identifier) {
-        return Ok(Some(found));
+    // 2. A schema-qualified identifier; with an empty namespace, the same lookup as 1.
+    if !session.namespace().is_empty() {
+        if let Some(found) = lookup(session, &default, identifier) {
+            return Ok(Some(found));
+        }
     }
 
     // 3. A catalog-qualified identifier.

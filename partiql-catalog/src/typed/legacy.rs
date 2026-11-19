@@ -17,8 +17,10 @@ use std::sync::Arc;
 ///   path into the table. The part is looked up with
 ///   [`crate::catalog::ReadOnlyCatalog::resolve_binding_type`]: a regular part as
 ///   [`BindingsName::CaseInsensitive`] and a delimited one as [`BindingsName::CaseSensitive`],
-///   so it matches by the inner catalog's case rules ([`crate::catalog::PartiqlCatalog`] ignores
-///   case for both).
+///   so it matches by the inner catalog's case rules, not by [`super::equals_ignore_case`]
+///   ([`crate::catalog::PartiqlCatalog`] ignores case with full Unicode case folding, for both).
+///   With a session namespace, [`super::resolve_table`] prepends it to an unqualified
+///   identifier, so only a table named like the namespace's first level matches.
 /// - A [`SharedCatalog`] does not report the name an entry was registered under, so the resolved
 ///   [`Name`] is the part's text as written, and [`TypedCatalog::get_table`] looks a name up as
 ///   written ([`BindingsName::CaseSensitive`]) and, failing that, ignoring case

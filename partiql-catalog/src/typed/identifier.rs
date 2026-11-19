@@ -12,7 +12,9 @@ use std::hash::{Hash, Hasher};
 /// The strings are compared character by character, without full Unicode case folding: two
 /// characters are equal if they are the same, if their uppercase forms are the same, or if the
 /// lowercase forms of their uppercase forms are the same. So `"Ä"` matches `"ä"`, and the
-/// dotless `"ı"` matches `"I"`, but `"ß"` does not match `"SS"`.
+/// dotless `"ı"` matches `"I"`, but `"ß"` does not match `"SS"`. Characters are compared as
+/// Unicode scalar values (as JDK 16 and later compare supplementary characters), using the case
+/// mappings of the Unicode version Rust's standard library implements.
 #[must_use]
 pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     let mut a = a.chars();
@@ -385,7 +387,15 @@ pub struct Path {
 /// The error of [`Path::promote`] for a namespace that is not in the path.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error("Cannot promote a path entry that is not present: {0}")]
-pub struct PathEntryNotPresent(pub Namespace);
+pub struct PathEntryNotPresent(Namespace);
+
+impl PathEntryNotPresent {
+    /// The namespace that is not in the path.
+    #[must_use]
+    pub fn entry(&self) -> &Namespace {
+        &self.0
+    }
+}
 
 impl Path {
     pub fn of(namespaces: impl IntoIterator<Item = Namespace>) -> Self {
