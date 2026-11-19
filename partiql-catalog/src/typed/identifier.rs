@@ -12,6 +12,17 @@ use std::hash::{Hash, Hasher};
 /// dotless `"ı"` matches `"I"`, but `"ß"` does not match `"SS"`. Characters are compared as
 /// Unicode scalar values (a supplementary character is one character, not two UTF-16 code units),
 /// using the case mappings of the Unicode version Rust's standard library implements.
+///
+/// This is deliberately not the SQL standard's rule, which compares the full uppercase case-normal
+/// form, under which a regular `straße` equals `"STRASSE"`. Consequences to be aware of:
+/// - Some non-ASCII characters match ASCII names: the Kelvin sign `\u{212A}` matches `k`, the
+///   long s `\u{17F}` matches `s`, and `\u{130}` (capital I with dot above) matches `i`. An
+///   allow-list of table names should check the resolved [`Name`], not the query text.
+/// - There is no Unicode normalization: a decomposed `e` + U+0301 does not match a precomposed
+///   `\u{E9}`.
+/// - The result depends on the Unicode version of the Rust toolchain, so other engines using
+///   older case tables can differ for characters added in later Unicode versions. Tests shared
+///   across engines should avoid characters added after Unicode 13.
 #[must_use]
 pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     let mut a = a.chars();
@@ -88,6 +99,7 @@ impl IdentPart {
         }
     }
 
+    /// The part's text, without quotes.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text

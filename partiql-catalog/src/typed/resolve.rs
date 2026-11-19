@@ -12,6 +12,7 @@ pub enum ResolveError {
     /// The session's current catalog is not one of its catalogs.
     #[error("Default catalog does not exist: {0}")]
     MissingDefaultCatalog(String),
+    /// A catalog-qualified identifier's first part matches several catalogs ignoring case.
     #[error(transparent)]
     CatalogNameAmbiguous(#[from] CatalogNameAmbiguous),
 }
@@ -32,6 +33,7 @@ impl ResolvedTable {
         &self.catalog
     }
 
+    /// The table.
     #[must_use]
     pub fn table(&self) -> &Table {
         &self.table
@@ -116,7 +118,7 @@ fn lookup(
     })
 }
 
-/// The parts of `path` after as many parts as `name` has (`Env.calculateMatched`).
+/// The parts of `path` after as many parts as `name` has.
 fn unmatched(path: &Identifier, name: &Name) -> Vec<IdentPart> {
     path.parts().skip(name.len()).cloned().collect()
 }

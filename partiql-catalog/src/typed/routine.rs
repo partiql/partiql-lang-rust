@@ -66,9 +66,13 @@ impl RoutineOverloadSignature {
 }
 
 /// The concrete signature of a routine instance: its parameters, its return type, and two flags
-/// (IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument
-/// makes the call return NULL without invoking it; with `is_missing_call`, a MISSING argument
-/// makes it return MISSING. NULL and MISSING are absent values, not types.
+/// (IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument makes the call return
+/// NULL without invoking it; with `is_missing_call`, a MISSING argument makes it return MISSING.
+/// MISSING is checked first, so with both flags `f(NULL, MISSING)` is MISSING. NULL and MISSING
+/// are absent values, not types.
+///
+/// The flags apply to scalar function calls only. The same type is the instance of an
+/// aggregation, whose calls do not read them: `COUNT(NULL)` is not folded to NULL.
 #[derive(Debug, Clone)]
 pub struct RoutineSignature {
     name: String,
@@ -236,8 +240,10 @@ impl AggOverload for FixedAggOverload {
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RoutineBindingError {
+    /// A part of the canonical name is empty.
     #[error("Routine binding canonical name cannot contain an empty part")]
     EmptyNamePart,
+    /// There are no overloads.
     #[error("Routine binding overloads cannot be empty")]
     NoOverloads,
 }
@@ -260,6 +266,8 @@ impl<T: ?Sized> Clone for RoutineBinding<T> {
 
 impl<T: ?Sized> RoutineBinding<T> {
     /// A binding of `canonical_name`, none of whose parts may be empty, to one or more overloads.
+    /// The canonical name is local to the catalog that returns the binding: it does not include
+    /// the catalog's name.
     pub fn new(canonical_name: Name, overloads: Vec<Arc<T>>) -> Result<Self, RoutineBindingError> {
         if canonical_name.parts().any(str::is_empty) {
             return Err(RoutineBindingError::EmptyNamePart);

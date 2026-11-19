@@ -19,6 +19,7 @@ pub struct Table {
 }
 
 impl Table {
+    /// A table named `name` with the schema `schema`.
     #[must_use]
     pub fn new(name: Name, schema: PartiqlShape) -> Self {
         Table { name, schema }
@@ -58,6 +59,16 @@ pub trait TypedCatalog: Debug + Send + Sync {
     /// The canonical name of the table that `identifier`, or a prefix of it, names.
     /// The parts of `identifier` after the matched name become a path into the table.
     ///
+    /// The contract:
+    /// - The longest prefix of `identifier` that names a table wins.
+    /// - If two or more tables match a prefix of that length (for example `Foo` and `FOO` for a
+    ///   regular `foo`), the identifier is ambiguous and the result is `None`.
+    /// - The returned name has exactly as many parts as the prefix it matched.
+    ///   [`super::resolve_table`] takes the parts of `identifier` after that many parts as the
+    ///   path, so a catalog that resolves bare `orders` to the two-part `public.orders` would make
+    ///   `orders.total` resolve with an empty path, dropping `.total`.
+    /// - [`TypedCatalog::get_table`] of the returned name returns the table it was resolved to.
+    ///
     /// The case rules are the implementation's. [`super::LegacyCatalogAdapter`] applies its
     /// inner catalog's rules: over [`crate::catalog::PartiqlCatalog`], delimited parts also
     /// ignore case, by full Unicode case folding.
@@ -69,6 +80,10 @@ pub trait TypedCatalog: Debug + Send + Sync {
     /// them (`false`) is searched by [`super::resolve_table`] with the identifier as written
     /// rather than with the session namespace prepended. The default is `true`: the session
     /// namespace is prepended. A catalog that wraps another must forward this.
+    ///
+    /// This is deliberate: a catalog whose names have no namespaces cannot hold `shop.orders`,
+    /// so prepending a namespace `shop` to `orders` and matching only the first part would
+    /// resolve the table `shop`, a different object, with the path `orders`.
     fn has_namespaces(&self) -> bool {
         true
     }
@@ -97,6 +112,14 @@ pub trait TypedCatalog: Debug + Send + Sync {
 /// An implementor must also return `Some(self)` from [`TypedCatalog::as_routine_catalog`];
 /// otherwise its routines are looked up only by text, through [`TypedCatalog::get_functions`]
 /// and [`TypedCatalog::get_aggregations`].
+///
+/// The contract of [`RoutineCatalog::resolve_functions`] and
+/// [`RoutineCatalog::resolve_aggregations`]:
+/// - The identifier is local to the catalog: it never includes the catalog's own name.
+/// - It matches a routine at its full depth; a prefix of the identifier does not match.
+/// - A regular part matches ignoring case and a delimited part exactly.
+/// - The result is authoritative: for a `RoutineCatalog` there is no fallback to the by-text
+///   lookup, so an empty result means the catalog has no such routine.
 pub trait RoutineCatalog: TypedCatalog {
     /// The scalar function bindings that `identifier` names.
     fn resolve_functions(

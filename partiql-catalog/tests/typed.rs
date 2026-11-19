@@ -1274,3 +1274,96 @@ fn table_named_like_current_catalog_shadows_qualifier_in_step2() {
         Some(("main".into(), "\"orders\"".into(), vec![]))
     );
 }
+
+/// The ambiguous-catalog error lists names by UTF-16 code unit: U+10400 (a surrogate pair,
+/// 0xD801 0xDC00) sorts before U+FF21, although its scalar value is larger.
+#[test]
+fn ambiguous_catalog_names_sort_by_utf16_code_unit() {
+    let err = CatalogNameAmbiguous::new(strs(&["\u{FF21}", "\u{10400}"]));
+    assert_eq!(err.catalog_names(), strs(&["\u{10400}", "\u{FF21}"]));
+}
+
+#[test]
+fn regular_matching_edge_cases() {
+    // Deseret, a supplementary-plane pair: one character each, not two code units.
+    assert!(equals_ignore_case("\u{10400}", "\u{10428}"));
+    // Greek ypogegrammeni: the uppercase mappings are two characters, so they match only
+    // through the lowercase step.
+    assert!(equals_ignore_case("\u{1F80}", "\u{1F88}"));
+    // Capital I with dot above and dotless i: both reach `i` or `I`.
+    assert!(equals_ignore_case("\u{130}", "I"));
+    assert!(equals_ignore_case("\u{130}", "\u{131}"));
+    assert!(equals_ignore_case("\u{131}", "i"));
+    // Capital sigma and final sigma.
+    assert!(equals_ignore_case("\u{3a3}", "\u{3c2}"));
+    // Non-ASCII characters that match ASCII names.
+    assert!(equals_ignore_case("\u{212a}", "K"));
+    assert!(equals_ignore_case("\u{17f}", "S"));
+    // No normalization: decomposed e + U+0301 is not the precomposed U+00E9.
+    assert!(!equals_ignore_case("e\u{301}", "\u{e9}"));
+}
+
+#[test]
+fn adapter_alias_resolves_to_the_name_as_written() {
+    let adapter = LegacyCatalogAdapter::new(legacy());
+    let s = Session::empty();
+    assert_eq!(
+        adapter.resolve_table(&s, &reg(&["purchases"])),
+        Some(Name::of(["purchases"]).unwrap())
+    );
+}
+
+#[test]
+fn path_promote_first_and_duplicate_entries() {
+    let (a, b, c) = (ns(&["a"]), ns(&["b"]), ns(&["c"]));
+    // Already first: unchanged.
+    let path = Path::of([a.clone(), b.clone(), a.clone()]);
+    assert_eq!(path.promote(&a).unwrap(), path);
+    // Only the first occurrence moves.
+    let path = Path::of([b.clone(), a.clone(), c.clone(), a.clone()]);
+    assert_eq!(path.promote(&a).unwrap(), Path::of([a.clone(), b, c, a]));
+}
+
+#[test]
+fn step3_catalog_found_without_the_table_is_not_found() {
+    let s = session(
+        "main",
+        &[],
+        vec![
+            TestCatalog::shared("main", &[]),
+            TestCatalog::shared("archive", &[&["other"]]),
+        ],
+    );
+    assert_eq!(resolved(&s, &reg(&["archive", "orders"])), None);
+}
+
+/// The path is the identifier's parts after as many parts as the resolved name has. A catalog
+/// whose name for a prefix has more parts than the prefix (against the `resolve_table` contract)
+/// loses the path.
+#[test]
+fn path_follows_the_resolved_name_length() {
+    #[derive(Debug)]
+    struct Longer;
+    impl TypedCatalog for Longer {
+        fn name(&self) -> &str {
+            "main"
+        }
+        fn get_table(&self, _: &Session, name: &Name) -> Option<Table> {
+            Some(Table::dynamic(name.clone()))
+        }
+        fn resolve_table(&self, _: &Session, id: &Identifier) -> Option<Name> {
+            (id.parts().next()?.text() == "orders").then(|| Name::of(["public", "orders"]).unwrap())
+        }
+    }
+    let s = session("main", &[], vec![Arc::new(Longer)]);
+    // A resolved name as long as the identifier: no path.
+    assert_eq!(
+        resolved(&s, &reg(&["orders", "total"])),
+        Some(("main".into(), "\"public\".\"orders\"".into(), vec![]))
+    );
+    // Longer than the identifier: no path either.
+    assert_eq!(
+        resolved(&s, &reg(&["orders"])),
+        Some(("main".into(), "\"public\".\"orders\"".into(), vec![]))
+    );
+}

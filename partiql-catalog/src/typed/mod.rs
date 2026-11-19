@@ -16,6 +16,36 @@
 //! scalar-versus-aggregate classification) and overload selection are not here yet; they come
 //! with the builtin routines. [`Session::path`] and [`RoutineCatalog`] are the
 //! inputs they will use.
+//!
+//! # Example
+//!
+//! An existing catalog, presented through [`LegacyCatalogAdapter`], as a session's current
+//! catalog; `orders.total` resolves to the table `orders` with the path `total`:
+//!
+//! ```
+//! use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog, TypeEnvEntry};
+//! use partiql_catalog::typed::{resolve_table, Identifier, LegacyCatalogAdapter, Session};
+//! use partiql_types::PartiqlShape;
+//! use std::sync::Arc;
+//!
+//! let mut catalog = PartiqlCatalog::default();
+//! catalog
+//!     .add_type_entry(TypeEnvEntry::new("orders", &[], PartiqlShape::Dynamic))
+//!     .unwrap();
+//! let shared: Arc<dyn SharedCatalog> = Arc::new(catalog.to_shared_catalog());
+//!
+//! let session = Session::builder()
+//!     .catalog("default")
+//!     .catalogs([Arc::new(LegacyCatalogAdapter::new(shared)) as _])
+//!     .build()
+//!     .unwrap();
+//!
+//! let id = Identifier::regular_parts(["ORDERS", "total"]).unwrap();
+//! let found = resolve_table(&session, &id).unwrap().unwrap();
+//! assert_eq!(found.catalog(), "default");
+//! assert_eq!(found.table().name().name(), "ORDERS"); // the name as written
+//! assert_eq!(found.path()[0].text(), "total");
+//! ```
 
 mod catalog;
 mod identifier;

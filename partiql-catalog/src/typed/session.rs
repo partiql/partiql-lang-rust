@@ -10,8 +10,10 @@ use std::sync::Arc;
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionError {
+    /// The current catalog was not set.
     #[error("Session catalog must be set")]
     MissingCatalog,
+    /// Two added catalogs have this name.
     #[error("Catalog names must be unique: {0}")]
     DuplicateCatalogName(String),
 }
@@ -92,6 +94,12 @@ impl Session {
 
 /// The builder of a [`Session`]. The current catalog must be set; the system catalog defaults to
 /// [`SystemCatalog`]. Its `Debug` output omits the identity and the property values.
+///
+/// [`SessionBuilder::build`] checks only that the current catalog is set and that the catalogs
+/// added with [`SessionBuilder::catalogs`] have unique names. It does not check that the current
+/// catalog is one of them; a missing one is reported by [`super::resolve_table`] as
+/// [`super::ResolveError::MissingDefaultCatalog`] on the first lookup. The system catalog
+/// replaces an added catalog with the same name, without an error.
 #[derive(Clone)]
 pub struct SessionBuilder {
     identity: String,
