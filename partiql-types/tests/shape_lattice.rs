@@ -1,7 +1,7 @@
-//! Tests for `ShapeKind` and the `lattice` tables, ported from partiql-lang-kotlin (PLK) v1.6.1.
+//! Tests for `ShapeKind` and the `lattice` tables.
 //!
-//! The expected values are transcribed from PLK's sources (named at each table) independently of
-//! the implementation, one row per kind.
+//! The expected values are written out from the PartiQL typing rules, independently of the
+//! implementation, one row per kind.
 
 use partiql_types::lattice::{
     can_cast, can_coerce, coercion_family, compare_fn_precedence, fn_precedence, type_precedence,
@@ -26,15 +26,15 @@ fn all_except(excluded: &[K]) -> Vec<K> {
 
 struct KindRow {
     kind: K,
-    /// `PType.name()`, `PType.java:232-297`.
+    /// The kind's type name.
     name: &'static str,
-    /// `CoercionFamily.family`, `partiql-planner/.../CoercionFamily.kt:39-72`.
+    /// The kind's coercion family.
     family: F,
-    /// The index in `FnComparator.precedence`, `FnComparator.kt:45-73`.
+    /// The index in `FN_PRECEDENCE`.
     fn_precedence: Option<usize>,
-    /// The index in `TypePrecedence.TYPE_PRECEDENCE`, `TypePrecedence.kt:11-39`.
+    /// The index in `TYPE_PRECEDENCE`.
     type_precedence: Option<usize>,
-    /// The kinds `graph[kind]` marks `YES`, `CastTable.kt:54-311`.
+    /// The kinds this kind may be `CAST` to.
     casts: Vec<K>,
 }
 
@@ -193,7 +193,7 @@ fn rows() -> Vec<KindRow> {
 }
 
 #[test]
-fn rows_cover_every_kind_in_plk_code_order() {
+fn rows_cover_every_kind_in_order() {
     let kinds: Vec<K> = rows().iter().map(|r| r.kind).collect();
     assert_eq!(kinds, K::ALL.to_vec());
     assert_eq!(K::ALL.iter().collect::<HashSet<_>>().len(), 29);
@@ -244,14 +244,11 @@ fn cast_row_per_kind() {
     }
 }
 
-/// Port of PLK's `TypeLatticeTest.latticeAsciidocDump` (`TypeLatticeTest.kt:9-14`), its only
-/// test: `@Disabled`, with no assertions, it exists to print the cast table. PLK's `CastTable`
-/// has no `toString`, so it prints an object reference; this port prints the table as Asciidoc
-/// (operand rows, target columns), as the PLK test's name intends. Ignored like the original;
-/// run it with `cargo test -p partiql-types --test shape_lattice -- --ignored --nocapture`.
-/// The table's content is checked by `cast_row_per_kind`.
+/// Prints the cast table as Asciidoc (operand rows, target columns), with no assertions. It is
+/// ignored; run it with `cargo test -p partiql-types --test shape_lattice -- --ignored
+/// --nocapture`. The table's content is checked by `cast_row_per_kind`.
 #[test]
-#[ignore = "dump only, as PLK's @Disabled TypeLatticeTest"]
+#[ignore = "dump only"]
 fn lattice_asciidoc_dump() {
     let mut out = String::from("|===\n|");
     for target in K::ALL {
@@ -293,7 +290,7 @@ fn cast_table_quirks_are_kept() {
 
 #[test]
 fn coercion_rules() {
-    // No direction within a family (`CoercionFamily.kt:82-90`).
+    // No direction within a family.
     assert!(can_coerce(K::Double, K::TinyInt));
     assert!(can_coerce(K::TinyInt, K::Double));
     assert!(can_coerce(K::Clob, K::Char));
@@ -319,9 +316,9 @@ fn coercion_rules() {
 }
 
 #[test]
-fn fn_precedence_orders_overloads_as_plk() {
+fn fn_precedence_orders_overloads() {
     // A call with a DYNAMIC or VARIANT argument dispatches over every candidate, sorted by
-    // `FnComparator` (`FnResolver.kt:47-52`); for `abs`, the numbers and intervals in this order.
+    // `compare_fn_precedence`; for `abs`, the numbers and intervals in this order.
     let mut candidates = vec![
         K::IntervalDt,
         K::Double,
@@ -406,7 +403,7 @@ fn sql_type_family_membership() {
 #[test]
 fn sql_type_family_of_per_kind() {
     use K::*;
-    // `SqlTypeFamily.kt:40-45`.
+    // The kinds that `of` maps to a shared family.
     let number = [
         Integer, TinyInt, SmallInt, BigInt, Real, Double, Decimal, Numeric,
     ];
@@ -424,8 +421,8 @@ fn sql_type_family_of_per_kind() {
             assert_eq!(family.members(), &[k], "{k}");
         }
     }
-    // `DiadicOperator`'s check (`DiadicOperator.kt:60`): `DATE` and `TIMESTAMP` are not one
-    // family there, while `DATE_TIMESTAMP` groups them.
+    // A binary operator's same-family check should use `of`, under which `DATE` and
+    // `TIMESTAMP` are not one family, while `DATE_TIMESTAMP` groups them.
     assert!(!SqlTypeFamily::of(K::Date).contains(K::Timestamp));
     assert!(SqlTypeFamily::of(K::Integer).contains(K::Double));
 }
@@ -519,16 +516,15 @@ fn kind_of_interval_follows_its_family() {
 fn kind_of_non_static_shapes() {
     let mut b = PartiqlNoIdShapeBuilder::default();
     assert_eq!(b.new_dynamic().kind(), Some(K::Dynamic));
-    // `NULL` and `MISSING` are absent values; their static type is `Undefined`, PLK's `UNKNOWN`.
+    // `NULL` and `MISSING` are absent values; their static type is `Undefined`, kind `UNKNOWN`.
     assert_eq!(b.new_undefined().kind(), Some(K::Unknown));
     let union = b.any_of([shape(Static::Int32), shape(Static::String)]);
     assert!(matches!(union, PartiqlShape::AnyOf(_)));
     assert_eq!(union.kind(), None);
 }
 
-/// PLK types every closed struct as `ROW`, also when its fields are unordered or there are none,
-/// and only an open struct as `STRUCT` (`PlanTyper.kt:1434-1437`, `:1576`, `:1687-1691`;
-/// `PType.struct()` carries no fields, `PType.java:1182-1184`).
+/// Every closed struct is a `ROW`, also when its fields are unordered or there are none, and
+/// only an open struct is a `STRUCT` (which carries no fields of its own).
 #[test]
 fn closed_structs_are_rows_open_structs_are_structs() {
     let a = || StructField::new("a", shape(Static::Int32));
@@ -560,7 +556,7 @@ fn closed_structs_are_rows_open_structs_are_structs() {
         let ty = Static::Struct(s);
         assert_eq!(ty.kind(), Some(kind), "{ty:?}");
     }
-    // So a closed table schema casts as PLK's ROW does.
+    // So a closed table schema casts as a ROW does.
     let closed = Static::Struct(StructType::new(
         [
             StructConstraint::Open(false),

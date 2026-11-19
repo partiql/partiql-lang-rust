@@ -1,6 +1,5 @@
 //! Tests for `UNKNOWN` (`PartiqlShape::Undefined`, the static type of `NULL` and `MISSING`) as
-//! the bottom of the lattice, and for `common_supertype`, a port of partiql-lang-kotlin's
-//! `DynamicTyper.getCommonSuperType` (v1.6.1, `DynamicTyper.kt:192-349`).
+//! the bottom of the lattice, and for `common_supertype`.
 
 use partiql_types::lattice::{can_coerce, common_supertype, implicit_coercion, Coercion};
 use partiql_types::{
@@ -24,9 +23,8 @@ fn row(fields: &[(&str, Static)]) -> PartiqlShape {
     )))
 }
 
-/// The supertype of several types, folded pairwise as `DynamicTyper.calculate` does
-/// (`DynamicTyper.kt:163-177`); `None` when a pair has none. (PLK's `CASE` / `COALESCE` result
-/// adds the typer's `mapping` step on top, see `common_supertype`.)
+/// The supertype of several types, folded pairwise; `None` when a pair has none. (A typer's
+/// `CASE` / `COALESCE` result adds a further step on top, see `common_supertype`.)
 fn fold(types: &[PartiqlShape]) -> Option<PartiqlShape> {
     let mut it = types.iter();
     let first = it.next()?.clone();
@@ -61,8 +59,7 @@ fn sample() -> Vec<PartiqlShape> {
     ]
 }
 
-/// `CoercionFamily.canCoerce` (`CoercionFamily.kt:83-85`) and `FnResolver.match`
-/// (`FnResolver.kt:148-150`): an `UNKNOWN` argument coerces to every parameter, with no cast.
+/// An `UNKNOWN` argument coerces to every parameter, with no cast.
 #[test]
 fn undefined_coerces_to_every_kind_without_a_cast() {
     assert_eq!(undefined().kind(), Some(K::Unknown));
@@ -98,7 +95,7 @@ fn implicit_coercion_rules() {
     assert_eq!(implicit_coercion(K::Dynamic, K::Integer), None);
 }
 
-/// `supertype(T, UNKNOWN) = supertype(UNKNOWN, T) = T` (`DynamicTyper.kt:196-197`).
+/// `supertype(T, UNKNOWN) = supertype(UNKNOWN, T) = T`.
 #[test]
 fn undefined_is_the_bottom_of_the_supertype() {
     for t in sample() {
@@ -111,9 +108,9 @@ fn undefined_is_the_bottom_of_the_supertype() {
     );
 }
 
-/// `CASE WHEN c THEN 1 ELSE NULL END` is `INTEGER`: the literal `1` is `INTEGER`
-/// (`RexConverter.kt:199-204`) and `NULL` is `UNKNOWN`, the bottom. (PLK reaches the same
-/// result by skipping the `NULL` literal, `DynamicTyper.kt:29-34`.)
+/// `CASE WHEN c THEN 1 ELSE NULL END` is `INTEGER`: the literal `1` is `INTEGER` (it fits in 32
+/// bits) and `NULL` is `UNKNOWN`, the bottom. (A typer that skips the `NULL` literal reaches the
+/// same result.)
 #[test]
 fn case_then_1_else_null_is_integer() {
     let int = s(Static::Int32);
@@ -121,8 +118,8 @@ fn case_then_1_else_null_is_integer() {
     assert_eq!(fold(&[undefined(), int.clone()]), Some(int.clone()));
     // `COALESCE(NULL, 1, NULL)`.
     assert_eq!(fold(&[undefined(), int.clone(), undefined()]), Some(int));
-    // The bottom with itself. (PLK types a `CASE` whose branches are all absent literals as
-    // `DYNAMIC`, in the typer's `mapping` step, `DynamicTyper.kt:79`.)
+    // The bottom with itself. (A typer should type a `CASE` whose branches are all absent
+    // literals as `DYNAMIC`, in its result step.)
     assert_eq!(fold(&[undefined(), undefined()]), Some(undefined()));
 }
 
@@ -146,7 +143,7 @@ fn dynamic_absorbs() {
 #[test]
 fn widening_table() {
     let cases: Vec<(Static, Static, Option<Static>)> = vec![
-        // Numbers (`DynamicTyper.kt:223-271`).
+        // Numbers.
         (Static::Int8, Static::Int16, Some(Static::Int16)),
         (Static::Int32, Static::Int64, Some(Static::Int64)),
         (Static::Int8, Static::Float64, Some(Static::Float64)),
@@ -177,7 +174,7 @@ fn widening_table() {
             Some(Static::Float32),
         ),
         (Static::Float32, Static::Float64, Some(Static::Float64)),
-        // Decimal merge (`:313-317`), capped at 38, signed when the scale exceeds the precision.
+        // Decimal merge, capped at 38, signed when the scale exceeds the precision.
         (
             Static::DecimalP(38, 0),
             Static::DecimalP(38, 10),
@@ -193,7 +190,7 @@ fn widening_table() {
             Static::DecimalP(3, 0),
             Some(Static::DecimalP(5, 2)),
         ),
-        // Text (`:272-286`, `:318-320`).
+        // Text.
         (
             Static::StringFixed(3),
             Static::StringVarying(5),
@@ -217,7 +214,7 @@ fn widening_table() {
         ),
         (Static::Blob(4), Static::Blob(9), Some(Static::Blob(9))),
         (Static::Blob(4), Static::Clob(9), None),
-        // Datetime (`:287-299`, `:322-325`).
+        // Datetime.
         (
             Static::Date,
             Static::Timestamp(3),
@@ -252,7 +249,7 @@ fn collections_and_rows() {
     let int = || s(Static::Int32);
     let array = |e: PartiqlShape| s(Static::Array(ArrayType::new(Box::new(e))));
     let bag = |e: PartiqlShape| s(Static::Bag(BagType::new(Box::new(e))));
-    // Element-wise (`:326-333`).
+    // Element-wise.
     assert_eq!(
         common_supertype(&array(int()), &array(s(Static::Int64))),
         Some(array(s(Static::Int64)))
@@ -261,12 +258,12 @@ fn collections_and_rows() {
         common_supertype(&array(int()), &array(s(Static::String))),
         None
     );
-    // `ARRAY` widens to `BAG<DYNAMIC>` (`:300-302`), whose element absorbs.
+    // `ARRAY` widens to `BAG<DYNAMIC>`, whose element absorbs.
     assert_eq!(
         common_supertype(&array(int()), &bag(int())),
         Some(bag(PartiqlShape::Dynamic))
     );
-    // Rows merge field by field; differing names become `_` (`:334-346`).
+    // Rows merge field by field; differing names become `_`.
     assert_eq!(
         common_supertype(&row(&[("a", Static::Int32)]), &row(&[("b", Static::Int64)])),
         Some(row(&[("_", Static::Int64)]))
@@ -320,7 +317,7 @@ fn collections_and_rows() {
             StructField::new_optional("a", s(Static::Int64))
         ])))
     );
-    // `ROW` and `STRUCT` have no supertype; two `STRUCT`s keep the left one (`:347`).
+    // `ROW` and `STRUCT` have no supertype; two `STRUCT`s keep the left one.
     let open = s(Static::Struct(StructType::new_any()));
     assert_eq!(common_supertype(&row(&[]), &open), None);
     assert_eq!(common_supertype(&open, &open), Some(open.clone()));
@@ -340,8 +337,8 @@ fn shapes_without_a_kind_have_no_supertype_except_with_the_bottom() {
     assert_eq!(common_supertype(&undefined(), &union), Some(union.clone()));
 }
 
-/// The supertype's kind does not depend on the order of the operands (PLK tries both
-/// directions, `DynamicTyper.kt:199-209`).
+/// The supertype's kind does not depend on the order of the operands (widening is tried in
+/// both directions).
 #[test]
 fn supertype_kind_is_symmetric() {
     let all = sample();
