@@ -5,13 +5,35 @@
 //! printer ([`Plan::dump`]) and [`crate::validate`] are written over this tree, and a plan
 //! comparator can be too. Shapes are kept as shapes; how they are spelled is the caller's choice
 //! ([`Plan::dump_with`]); [`render_shape`] is the default.
+//!
+//! EXPERIMENTAL: the tree's shape and the text format may change; they are a debugging and
+//! comparison aid, not a stable serialization. The dump is order-preserving, not canonical: data
+//! whose equality ignores order (bag and tuple literals, `AnyOf` members, struct constraint sets)
+//! prints in insertion order, and a graph shared by several literals prints once and then as
+//! `Graph #n` while an identical but separate graph prints in full again, so two `==` plans can
+//! dump differently. Compare plans with `==` (plus
+//! `Debug` for unspecified-parameter flags); compare dumps only between plans built the same way,
+//! as snapshots do. Names, string literals and variant encodings are escaped, so unequal plans do
+//! not dump alike, with two exceptions: a variant literal prints only its type, and every plan too
+//! deep to print prints the same notice (as would graph literals of a graph kind that partiql-value
+//! adds later). Note that `==` on a plan holding a graph literal panics, because partiql-value does
+//! not implement graph equality yet; there, the dump is the comparison that works. Like
+//! `validate`'s walk, the printer recurses once per nesting level. [`Plan::dump`] checks the depth
+//! bound itself and prints a notice for a plan that is too deep (the same notice for every such
+//! plan); [`tree`], [`TreeNode::write_text`], the visitor, the rewriter and the derived `Clone` /
+//! `==` / `Debug` / `Drop` do not, so run [`crate::validate`] first on untrusted plans.
 
 use crate::plan::{Action, Plan, Version};
 use crate::refs::RoutineRef;
 use crate::rel::{Collation, ExclusionItem, JoinType, Nulls, Order, Rel, RelOp, RelType};
 use crate::rex::{Comparison, MapEntry, Quantifier, Rex, RexOp, SubqueryTest};
 use partiql_types::{PartiqlShape, Static, StructType};
-use partiql_value::Value;
+use partiql_value::{Graph, SimpleGraph, Value};
+use std::collections::HashMap;
+
+/// Graphs already printed in one dump, by address, with the number they were printed under;
+/// graph values are reference-counted and may be shared, and a repeat prints as a reference.
+type SeenGraphs = HashMap<*const SimpleGraph, usize>;
 use std::fmt::Write;
 
 /// One node of a plan's tree view.
@@ -116,7 +138,7 @@ pub fn tree(plan: &Plan) -> TreeNode<'_> {
 
 fn routine_tree(r: &RoutineRef) -> TreeNode<'_> {
     let n = TreeNode::new("RoutineRef", None)
-        .text("name", r.name())
+        .text("name", qualified_text(r.name()))
         .text("specific", name_text(r.specific()));
     let n = r
         .params()
@@ -298,7 +320,7 @@ pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
             };
             n("RexSubqueryTest").text("test", test).rel("input", input)
         }
-        RexOp::Table { table } => n("RexTable").text("table", table),
+        RexOp::Table { table } => n("RexTable").text("table", qualified_text(table)),
         RexOp::TableRef {
             catalog_id,
             table_id,
@@ -489,6 +511,10 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
                     write_shape(out, m.value_type());
                     out.push('>');
                 }
+                // The encoding is a free-form string; escape it as a name.
+                Static::Variant(v) => {
+                    let _ = write!(out, "Variant({})", name_text(v.encoding()));
+                }
                 other => {
                     let _ = write!(out, "{other}");
                 }
@@ -535,13 +561,17 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
 
 /// Whether `s` is one of partiql-lang-kotlin's two struct kinds: a row exactly as built by
 /// `StructType::new_row`, or `StructType::new_any()` (`STRUCT`).
+// Rebuilding and comparing clones the fields, so this costs O(size of the subtree) per struct
+// level, superlinear in row nesting depth (bounded by `MAX_DEPTH`). partiql-types exposes no
+// getter for a struct's constraints that would make it O(1).
 pub(crate) fn is_plk_struct(s: &StructType) -> bool {
     *s == StructType::new_row(s.fields().cloned()) || *s == StructType::new_any()
 }
 
 /// A name as written in a dump: bare if it is a non-empty run of ASCII letters, digits, `_` and
-/// `$`, otherwise double-quoted with `"` doubled, so that names holding `, `, `: ` or `}` cannot
-/// be mistaken for dump syntax.
+/// `$`, otherwise a double-quoted, escaped string literal (Rust escaping: `"`, `\` and control
+/// characters such as a newline are escaped), so that a name cannot be mistaken for dump syntax
+/// or start a new line.
 pub fn name_text(name: &str) -> String {
     let simple = !name.is_empty()
         && name
@@ -550,24 +580,166 @@ pub fn name_text(name: &str) -> String {
     if simple {
         name.to_string()
     } else {
-        crate::refs::quote(name)
+        format!("{name:?}")
     }
 }
 
-/// A literal as written in a dump: its kind, then its value, with strings and other values
-/// whose text could hold dump syntax escaped as a Rust string literal. E.g. `Integer 1`,
-/// `Real 1.0`, `String "a"`.
+/// A qualified name as written in a dump: every part a double-quoted, escaped string literal
+/// (Rust escaping), joined by `.`, so parts cannot hold dump syntax or line breaks.
+fn qualified_text(q: &crate::QualifiedName) -> String {
+    std::iter::once(q.catalog())
+        .chain(q.namespace().iter().map(String::as_str))
+        .chain(std::iter::once(q.name()))
+        .map(|p| format!("{p:?}"))
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// A literal as written in a dump: its kind, then its value. Strings, tuple keys and any other
+/// text are escaped as Rust string literals; collections, tuples and graph element values are
+/// printed element by element, so the printer controls (and [`crate::validate`] bounds) the
+/// recursion. A variant (an embedded document, e.g. Ion) prints only its type, not its
+/// content, which this crate cannot bound: `Variant "ion"`. E.g. `Integer 1`, `Real 1.0`,
+/// `String "a"`, `List [Integer 1, Integer 2]`.
 pub fn value_text(v: &Value) -> String {
+    let mut out = String::new();
+    write_value(&mut out, v, &mut SeenGraphs::new());
+    out
+}
+
+fn write_value(out: &mut String, v: &Value, seen: &mut SeenGraphs) {
+    let items = |out: &mut String,
+                 seen: &mut SeenGraphs,
+                 open: &str,
+                 vs: &mut dyn Iterator<Item = &Value>,
+                 close| {
+        out.push_str(open);
+        for (i, x) in vs.enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            write_value(out, x, seen);
+        }
+        out.push_str(close);
+    };
     match v {
-        Value::Null => "NULL".to_string(),
-        Value::Missing => "MISSING".to_string(),
-        Value::Boolean(b) => format!("Boolean {b}"),
-        Value::Integer(i) => format!("Integer {i}"),
-        Value::Real(r) => format!("Real {:?}", r.0),
-        Value::Decimal(d) => format!("Decimal {d}"),
-        Value::String(s) => format!("String {:?}", s.as_str()),
-        other => format!("Value {:?}", format!("{other:?}")),
+        Value::Null => out.push_str("NULL"),
+        Value::Missing => out.push_str("MISSING"),
+        Value::Boolean(b) => {
+            let _ = write!(out, "Boolean {b}");
+        }
+        Value::Integer(i) => {
+            let _ = write!(out, "Integer {i}");
+        }
+        Value::Real(r) => {
+            let _ = write!(out, "Real {:?}", r.0);
+        }
+        Value::Decimal(d) => {
+            let _ = write!(out, "Decimal {d}");
+        }
+        Value::String(s) => {
+            let _ = write!(out, "String {:?}", s.as_str());
+        }
+        Value::List(l) => items(out, seen, "List [", &mut l.iter(), "]"),
+        Value::Bag(b) => items(out, seen, "Bag <<", &mut b.iter(), ">>"),
+        Value::Tuple(t) => {
+            out.push_str("Tuple {");
+            for (i, (k, x)) in t.pairs().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let _ = write!(out, "{k:?}: ");
+                write_value(out, x, seen);
+            }
+            out.push('}');
+        }
+        Value::Graph(g) => match g.as_ref() {
+            Graph::Simple(g) => {
+                let key = std::rc::Rc::as_ptr(g);
+                if let Some(n) = seen.get(&key) {
+                    let _ = write!(out, "Graph #{n}");
+                } else {
+                    let n = seen.len();
+                    seen.insert(key, n);
+                    let _ = write!(out, "Graph #{n} ");
+                    write_graph(out, g, seen);
+                }
+            }
+            // `Graph` is non-exhaustive; a kind added later prints opaquely (documented).
+            _ => out.push_str("Graph <unknown kind>"),
+        },
+        Value::Variant(x) => {
+            let _ = write!(out, "Variant {:?}", x.type_tag().name());
+        }
+        // Scalars with no nesting (datetime, blob, and kinds added later): their Debug text,
+        // escaped.
+        other => {
+            let _ = write!(out, "Value {:?}", format!("{other:?}"));
+        }
     }
+}
+
+/// A simple graph: each node and edge by index with its labels (sorted, escaped) and value,
+/// then every directed and undirected connection as `(from -[edge]-> to)` / `(a -[edge]- b)`,
+/// so graphs that differ in labels or connectivity print differently. A label the graph's
+/// interner does not know prints as `<label #key>` (the interner's
+/// 1-based key) instead of panicking; a key from another interner that happens to be in range
+/// prints as that label, which cannot be detected here.
+fn write_graph(out: &mut String, g: &SimpleGraph, seen: &mut SeenGraphs) {
+    let elem = |out: &mut String, seen: &mut SeenGraphs, i: usize, e: &partiql_value::GElem| {
+        let mut labels: Vec<String> = e
+            .labels
+            .0
+            .iter()
+            .map(|l| match g.labels.try_resolve(&l.0) {
+                Some(name) => format!("{name:?}"),
+                None => format!("<label #{}>", l.0.into_inner()),
+            })
+            .collect();
+        labels.sort_unstable();
+        let _ = write!(out, "{i} [{}] ", labels.join(", "));
+        match &e.value {
+            Some(x) => write_value(out, x, seen),
+            None => out.push('_'),
+        }
+    };
+    let list =
+        |out: &mut String, seen: &mut SeenGraphs, name: &str, es: &[partiql_value::GElem]| {
+            let _ = write!(out, "{name}: [");
+            for (i, e) in es.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                elem(out, seen, i, e);
+            }
+            out.push(']');
+        };
+    let links = |out: &mut String,
+                 name: &str,
+                 ts: &[(
+        partiql_value::GNodeId,
+        partiql_value::GEdgeId,
+        partiql_value::GNodeId,
+    )],
+                 arrow: &str| {
+        let _ = write!(out, "{name}: [");
+        for (i, (a, e, b)) in ts.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            let _ = write!(out, "({} -[{}]{arrow} {})", a.0, e.0, b.0);
+        }
+        out.push(']');
+    };
+    out.push('{');
+    list(out, seen, "nodes", &g.nodes);
+    out.push_str(", ");
+    list(out, seen, "edges", &g.edges);
+    out.push_str(", ");
+    links(out, "directed", &g.g_dir, "->");
+    out.push_str(", ");
+    links(out, "undirected", &g.g_undir, "-");
+    out.push('}');
 }
 
 fn render_rel_type(ty: &RelType, shape: &dyn Fn(&PartiqlShape) -> String) -> String {
@@ -583,8 +755,11 @@ fn render_rel_type(ty: &RelType, shape: &dyn Fn(&PartiqlShape) -> String) -> Str
 impl TreeNode<'_> {
     /// Writes the tree as indented text, one node per line:
     /// `role: Kind :: TYPE {attr: value, ..}`, children indented by two spaces.
+    ///
+    /// A graph value shared by several literals (graphs are reference-counted) is printed in
+    /// full once, as `Graph #n {..}`, and as `Graph #n` wherever it appears again.
     pub fn write_text(&self, out: &mut String, shape: &dyn Fn(&PartiqlShape) -> String) {
-        self.write_at(out, None, 0, shape)
+        self.write_at(out, None, 0, shape, &mut SeenGraphs::new())
     }
 
     fn write_at(
@@ -593,6 +768,7 @@ impl TreeNode<'_> {
         role: Option<&str>,
         depth: usize,
         shape: &dyn Fn(&PartiqlShape) -> String,
+        seen: &mut SeenGraphs,
     ) {
         for _ in 0..depth {
             out.push_str("  ");
@@ -617,14 +793,18 @@ impl TreeNode<'_> {
                 .map(|(k, v)| match v {
                     Attr::Text(s) => format!("{k}: {s}"),
                     Attr::Shape(s) => format!("{k}: {}", shape(s)),
-                    Attr::Value(v) => format!("{k}: {}", value_text(v)),
+                    Attr::Value(v) => {
+                        let mut text = String::new();
+                        write_value(&mut text, v, seen);
+                        format!("{k}: {text}")
+                    }
                 })
                 .collect();
             let _ = write!(out, " {{{}}}", attrs.join(", "));
         }
         out.push('\n');
         for (role, child) in &self.children {
-            child.write_at(out, Some(role), depth + 1, shape);
+            child.write_at(out, Some(role), depth + 1, shape, seen);
         }
     }
 }
@@ -637,7 +817,24 @@ impl Plan {
     }
 
     /// The plan as indented text, shapes spelled by `shape`.
+    ///
+    /// A plan nested deeper than [`crate::MAX_DEPTH`] is not printed (that would risk a stack
+    /// overflow); the result is a one-line notice instead, the same for every such plan. Use
+    /// [`Plan::dump_with_max_depth`] with the limit given to [`crate::validate_with_max_depth`].
     pub fn dump_with(&self, shape: &dyn Fn(&PartiqlShape) -> String) -> String {
+        self.dump_with_max_depth(crate::MAX_DEPTH, shape)
+    }
+
+    /// [`Plan::dump_with`] with a different depth limit, for callers whose stack allows deeper
+    /// plans (see [`crate::MAX_DEPTH`]).
+    pub fn dump_with_max_depth(
+        &self,
+        max_depth: usize,
+        shape: &dyn Fn(&PartiqlShape) -> String,
+    ) -> String {
+        if crate::validate::exceeds_depth(self, max_depth) {
+            return format!("<plan nested deeper than {max_depth}; not printed>\n");
+        }
         let mut out = String::new();
         tree(self).write_text(&mut out, shape);
         out

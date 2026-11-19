@@ -1,6 +1,8 @@
 //! Snapshots of hand-built plans printed by `Plan::dump`.
 mod common;
 
+use partiql_types::PartiqlShapeBuilder;
+
 use common::*;
 use partiql_ir::{tree, NodeType, Plan};
 use partiql_types::PartiqlShape;
@@ -112,4 +114,67 @@ fn non_canonical_structs_print_their_constraints() {
     let any = b().new_struct(StructType::new_any());
     assert_eq!(render_shape(&any), "{...}");
     assert_ne!(render_shape(&open), render_shape(&any));
+}
+
+/// A name holding a newline cannot forge a dump line or a violation path line.
+#[test]
+fn control_characters_in_names_are_escaped() {
+    use partiql_ir::{name_text, validate, Rel, RelField, RelType, Rex};
+    assert_eq!(name_text("a\nb"), r#""a\nb""#);
+    let forged = "x\n    rex: RexVar :: Int32 {scope: 9, offset: 9}";
+    let ty = RelType::new(vec![RelField::new(forged, int())], false);
+    let plan = partiql_ir::Plan::query(Rex::select(
+        bag(dynamic()),
+        Rel::scan(ty, Rex::var(dynamic(), 0, 0)),
+        Rex::path_symbol(dynamic(), Rex::var(dynamic(), 0, 0), forged),
+    ));
+    let dump = plan.dump();
+    // One line per node: Plan, Query, RexSelect, RelScan, RexVar, RexPathSymbol, RexVar.
+    assert_eq!(dump.lines().count(), 7, "{dump}");
+    assert!(
+        !dump
+            .lines()
+            .any(|l| l.trim_start().starts_with("rex: RexVar :: Int32")),
+        "{dump}"
+    );
+    // Violation paths escape the name too.
+    let bad = PartiqlShapeBuilder::default().new_static(partiql_types::Static::Int32);
+    let ty = RelType::new(vec![RelField::new(forged, bad)], false);
+    let plan = partiql_ir::Plan::query(Rex::select(
+        bag(dynamic()),
+        Rel::scan(ty, Rex::var(dynamic(), 0, 0)),
+        Rex::var(dynamic(), 0, 0),
+    ));
+    let v = validate(&plan).expect_err("id");
+    assert!(!v[0].path().contains('\n'), "{}", v[0].path());
+}
+
+/// Two unequal rows that differ only inside variant encodings dump differently.
+#[test]
+fn variant_encodings_are_escaped() {
+    use partiql_ir::render_shape;
+    use partiql_types::{Static, VariantType};
+    let v = |e: &str| s(Static::Variant(VariantType::new(e)));
+    let two = row(&[("a", v("x")), ("b", v("y"))]);
+    let one = row(&[("a", v("x), b: Variant(y"))]);
+    assert_ne!(two, one);
+    assert_ne!(render_shape(&two), render_shape(&one));
+}
+
+/// The dump is order-preserving, not canonical: `==` plans may dump differently.
+#[test]
+fn dump_is_order_preserving() {
+    use partiql_ir::Rex;
+    use partiql_value::{Bag, Value};
+    let lit = |vs: Vec<i64>| {
+        partiql_ir::Plan::query(Rex::lit(
+            bag(int()),
+            Value::from(Bag::from(
+                vs.into_iter().map(Value::from).collect::<Vec<_>>(),
+            )),
+        ))
+    };
+    let (p, q) = (lit(vec![1, 2]), lit(vec![2, 1]));
+    assert_eq!(p, q);
+    assert_ne!(p.dump(), q.dump());
 }

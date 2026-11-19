@@ -14,9 +14,13 @@
 //!
 //! `Undefined` is the bottom type, "no present value" (partiql-lang-kotlin's `UNKNOWN`). `NULL` and
 //! `MISSING` are absent values, not types: the typer types a `NULL` or `MISSING` literal
-//! `Undefined`, and a literal typed `Undefined` must hold an absent value. An absent-value literal
-//! may also carry a concrete type: partiql-lang-kotlin replaces the `NULL` / `MISSING` branches of
-//! `CASE` and `COALESCE` with absent literals typed as the supertype (`DynamicTyper.kt:107-108`).
+//! `Undefined`, and a literal typed `Undefined` must hold an absent value. The other direction is
+//! not checked: an absent-value literal may carry a concrete type, because partiql-lang-kotlin
+//! produces such literals in several places that a positional rule would have to track (the
+//! `NULL` / `MISSING` branches of `CASE` and arguments of `COALESCE`, retyped as the supertype by
+//! `DynamicTyper.kt:107-108`, even after a constant `CASE` is folded into its first branch,
+//! `PlanTyper.kt:1296`; the `INT` length `NULL` of `x IS VARCHAR`, `RexConverter.kt:1392`). The
+//! typer types the `NULL` and `MISSING` literals a query writes `Undefined`.
 //! `Undefined` may appear wherever an absent value's type flows: on an expression that can only
 //! produce absent values (a variable or path reading one, a supertype of only absent values,
 //! `PlanTyper.kt:134-136`), nested in rows, collections and map values (`SELECT NULL AS a`,
@@ -45,16 +49,23 @@
 //! `RelWindow`'s `bindings` are not checked: partiql-lang-kotlin takes them as the last names of
 //! the window's input schema, possibly fewer than its functions (`PlanTransform.kt:280`).
 //!
+//! A plan nesting deeper than [`MAX_DEPTH`] (counting `Rex`/`Rel` nodes, nested shapes, nested
+//! literal values and EXCLUDE path steps) is rejected before anything else is checked, without
+//! recursing past that depth.
+//!
 //! Not checked (left to the typer, whose scoping rules define them): that a `RexVar`'s scope and
 //! offset are in range, and that a `Rel`'s schema matches its operator.
 
 use crate::plan::Plan;
 use crate::print::{is_plk_struct, name_text};
 use crate::print::{tree, Attr, NodeType, Source, TreeNode};
-use crate::rel::RelOp;
-use crate::rex::RexOp;
+use crate::rel::{Rel, RelOp};
+use crate::rex::{Rex, RexOp};
+use crate::visit::{walk_rel, walk_rex, Visitor};
 use partiql_types::{PartiqlNoIdShapeBuilder, PartiqlShape, ShapeResultError, Static};
 use partiql_value::datum::Datum;
+use partiql_value::{Graph, Value};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 /// One broken invariant, at a path from the plan root.
@@ -94,6 +105,10 @@ pub enum ViolationKind {
     /// `Undefined` where no absent value can be: a cast target, a literal with a present value,
     /// or a constructor, table reference or `EXISTS`/`UNIQUE`.
     Undefined,
+    /// The plan nests deeper than the limit ([`MAX_DEPTH`] by default), counting `Rex`/`Rel`
+    /// nodes, nested shapes, nested literal values and EXCLUDE path steps; nothing else was
+    /// checked. Its path is always the plan root (`action`).
+    TooDeep { max: usize },
     /// A `RexError` not typed `Dynamic`.
     ErrorNotDynamic,
     /// A non-nullable shape.
@@ -123,6 +138,10 @@ impl Display for ViolationKind {
             ViolationKind::ShapeWithId { id } => write!(f, "shape has node id {id}"),
             ViolationKind::AnyOf => write!(f, "AnyOf union"),
             ViolationKind::Undefined => write!(f, "Undefined where no absent value can be"),
+            ViolationKind::TooDeep { max } => write!(
+                f,
+                "plan nests deeper than {max} levels (nodes, nested types, nested literal values and EXCLUDE path steps)"
+            ),
             ViolationKind::ErrorNotDynamic => write!(f, "error node is not typed Dynamic"),
             ViolationKind::NotNullable => write!(f, "non-nullable shape"),
             ViolationKind::NoPlkEquivalent => {
@@ -145,6 +164,20 @@ impl Display for ViolationKind {
 
 /// Checks `plan` against the invariants above; returns every violation, in tree order.
 pub fn validate(plan: &Plan) -> Result<(), Vec<Violation>> {
+    validate_with_max_depth(plan, MAX_DEPTH)
+}
+
+/// [`validate`] with a different depth limit, for callers whose stack allows deeper plans
+/// (e.g. a release build or a larger thread stack; see [`MAX_DEPTH`]).
+pub fn validate_with_max_depth(plan: &Plan, max_depth: usize) -> Result<(), Vec<Violation>> {
+    // Bound the depth first, with a walk that stops descending past the limit, so that the
+    // recursive checks below (and a caller's `dump`) cannot overflow the stack.
+    if exceeds_depth(plan, max_depth) {
+        return Err(vec![Violation {
+            path: "action".to_string(),
+            kind: ViolationKind::TooDeep { max: max_depth },
+        }]);
+    }
     let mut out = vec![];
     check_node(&tree(plan), "", &mut out);
     if out.is_empty() {
@@ -152,6 +185,179 @@ pub fn validate(plan: &Plan) -> Result<(), Vec<Violation>> {
     } else {
         Err(out)
     }
+}
+
+/// The deepest nesting [`validate`] accepts, counting `Rex`/`Rel` nodes, nested container
+/// shapes, nested literal values (collections, tuples, graph element values) and EXCLUDE path
+/// steps; a deeper plan is rejected with [`ViolationKind::TooDeep`] before any recursive check
+/// runs, and [`crate::Plan::dump`] prints a notice instead of it. Chosen so that validating and
+/// printing a plan of this depth fits a 2 MiB thread stack (Rust's default for spawned threads)
+/// in a debug build. Measured with chains of nested calls, the printer reaches about 190 levels
+/// there and about 1500 in a release build; nodes that print an intermediate level (a CASE
+/// branch, a struct field, a map entry) use more stack per level. Use
+/// [`validate_with_max_depth`] and [`crate::Plan::dump_with_max_depth`] to raise it.
+pub const MAX_DEPTH: usize = 128;
+
+/// Finds whether a plan nests deeper than `max`, recursing at most that deep.
+#[derive(Default)]
+struct Depth {
+    max: usize,
+    depth: usize,
+    too_deep: bool,
+    /// Heights of graph literal values already measured (reference-counted, maybe shared).
+    graph_heights: HashMap<*const partiql_value::SimpleGraph, usize>,
+}
+
+impl Depth {
+    fn enter(&mut self, f: impl FnOnce(&mut Self)) {
+        if self.too_deep {
+            return;
+        }
+        self.depth += 1;
+        if self.depth > self.max {
+            self.too_deep = true;
+        } else {
+            f(self);
+        }
+        self.depth -= 1;
+    }
+}
+
+impl Visitor for Depth {
+    fn visit_rex(&mut self, rex: &Rex) {
+        self.enter(|d| {
+            // Literal values nest too (`[[..]]`), and the printer recurses into them.
+            if let RexOp::Lit { value } = rex.op() {
+                // Graph heights are memoised at the full limit, so they compare at any depth.
+                if value_height(value, d.max, &mut d.graph_heights) > d.max - d.depth {
+                    d.too_deep = true;
+                    return;
+                }
+            }
+            walk_rex(d, rex)
+        })
+    }
+    fn visit_rel(&mut self, rel: &Rel) {
+        self.enter(|d| {
+            // EXCLUDE paths nest too, and the checks and the printer recurse into them.
+            if let RelOp::Exclude { exclusions, .. } = rel.op() {
+                let budget = d.max - d.depth;
+                if exclusions
+                    .iter()
+                    .any(|e| items_deeper_than(e.items(), budget))
+                {
+                    d.too_deep = true;
+                    return;
+                }
+            }
+            walk_rel(d, rel)
+        })
+    }
+    // Shapes nest too (`ARRAY<ARRAY<..>>`), and the shape checks and printer recurse into them.
+    fn visit_shape(&mut self, shape: &PartiqlShape) {
+        if !self.too_deep && shape_deeper_than(shape, self.max - self.depth) {
+            self.too_deep = true;
+        }
+    }
+}
+
+/// Whether `shape` nests containers (rows, collections, maps, unions) deeper than `budget`
+/// levels; a leaf shape costs nothing. Recurses at most `budget + 1` deep.
+fn shape_deeper_than(shape: &PartiqlShape, budget: usize) -> bool {
+    // `Some(b)`: the children get budget `b`; `None`: no budget left for any child.
+    let child = budget.checked_sub(1);
+    let deeper = |t: &PartiqlShape| child.is_none_or(|b| shape_deeper_than(t, b));
+    match shape {
+        PartiqlShape::AnyOf(a) => a.types().any(deeper),
+        PartiqlShape::Static(st) => match st.ty() {
+            Static::Struct(s) => s.fields().any(|f| deeper(f.ty())),
+            Static::Bag(b) => deeper(b.element_type()),
+            Static::Array(a) => deeper(a.element_type()),
+            Static::Map(m) => deeper(m.key_type()) || deeper(m.value_type()),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The nesting height of literal `value` (collections, tuples and graph element values; a
+/// scalar is 0), or `cap + 1` if it is above `cap`; recurses at most `cap + 1` deep. Graphs are
+/// reference-counted and may be shared, so each distinct graph's height is computed once and
+/// kept in `heights`; the caller compares the height with the remaining budget at every
+/// occurrence, so the bound holds wherever the printer prints a graph in full.
+fn value_height(
+    value: &Value,
+    cap: usize,
+    heights: &mut HashMap<*const partiql_value::SimpleGraph, usize>,
+) -> usize {
+    let Some(child_cap) = cap.checked_sub(1) else {
+        // Any container is above a cap of 0.
+        return usize::from(matches!(
+            value,
+            Value::List(_) | Value::Bag(_) | Value::Tuple(_) | Value::Graph(_)
+        ));
+    };
+    match value {
+        Value::List(l) => children_height(&mut l.iter(), child_cap, heights),
+        Value::Bag(b) => children_height(&mut b.iter(), child_cap, heights),
+        Value::Tuple(t) => children_height(&mut t.values(), child_cap, heights),
+        Value::Graph(g) => match g.as_ref() {
+            Graph::Simple(g) => {
+                let key = std::rc::Rc::as_ptr(g);
+                if let Some(h) = heights.get(&key) {
+                    return *h;
+                }
+                let mut values = g
+                    .nodes
+                    .iter()
+                    .chain(&g.edges)
+                    .filter_map(|e| e.value.as_ref());
+                let h = children_height(&mut values, child_cap, heights);
+                heights.insert(key, h);
+                h
+            }
+            _ => 0,
+        },
+        _ => 0,
+    }
+}
+
+/// One more than the tallest of `values` (see [`value_height`]), stopping once above `cap`.
+fn children_height(
+    values: &mut dyn Iterator<Item = &Value>,
+    cap: usize,
+    heights: &mut HashMap<*const partiql_value::SimpleGraph, usize>,
+) -> usize {
+    let mut h = 0;
+    for v in values {
+        h = h.max(value_height(v, cap, heights));
+        if h > cap {
+            break;
+        }
+    }
+    h + 1
+}
+
+/// Whether exclusion `items` nest deeper than `budget` levels; recurses at most `budget + 1`.
+fn items_deeper_than(items: &[crate::rel::ExclusionItem], budget: usize) -> bool {
+    if items.is_empty() {
+        return false;
+    }
+    let Some(budget) = budget.checked_sub(1) else {
+        return true;
+    };
+    items.iter().any(|i| items_deeper_than(i.items(), budget))
+}
+
+/// Whether `plan` nests deeper than `max` (counting `Rex`/`Rel` nodes, nested shapes, nested
+/// literal values and EXCLUDE path steps), recursing at most that deep.
+pub(crate) fn exceeds_depth(plan: &Plan, max: usize) -> bool {
+    let mut depth = Depth {
+        max,
+        ..Depth::default()
+    };
+    depth.visit_plan(plan);
+    depth.too_deep
 }
 
 fn join(path: &str, role: &str) -> String {

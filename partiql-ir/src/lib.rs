@@ -17,6 +17,9 @@
 //!   default traversal as [`visit::walk_rex`] / [`rewrite::walk_rex`] (and `walk_rel`,
 //!   `walk_plan`).
 //! - [`Plan::dump`] prints a plan as an indented tree; [`tree`] gives the same tree as data.
+//!   EXPERIMENTAL: the dump format, the [`TreeNode`] shape and the text helpers ([`name_text`],
+//!   [`value_text`], [`render_shape`]) are a debugging and comparison aid and may change; the
+//!   dump is order-preserving, not canonical (see the `print` module docs).
 //! - [`validate`] checks the invariants of a typed planner's output: no-id, non-union,
 //!   nullable shapes with a partiql-lang-kotlin counterpart; `Undefined` (the bottom type) only
 //!   where absent values flow; failed expressions typed `Dynamic`.
@@ -49,5 +52,5 @@ pub use rewrite::Rewriter;
 pub use rex::{
     CaseBranch, Comparison, MapEntry, Quantifier, Rex, RexOp, StructEntry, SubqueryTest,
 };
-pub use validate::{validate, Violation, ViolationKind};
+pub use validate::{validate, validate_with_max_depth, Violation, ViolationKind, MAX_DEPTH};
 pub use visit::Visitor;

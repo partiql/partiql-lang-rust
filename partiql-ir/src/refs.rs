@@ -47,8 +47,9 @@ impl QualifiedName {
 }
 
 impl Display for QualifiedName {
-    /// `"catalog"."ns1"."ns2"."name"`: every part double-quoted, a `"` in a part doubled, so
-    /// distinct names print distinctly (e.g. namespace `["s.x"]` vs `["s", "x"]`).
+    /// `"catalog"."ns1"."ns2"."name"`: every part a SQL delimited identifier (double-quoted, a
+    /// `"` doubled), so distinct names print distinctly (e.g. namespace `["s.x"]` vs
+    /// `["s", "x"]`). A plan dump escapes parts further (control characters too).
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", quote(&self.catalog))?;
         for part in &self.namespace {
@@ -58,8 +59,8 @@ impl Display for QualifiedName {
     }
 }
 
-/// `part` double-quoted, a `"` in it doubled.
-pub(crate) fn quote(part: &str) -> String {
+/// `part` as a SQL delimited identifier: double-quoted, a `"` doubled.
+fn quote(part: &str) -> String {
     format!("\"{}\"", part.replace('"', "\"\""))
 }
 
