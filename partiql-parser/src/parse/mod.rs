@@ -342,6 +342,88 @@ mod tests {
             assert!(parse_partiql("(a, b) OVERLAPS").is_err());
         }
 
+        // Where PartiQL Kotlin puts comparisons and `IS` on the level of OVERLAPS, PLR keeps
+        // its own levels, so these trees differ from PartiQL Kotlin's on purpose.
+        #[test]
+        fn overlaps_precedence_vs_plk() {
+            // `x = ((a, b) OVERLAPS (c, d))`; PartiQL Kotlin: `(x = (a, b)) OVERLAPS (c, d)`
+            let b = bin("x = (a, b) OVERLAPS (c, d)");
+            assert_eq!(b.kind, ast::BinOpKind::Eq);
+            assert!(
+                matches!(*b.rhs, ast::Expr::BinOp(ref r) if r.node.kind == ast::BinOpKind::Overlaps)
+            );
+            // `x IS (NULL OVERLAPS y)`; PartiQL Kotlin: `(x IS NULL) OVERLAPS y`
+            let b = bin("x IS NULL OVERLAPS y");
+            assert_eq!(b.kind, ast::BinOpKind::Is);
+            assert!(
+                matches!(*b.rhs, ast::Expr::BinOp(ref r) if r.node.kind == ast::BinOpKind::Overlaps)
+            );
+            // `(p AND ((a, b) OVERLAPS (c, d))) OR q`
+            let b = bin("p AND (a, b) OVERLAPS (c, d) OR q");
+            assert_eq!(b.kind, ast::BinOpKind::Or);
+            match *b.lhs {
+                ast::Expr::BinOp(ref l) => {
+                    assert_eq!(l.node.kind, ast::BinOpKind::And);
+                    assert!(
+                        matches!(*l.node.rhs, ast::Expr::BinOp(ref r) if r.node.kind == ast::BinOpKind::Overlaps)
+                    );
+                }
+                ref other => panic!("{other:?}"),
+            }
+        }
+
+        // `OVERLAPS` is a keyword, so it no longer names an alias, a table or an EXCLUDE path
+        // step unless quoted; these parsed before.
+        #[test]
+        fn overlaps_as_name_needs_quotes() {
+            for (bare, quoted) in [
+                (
+                    "SELECT x AS overlaps FROM t",
+                    r#"SELECT x AS "overlaps" FROM t"#,
+                ),
+                ("SELECT x overlaps FROM t", r#"SELECT x "overlaps" FROM t"#),
+                (
+                    "SELECT * FROM t AS overlaps",
+                    r#"SELECT * FROM t AS "overlaps""#,
+                ),
+                (
+                    "SELECT * FROM t AS x AT overlaps",
+                    r#"SELECT * FROM t AS x AT "overlaps""#,
+                ),
+                (
+                    "SELECT * EXCLUDE t.overlaps FROM t AS t",
+                    r#"SELECT * EXCLUDE t."overlaps" FROM t AS t"#,
+                ),
+                (
+                    "SELECT x FROM t GROUP BY x GROUP AS overlaps",
+                    r#"SELECT x FROM t GROUP BY x GROUP AS "overlaps""#,
+                ),
+                ("CREATE TABLE overlaps", r#"CREATE TABLE "overlaps""#),
+                (
+                    "INSERT INTO overlaps SELECT * FROM t",
+                    r#"INSERT INTO "overlaps" SELECT * FROM t"#,
+                ),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // A lexing error right after OVERLAPS is reported, not dropped.
+        #[test]
+        fn overlaps_lex_error_after() {
+            assert!(parse_partiql("a OVERLAPS\u{20ac} b").is_err());
+            assert!(parse_partiql("SELECT t.overlaps\u{20ac} FROM t").is_err());
+        }
+
+        // Any non-reserved keyword may name a function argument, as an identifier may.
+        #[test]
+        fn non_reserved_keyword_argument_name() {
+            for query in ["f(overlaps: 1)", "f(any: 1)", "f(simple: 1, overlaps: 2)"] {
+                parse!(query);
+            }
+        }
+
         // The pretty-printed predicate parses back to the same operator.
         #[test]
         fn overlaps_pretty_round_trip() {

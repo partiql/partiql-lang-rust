@@ -962,3 +962,21 @@ fn test_aggregate_without_group_by_has_no_keys() {
     assert!(group_by.exprs.is_empty(), "{:?}", group_by.exprs);
     assert_eq!(group_by.aggregate_exprs.len(), 2);
 }
+
+// OVERLAPS parses but does not lower yet: lowering reports it, without panicking.
+#[test]
+fn test_plan_overlaps_not_yet_implemented() {
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
+    let statement =
+        "(DATE '2023-01-01', DATE '2023-01-10') OVERLAPS (DATE '2023-01-05', DATE '2023-01-15')";
+    let parsed = partiql_parser::Parser::default()
+        .parse(statement)
+        .expect("Expect successful parse");
+    let planner = LogicalPlanner::new(&catalog);
+    let errs = planner.lower(&parsed).expect_err("Expect errs").errors;
+    assert!(
+        errs.iter()
+            .any(|e| matches!(e, AstTransformError::NotYetImplemented(_))),
+        "{errs:?}"
+    );
+}
