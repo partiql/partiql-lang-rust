@@ -16,6 +16,8 @@ use crate::parse::parse_util::{
     struct_to_lit,
     bag_to_lit,
     list_to_lit,
+    is_datetime_type,
+    two_word_type,
     CallSite,
     Attrs,
     Synth
@@ -1173,6 +1175,20 @@ ExprPrecedence12: Synth<ast::Expr> = {
                rhs: Box::new(r.data),
            }, lo..hi)
        )),
+    // `IS [NOT] <type>`, as in PartiQL Kotlin's `PredicateIs`
+    <lo:@L> <l:ExprPrecedence12> "IS" <ty:IsTypeName> <hi:@R> =>
+       Synth::empty(ast::Expr::IsType(
+           state.node(ast::IsType { value: Box::new(l.data), ty }, lo..hi)
+       )),
+    <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <ty:IsTypeName> <hi:@R> => {
+       let is = ast::Expr::IsType(state.node(ast::IsType { value: Box::new(l.data), ty }, lo..hi));
+       Synth::empty(ast::Expr::UniOp(
+           state.node(ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(is),
+           }, lo..hi)
+       ))
+    },
     <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <r:ExprPrecedence11> <hi:@R> => {
        let is =  ast::Expr::BinOp(
            state.node(ast::BinOp {
@@ -1308,6 +1324,15 @@ ExprPrecedence08: Synth<ast::Expr> = {
                rhs: Box::new(r.data),
            }, lo..hi)
        )),
+    // `&` is one of PartiQL Kotlin's "other" operators, at the same level as `||`
+    <lo:@L> <l:ExprPrecedence08> "&" <r:ExprPrecedence07> <hi:@R> =>
+       Synth::empty(ast::Expr::BinOp(
+           state.node(ast::BinOp {
+               kind: ast::BinOpKind::BitwiseAnd,
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
+           }, lo..hi)
+       )),
     <ExprPrecedence07>,
 }
 
@@ -1425,6 +1450,7 @@ ExprTerm: Synth<ast::Expr> = {
     <s:SubQuery> => Synth::empty(s),
     <lo:@L> <lit:Literal> <hi:@R> => Synth::lit(ast::Expr::Lit( state.node(lit, lo..hi) )),
     <v:VarRefExpr> => Synth::empty(v),
+    <m:ExprTermMap> => Synth::empty(m),
     <lo:@L> <c:ExprTermCollection> <hi:@R> => {
         if c.attrs.contains(Attrs::LIT) {
             match c.data {
@@ -1611,6 +1637,14 @@ ExprTermTuple: Synth<ast::Expr> = {
     }
 }
 
+#[inline]
+ExprTermMap: ast::Expr = {
+    <lo:@L> "MAP" "{" <entries:(<ExprPair> ",")*> <entry:ExprPair?> "}" <hi:@R> => {
+        let entries = entries.into_iter().chain(entry).map(|e| e.data).collect();
+        ast::Expr::Map( state.node(ast::Map{ entries }, lo..hi) )
+    }
+}
+
 ExprPair: Synth<ast::ExprPair> = {
     <lo:@L> <first:ExprQuerySynth> ":" <second:ExprQuerySynth> <hi:@R> => {
         let Synth{data:first, attrs: fattrs} = first;
@@ -1659,12 +1693,13 @@ FunctionArgPositional: ast::AstNode<ast::CallArg> = {
     <lo:@L> "*" <hi:@R> => state.node(ast::CallArg::Star(), lo..hi),
     <lo:@L> <expr:ExprQuery> <hi:@R> => state.node(ast::CallArg::Positional(expr), lo..hi),
     <lo:@L> <ty:TypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
+    <lo:@L> <ty:MapTypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
 }
 
 #[inline]
 FunctionArgNamed: ast::AstNode<ast::CallArg> = {
     <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named(ast::CallArgNamed{name, value}), lo..hi),
-    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <ty:ArgTypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
 }
 
 #[inline]
@@ -1906,6 +1941,67 @@ TypeNamePart: ast::CustomTypePart = {
 #[inline]
 TypeName: ast::Type = {
     <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts } ),
+}
+
+// A type in a named function argument, e.g. the target of `CAST(x AS <type>)`
+#[inline]
+ArgTypeName: ast::Type = {
+    <TypeName>,
+    <MapTypeName>,
+    <TwoWordTypeName>,
+}
+
+// The type of `<expr> IS [NOT] <type>`: `DATE`, `TIME` or `TIMESTAMP` (with an optional precision
+// and time zone) or `MAP<k, v>`. The two-word types are not accepted here: after `IS a`, another
+// identifier is an alias (`SELECT x IS a b`).
+#[inline]
+IsTypeName: ast::Type = {
+    <lo:@L> <ty:TypeName> <hi:@R> =>? if is_datetime_type(&ty) {
+        Ok(ty)
+    } else {
+        Err(lpop::ParseError::User{
+            error: ParseError::SyntaxError(
+                "expected a type: DATE, TIME, TIMESTAMP or MAP<k, v>".to_string()
+                    .to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+        })
+    },
+    <MapTypeName>,
+}
+
+// `MAP<key, value>`, as in PartiQL Kotlin's `TypeMap`
+MapTypeName: ast::Type = {
+    "MAP" "<" <k:MapTypeArg> "," <v:MapTypeArg> ">" => ast::Type::MapType(Box::new(k), Box::new(v)),
+    // a nested map closes with `>>`, which lexes as one token
+    "MAP" "<" <k:MapTypeArg> "," "MAP" "<" <k2:MapTypeArg> "," <v2:MapTypeArg> ">>" =>
+        ast::Type::MapType(Box::new(k), Box::new(ast::Type::MapType(Box::new(k2), Box::new(v2)))),
+}
+
+// The key or value type of a `MAP<key, value>`
+MapTypeArg: ast::Type = {
+    <TypeName>,
+    <MapTypeName>,
+    <TwoWordTypeName>,
+    <name:TypeIdent> => ast::Type::CustomType( ast::CustomType{ parts: vec![ast::CustomTypePart::Name(name)] } ),
+    <name:TypeIdent> "(" <args:CommaSepPlus<TypeParam>> ")" =>
+        ast::Type::CustomType( ast::CustomType{ parts: vec![ast::CustomTypePart::Parameterized(name, args)] } ),
+}
+
+#[inline]
+TypeIdent: ast::SymbolPrimitive = {
+    <id:"UnquotedIdent"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
+    <id:"QuotedIdent"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
+    <id:"ANY"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
+}
+
+// `CHARACTER VARYING [(n)]`, `CHAR VARYING [(n)]` and `DOUBLE PRECISION`, the SQL type names
+// made of two words that are not keywords here
+TwoWordTypeName: ast::Type = {
+    <lo:@L> <a:"UnquotedIdent"> <b:"UnquotedIdent"> <args:("(" <CommaSepPlus<TypeParam>> ")")?> <hi:@R> =>?
+        two_word_type(a, b, args.unwrap_or_default())
+            .ok_or_else(|| lpop::ParseError::User{
+                error: ParseError::SyntaxError(
+                    format!("unknown type `{a} {b}`").to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+            }),
 }
 
 #[inline]
@@ -2254,6 +2350,7 @@ extern {
         "LATERAL" => lexer::Token::Lateral,
         "LEFT" => lexer::Token::Left,
         "LIKE" => lexer::Token::Like,
+        "MAP" => lexer::Token::Map,
         "LIMIT" => lexer::Token::Limit,
         "MATCH" => lexer::Token::Match,
         "MISSING" => lexer::Token::Missing,

@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases and lateral joins resolve per the spec. With `VarRefResolution::Static`, an unqualified name with several candidate FROM bindings is a new `AstTransformError::AmbiguousReference`; `Dynamic` still picks the first non-`MISSING` candidate at evaluation time.
 - partiql-logical-planner: aggregate arguments resolve against the names visible before `GROUP BY` (`SUM(c) ... GROUP BY c` sums the input's `c`).
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
+- *BREAKING* partiql-parser: `MAP` is now a reserved keyword (as in PartiQL Kotlin), so it can no longer be used as a bare identifier, a path step or an alias (`map`, `t.map`, `AS map`); quote it (`"map"`, `t."map"`). Identifiers that merely start with `map`, such as `map_keys`, are unaffected.
 
 ### Added
+- partiql-parser: Parsing support for the `MAP { <key>: <value>, ... }` constructor (new `Expr::Map` / `ast::Map`), the `MAP<key, value>` type (new `Type::MapType`) in `CAST` and `IS`, `<expr> IS [NOT] <type>` for `DATE`, `TIME`, `TIMESTAMP` (with or without time zone) and `MAP<k, v>` (new `Expr::IsType` / `ast::IsType`), the two-word type names `CHARACTER VARYING [(n)]`, `CHAR VARYING [(n)]` and `DOUBLE PRECISION` in `CAST`, and the `&` operator (new `BinOpKind::BitwiseAnd`), at the precedence of `||`. These follow PartiQL Kotlin's grammar. Lowering does not support them yet.
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
 - partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
 - partiql-parser: `Parser::parse_statements` parses a `;`-separated script into multiple statements (optional trailing `;`). Single-statement `Parser::parse` is unchanged and still rejects `;`.
@@ -24,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical: `ValueExpr::DBRef(DBRef)`, a reference to a catalog-registered database object, emitted by `VarRefResolution::Static`.
 - partiql-logical-planner: `VarRefResolution` (`#[non_exhaustive]`) and `LogicalPlanner::with_var_resolution`. The default is `Dynamic`, which keeps the existing `DynamicLookup` lowering. `Static` resolves variable references at plan time, emitting `VarRef`, `Path`, or `DBRef`; the VM needs this mode.
 - New unpublished (`publish = false`) crates: `partiql-vm`, the experimental bytecode VM, and `partiql-tools`, the `pqlite` CLI.
+
+### Fixed
+- partiql-ast: a type argument of a function call (`CallArg::PositionalType`, `CallArg::NamedType`, e.g. the target of `CAST(x AS DATE)`) now pretty-prints instead of panicking with `todo!`.
 
 ### Removed
 
