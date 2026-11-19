@@ -5,9 +5,9 @@ use partiql_types::{
     type_int32, type_string, type_struct, AnyOf, IntervalFamily, IntervalQualifier, IntervalType,
     MapType, PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeResultError, Static,
     StaticCategory, StructConstraint, StructField, StructType, TypeParams, VariantType,
-    DEFAULT_LOB_LENGTH, DEFAULT_TIME_FACTORY_PRECISION, DEFAULT_TIME_PRECISION,
 };
 use std::collections::HashSet;
+use std::hash::{BuildHasher, RandomState};
 
 fn new_scalar_kinds() -> Vec<(Static, &'static str)> {
     vec![
@@ -387,7 +387,6 @@ fn rows_have_their_own_display_and_set_based_structs_are_not_rows() {
 
 #[test]
 fn equal_rows_hash_equally_whatever_the_constraint_order() {
-    use std::hash::{BuildHasher, RandomState};
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let fields = vec![
         StructField::new("a", type_int32!(bld)),
@@ -416,15 +415,15 @@ fn flags_are_kept_only_on_default_payloads() {
     let cleared = bld.new_static_with_params(Static::StringVarying(50), length);
     assert!(cleared.expect_static().unwrap().params().is_default());
     // partiql-lang-kotlin's defaults: BLOB/CLOB i32::MAX, TIME 0 or 6, TIMESTAMP 6.
-    let blob = bld.new_static_with_params(Static::Blob(DEFAULT_LOB_LENGTH), length);
+    let blob = bld.new_static_with_params(Static::Blob(TypeParams::DEFAULT_LOB_LENGTH), length);
     assert!(blob.expect_static().unwrap().params().unspecified_length);
     let blob_1 = bld.new_static_with_params(Static::Blob(1), length);
     assert!(blob_1.expect_static().unwrap().params().is_default());
     let precision = TypeParams::default().with_unspecified_precision(true);
     for (kind, kept) in [
         // TIME keeps the flag on both 0 (the planner's `TIME`) and 6 (`PType.time()`).
-        (Static::Time(DEFAULT_TIME_PRECISION), true),
-        (Static::Time(DEFAULT_TIME_FACTORY_PRECISION), true),
+        (Static::Time(TypeParams::DEFAULT_TIME_PRECISION), true),
+        (Static::Time(TypeParams::TIME_MICROSECOND_PRECISION), true),
         (Static::Time(3), false),
         (Static::TimeTz(0), true),
         (Static::TimeTz(6), true),
@@ -473,13 +472,7 @@ fn interval_display_is_sql_like() {
 
 #[test]
 fn equal_structs_hash_equally_whatever_the_constraint_order() {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let hash = |s: &StructType| {
-        let mut h = DefaultHasher::new();
-        s.hash(&mut h);
-        h.finish()
-    };
+    let state = RandomState::new();
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let fields = IndexSet::from([
         StructField::new("a", type_int32!(bld)),
@@ -496,20 +489,12 @@ fn equal_structs_hash_equally_whatever_the_constraint_order() {
     ]));
     // `IndexSet` equality ignores order, so the hash must too.
     assert_eq!(one, other);
-    assert_eq!(hash(&one), hash(&other));
+    assert_eq!(state.hash_one(&one), state.hash_one(&other));
 }
 
 #[test]
 fn equal_unions_hash_equally_whatever_the_member_order() {
-    use partiql_types::AnyOf;
-    use std::collections::hash_map::DefaultHasher;
-    use std::collections::HashSet;
-    use std::hash::{Hash, Hasher};
-    let hash = |s: &PartiqlShape| {
-        let mut h = DefaultHasher::new();
-        s.hash(&mut h);
-        h.finish()
-    };
+    let state = RandomState::new();
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let ab = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([
         type_int32!(bld),
@@ -520,7 +505,7 @@ fn equal_unions_hash_equally_whatever_the_member_order() {
         type_int32!(bld),
     ])));
     assert_eq!(ab, ba);
-    assert_eq!(hash(&ab), hash(&ba));
+    assert_eq!(state.hash_one(&ab), state.hash_one(&ba));
     let set: HashSet<_> = [ab.clone(), ba.clone()].into();
     assert_eq!(set.len(), 1);
 
@@ -532,4 +517,44 @@ fn equal_unions_hash_equally_whatever_the_member_order() {
         [StructField::new("u", ba)],
     ))]));
     assert_eq!(s1, s2);
+}
+
+#[test]
+fn map_key_must_not_be_undefined() {
+    // The MAP type RFC disallows NULL and MISSING keys; `Undefined` is their literals' type.
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let int = type_int32!(bld);
+    assert_eq!(
+        MapType::new(PartiqlShape::Undefined, int.clone()),
+        Err(ShapeResultError::UndefinedMapKey)
+    );
+    let nullable_key = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([
+        int.clone(),
+        PartiqlShape::Undefined,
+    ])));
+    let err = bld
+        .new_map(nullable_key, int.clone())
+        .expect_err("undefined member");
+    assert_eq!(err, ShapeResultError::UndefinedMapKey);
+    assert_eq!(
+        err.to_string(),
+        "MAP key type must not be Undefined (the type of NULL and MISSING)"
+    );
+    // An `Undefined` value is allowed (the RFC allows NULL values).
+    let k = type_string!(bld);
+    let map = bld.new_map(k, PartiqlShape::Undefined).unwrap();
+    assert_eq!(format!("{map}"), "Map<String, Undefined>");
+}
+
+#[test]
+fn variant_encoding_is_case_insensitive() {
+    let ion = VariantType::new("Ion");
+    assert_eq!(ion.encoding(), "ion");
+    assert_eq!(ion, VariantType::new("ION"));
+    let state = RandomState::new();
+    assert_eq!(
+        state.hash_one(&ion),
+        state.hash_one(VariantType::new("ion"))
+    );
+    assert_ne!(ion, VariantType::new("json"));
 }
