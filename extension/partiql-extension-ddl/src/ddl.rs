@@ -115,6 +115,8 @@ impl PartiqlBasicDdlEncoder {
             Static::Int32 => out.push_str("INTEGER"),
             Static::Int64 => out.push_str("INT8"),
             Static::Bool => out.push_str("BOOL"),
+            // Lossy, as before: `Decimal`, `DateTime` and `String` print as `DECIMAL`, `TIMESTAMP`
+            // and `VARCHAR`, the same text as an unspecified `DECIMAL`, `TIMESTAMP` and `VARCHAR`.
             Static::Decimal => out.push_str("DECIMAL"),
             Static::DecimalP(p, s) => {
                 out.push_str(&with_precision_scale("DECIMAL", *p, *s, ty.params()))
@@ -122,8 +124,6 @@ impl PartiqlBasicDdlEncoder {
             Static::DateTime => out.push_str("TIMESTAMP"),
             Static::Float32 => out.push_str("REAL"),
             Static::Float64 => out.push_str("DOUBLE"),
-            // Lossy, as before: `String`, `DateTime` and `Decimal` print as `VARCHAR`, `TIMESTAMP` and
-            // `DECIMAL`, the same text as an unspecified `VARCHAR`, `TIMESTAMP` and `DECIMAL`.
             Static::String => out.push_str("VARCHAR"),
             Static::StringFixed(n) => out.push_str(&with_length("CHAR", *n, ty.params())),
             Static::StringVarying(n) => out.push_str(&with_length("VARCHAR", *n, ty.params())),
@@ -144,17 +144,13 @@ impl PartiqlBasicDdlEncoder {
                 out.push_str(" WITH TIME ZONE");
             }
             Static::Interval(i) => out.push_str(&write_interval(i, ty.params())?),
-            Static::Variant(v) => {
-                out.push_str(&format!("VARIANT('{}')", checked_text(v.encoding(), '\'')?))
-            }
             Static::Struct(s) => out.push_str(&self.write_struct(s)?),
             Static::Bag(b) => out.push_str(&self.write_type_bag(b)?),
             Static::Array(a) => out.push_str(&self.write_type_array(a)?),
             Static::Map(m) => out.push_str(&self.write_type_map(m)?),
-            // Also `Null` and `Missing`, which have no DDL form, and `Graph`; plus the
-            // non-exhaustive catch-all.
+            // `Variant` (no DDL syntax agreed yet), `Graph`, and the non-exhaustive catch-all.
             _ => Err(ShapeEncodingError::UnsupportedEncoding(format!(
-                "`{ty}` is unsupported"
+                "`{ty}` has no DDL form"
             )))?,
         }
 
@@ -225,22 +221,17 @@ impl PartiqlBasicDdlEncoder {
 
 /// A delimited identifier: `name` in double quotes.
 fn quoted_identifier(name: &str) -> ShapeDdlEncodeResult<String> {
-    Ok(format!("\"{}\"", checked_text(name, '"')?))
-}
-
-/// `text` unchanged, or an error if it holds `quote` or a backslash.
-///
-/// SQL escapes a quote by doubling it while PartiQL's lexer uses backslash escapes, so no
-/// escaping reads back the same under both; such text is rejected rather than risk the output
-/// being read as different (e.g. extra) columns. Every other character, control and Unicode
-/// format characters included, is accepted inside quotes by both and cannot end the quoted text.
-fn checked_text(text: &str, quote: char) -> ShapeDdlEncodeResult<&str> {
-    if text.chars().any(|c| c == quote || c == '\\') {
+    if name.chars().any(|c| c == '"' || c == '\\') {
+        // SQL escapes a quote by doubling it while PartiQL's lexer uses backslash escapes, so no
+        // escaping reads back the same under both; such a name is rejected rather than risk the
+        // output being read as different (e.g. extra) columns. Every other character, control
+        // and Unicode format characters included, cannot end the quoted name.
         Err(ShapeEncodingError::UnsupportedEncoding(format!(
-            "{text:?} contains a quote or backslash"
+            "field name {name:?} contains a double quote or backslash, which the DDL output \
+             cannot quote"
         )))
     } else {
-        Ok(text)
+        Ok(format!("\"{name}\""))
     }
 }
 
