@@ -1,0 +1,581 @@
+//! A tree view of a plan, and a text printer over it.
+//!
+//! [`tree`] turns a plan into a uniform [`TreeNode`] tree: a node kind (partiql-lang-kotlin's
+//! class name, e.g. `RexSelect`), its type, its attributes, and its children by role. The text
+//! printer ([`Plan::dump`]) and [`crate::validate`] are written over this tree, and a plan
+//! comparator can be too. Shapes are kept as shapes; how they are spelled is the caller's choice
+//! ([`Plan::dump_with`]); [`render_shape`] is the default.
+
+use crate::plan::{Action, Plan, Version};
+use crate::refs::RoutineRef;
+use crate::rel::{Collation, ExclusionItem, JoinType, Nulls, Order, Rel, RelOp, RelType};
+use crate::rex::{Comparison, Quantifier, Rex, RexOp, SubqueryTest};
+use partiql_types::{PartiqlShape, Static};
+use partiql_value::Value;
+use std::fmt::Write;
+
+/// One node of a plan's tree view.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct TreeNode<'a> {
+    /// The node kind: partiql-lang-kotlin's class name (`RexVar`, `RelScan`, `RexCase.Branch`, ..).
+    pub kind: &'static str,
+    /// The node's type, for a `Rex` or `Rel`.
+    pub ty: Option<NodeType<'a>>,
+    /// The node's non-child attributes, in field order.
+    pub attrs: Vec<(String, Attr<'a>)>,
+    /// The node's children, in field order, each with its role (field name, `[i]` for a list).
+    pub children: Vec<(String, TreeNode<'a>)>,
+}
+
+/// The type of a [`TreeNode`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum NodeType<'a> {
+    Rex(&'a PartiqlShape),
+    Rel(&'a RelType),
+}
+
+/// An attribute value of a [`TreeNode`].
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Attr<'a> {
+    Text(String),
+    Shape(&'a PartiqlShape),
+    Value(&'a Value),
+}
+
+impl<'a> TreeNode<'a> {
+    fn new(kind: &'static str, ty: Option<NodeType<'a>>) -> Self {
+        TreeNode {
+            kind,
+            ty,
+            attrs: vec![],
+            children: vec![],
+        }
+    }
+
+    fn text(mut self, name: &str, value: impl ToString) -> Self {
+        self.attrs
+            .push((name.to_string(), Attr::Text(value.to_string())));
+        self
+    }
+
+    fn shape(mut self, name: impl Into<String>, shape: &'a PartiqlShape) -> Self {
+        self.attrs.push((name.into(), Attr::Shape(shape)));
+        self
+    }
+
+    fn child(mut self, role: impl Into<String>, node: TreeNode<'a>) -> Self {
+        self.children.push((role.into(), node));
+        self
+    }
+
+    fn rex(self, role: &str, rex: &'a Rex) -> Self {
+        self.child(role, rex_tree(rex))
+    }
+
+    fn rel(self, role: &str, rel: &'a Rel) -> Self {
+        self.child(role, rel_tree(rel))
+    }
+
+    fn rexes(self, role: &str, rexes: &'a [Rex]) -> Self {
+        rexes.iter().enumerate().fold(self, |n, (i, r)| {
+            n.child(format!("{role}[{i}]"), rex_tree(r))
+        })
+    }
+
+    fn list<T: 'a>(self, role: &str, xs: &'a [T], f: impl Fn(&'a T) -> TreeNode<'a>) -> Self {
+        xs.iter()
+            .enumerate()
+            .fold(self, |n, (i, x)| n.child(format!("{role}[{i}]"), f(x)))
+    }
+}
+
+/// The tree view of `plan`. Its root is a `Plan` node whose child is the action.
+pub fn tree(plan: &Plan) -> TreeNode<'_> {
+    let version = match plan.version() {
+        Version::V1 => "V1",
+    };
+    let root = TreeNode::new("Plan", None).text("version", version);
+    match plan.action() {
+        Action::Query { rex } => root.child("action", TreeNode::new("Query", None).rex("rex", rex)),
+    }
+}
+
+fn routine_tree(r: &RoutineRef) -> TreeNode<'_> {
+    let n = TreeNode::new("RoutineRef", None)
+        .text("name", r.name())
+        .text("specific", r.specific());
+    let n = r
+        .params()
+        .iter()
+        .enumerate()
+        .fold(n, |n, (i, p)| n.shape(format!("params[{i}]"), p));
+    n.shape("returns", r.returns())
+}
+
+fn collation_tree(c: &Collation) -> TreeNode<'_> {
+    let order = match c.order() {
+        Order::Asc => "ASC",
+        Order::Desc => "DESC",
+    };
+    let nulls = match c.nulls() {
+        Nulls::First => "FIRST",
+        Nulls::Last => "LAST",
+    };
+    TreeNode::new("Collation", None)
+        .text("order", order)
+        .text("nulls", nulls)
+        .rex("column", c.column())
+}
+
+fn exclusion_item_tree(item: &ExclusionItem) -> TreeNode<'_> {
+    let n = match item {
+        ExclusionItem::CollIndex { index, .. } => {
+            TreeNode::new("Exclusion.CollIndex", None).text("index", index)
+        }
+        ExclusionItem::CollWildcard { .. } => TreeNode::new("Exclusion.CollWildcard", None),
+        ExclusionItem::StructKey { key, .. } => {
+            TreeNode::new("Exclusion.StructKey", None).text("key", key)
+        }
+        ExclusionItem::StructSymbol { symbol, .. } => {
+            TreeNode::new("Exclusion.StructSymbol", None).text("symbol", symbol)
+        }
+        ExclusionItem::StructWildcard { .. } => TreeNode::new("Exclusion.StructWildcard", None),
+    };
+    n.list("items", item.items(), exclusion_item_tree)
+}
+
+fn join_type(j: JoinType) -> &'static str {
+    match j {
+        JoinType::Inner => "INNER",
+        JoinType::Left => "LEFT",
+        JoinType::Right => "RIGHT",
+        JoinType::Full => "FULL",
+    }
+}
+
+/// The tree view of one expression.
+pub fn rex_tree(rex: &Rex) -> TreeNode<'_> {
+    let ty = Some(NodeType::Rex(rex.ty()));
+    let n = |kind| TreeNode::new(kind, ty);
+    match rex.op() {
+        RexOp::Array { values } => n("RexArray").rexes("values", values),
+        RexOp::Bag { values } => n("RexBag").rexes("values", values),
+        RexOp::Call { function, args } => n("RexCall")
+            .child("function", routine_tree(function))
+            .rexes("args", args),
+        RexOp::Case {
+            match_,
+            branches,
+            default,
+        } => {
+            let mut c = n("RexCase");
+            if let Some(m) = match_ {
+                c = c.rex("match", m);
+            }
+            c = c.list("branches", branches, |b| {
+                TreeNode::new("RexCase.Branch", None)
+                    .rex("condition", b.condition())
+                    .rex("result", b.result())
+            });
+            if let Some(d) = default {
+                c = c.rex("default", d);
+            }
+            c
+        }
+        RexOp::Cast { operand, target } => {
+            n("RexCast").shape("target", target).rex("operand", operand)
+        }
+        RexOp::Coalesce { args } => n("RexCoalesce").rexes("args", args),
+        RexOp::Dispatch {
+            name,
+            functions,
+            args,
+        } => n("RexDispatch")
+            .text("name", name)
+            .list("functions", functions, routine_tree)
+            .rexes("args", args),
+        RexOp::Error {} => n("RexError"),
+        RexOp::Lit { value } => {
+            let mut l = n("RexLit");
+            l.attrs.push(("value".to_string(), Attr::Value(value)));
+            l
+        }
+        RexOp::Map {
+            key_type,
+            value_type,
+            entries,
+        } => n("RexMap")
+            .shape("key_type", key_type)
+            .shape("value_type", value_type)
+            .list("entries", entries, |e| {
+                TreeNode::new("RexMap.Entry", None)
+                    .rex("key", e.key())
+                    .rex("value", e.value())
+            }),
+        RexOp::MapDynamic { entries } => n("RexMapDynamic").list("entries", entries, |e| {
+            TreeNode::new("RexMap.Entry", None)
+                .rex("key", e.key())
+                .rex("value", e.value())
+        }),
+        RexOp::NullIf { v1, v2 } => n("RexNullIf").rex("v1", v1).rex("v2", v2),
+        RexOp::PathIndex { operand, index } => n("RexPathIndex")
+            .rex("operand", operand)
+            .rex("index", index),
+        RexOp::PathKey { operand, key } => n("RexPathKey").rex("operand", operand).rex("key", key),
+        RexOp::PathSymbol { operand, symbol } => n("RexPathSymbol")
+            .text("symbol", symbol)
+            .rex("operand", operand),
+        RexOp::Pivot { input, key, value } => n("RexPivot")
+            .rel("input", input)
+            .rex("key", key)
+            .rex("value", value),
+        RexOp::Select { input, constructor } => n("RexSelect")
+            .rel("input", input)
+            .rex("constructor", constructor),
+        RexOp::Spread { args } => n("RexSpread").rexes("args", args),
+        RexOp::Struct { fields } => n("RexStruct").list("fields", fields, |f| {
+            TreeNode::new("RexStruct.Field", None)
+                .rex("key", f.key())
+                .rex("value", f.value())
+        }),
+        RexOp::Subquery {
+            input,
+            constructor,
+            scalar,
+        } => n("RexSubquery")
+            .text("scalar", scalar)
+            .rel("input", input)
+            .rex("constructor", constructor),
+        RexOp::SubqueryComp {
+            input,
+            args,
+            comparison,
+            quantifier,
+        } => {
+            let comparison = match comparison {
+                Comparison::Eq => "EQ",
+                Comparison::Ne => "NE",
+                Comparison::Lt => "LT",
+                Comparison::Le => "LE",
+                Comparison::Gt => "GT",
+                Comparison::Ge => "GE",
+            };
+            let quantifier = match quantifier {
+                Quantifier::Any => "ANY",
+                Quantifier::All => "ALL",
+                Quantifier::Some => "SOME",
+            };
+            n("RexSubqueryComp")
+                .text("comparison", comparison)
+                .text("quantifier", quantifier)
+                .rel("input", input)
+                .rexes("args", args)
+        }
+        RexOp::SubqueryIn { input, args } => {
+            n("RexSubqueryIn").rel("input", input).rexes("args", args)
+        }
+        RexOp::SubqueryTest { input, test } => {
+            let test = match test {
+                SubqueryTest::Exists => "EXISTS",
+                SubqueryTest::Unique => "UNIQUE",
+            };
+            n("RexSubqueryTest").text("test", test).rel("input", input)
+        }
+        RexOp::Table { table } => n("RexTable").text("table", table),
+        RexOp::TableRef {
+            catalog_id,
+            table_id,
+        } => n("RexTableRef")
+            .text("catalog_id", catalog_id)
+            .text("table_id", table_id),
+        RexOp::Var { scope, offset } => n("RexVar").text("scope", scope).text("offset", offset),
+    }
+}
+
+/// The tree view of one relational operator.
+pub fn rel_tree(rel: &Rel) -> TreeNode<'_> {
+    let ty = Some(NodeType::Rel(rel.ty()));
+    let n = |kind| TreeNode::new(kind, ty);
+    match rel.op() {
+        RelOp::Aggregate {
+            input,
+            measures,
+            groups,
+        } => n("RelAggregate")
+            .rel("input", input)
+            .list("measures", measures, |m| {
+                TreeNode::new("RelAggregate.Measure", None)
+                    .text("distinct", m.is_distinct())
+                    .child("agg", routine_tree(m.agg()))
+                    .rexes("args", m.args())
+            })
+            .rexes("groups", groups),
+        RelOp::Correlate {
+            left,
+            right,
+            join_type: j,
+        } => n("RelCorrelate")
+            .text("join_type", join_type(*j))
+            .rel("left", left)
+            .rel("right", right),
+        RelOp::Distinct { input } => n("RelDistinct").rel("input", input),
+        RelOp::Except { left, right, all } => n("RelExcept")
+            .text("all", all)
+            .rel("left", left)
+            .rel("right", right),
+        RelOp::Exclude { input, exclusions } => {
+            n("RelExclude")
+                .rel("input", input)
+                .list("exclusions", exclusions, |e| {
+                    TreeNode::new("Exclusion", None).rex("var", e.var()).list(
+                        "items",
+                        e.items(),
+                        exclusion_item_tree,
+                    )
+                })
+        }
+        RelOp::Filter { input, predicate } => n("RelFilter")
+            .rel("input", input)
+            .rex("predicate", predicate),
+        RelOp::Intersect { left, right, all } => n("RelIntersect")
+            .text("all", all)
+            .rel("left", left)
+            .rel("right", right),
+        RelOp::Iterate { rex } => n("RelIterate").rex("rex", rex),
+        RelOp::Join {
+            left,
+            right,
+            condition,
+            join_type: j,
+        } => n("RelJoin")
+            .text("join_type", join_type(*j))
+            .rel("left", left)
+            .rel("right", right)
+            .rex("condition", condition),
+        RelOp::Limit { input, limit } => n("RelLimit").rel("input", input).rex("limit", limit),
+        RelOp::Offset { input, offset } => n("RelOffset").rel("input", input).rex("offset", offset),
+        RelOp::Project { input, projections } => n("RelProject")
+            .rel("input", input)
+            .rexes("projections", projections),
+        RelOp::Scan { rex } => n("RelScan").rex("rex", rex),
+        RelOp::Sort { input, collations } => {
+            n("RelSort")
+                .rel("input", input)
+                .list("collations", collations, collation_tree)
+        }
+        RelOp::Union { left, right, all } => n("RelUnion")
+            .text("all", all)
+            .rel("left", left)
+            .rel("right", right),
+        RelOp::Unpivot { rex } => n("RelUnpivot").rex("rex", rex),
+        RelOp::Window {
+            input,
+            name,
+            bindings,
+            functions,
+            collations,
+            partitions,
+        } => {
+            let mut w = n("RelWindow");
+            if let Some(name) = name {
+                w = w.text("name", name);
+            }
+            let w = bindings
+                .iter()
+                .enumerate()
+                .fold(w, |w, (i, b)| w.text(&format!("bindings[{i}]"), b));
+            w.rel("input", input)
+                .list("functions", functions, |f| {
+                    let sig = f.signature();
+                    let s = TreeNode::new("WindowFunctionNode", None)
+                        .text("name", sig.name())
+                        .text("ignore_nulls", sig.is_ignore_nulls());
+                    let s = sig
+                        .params()
+                        .iter()
+                        .enumerate()
+                        .fold(s, |s, (i, p)| s.shape(format!("params[{i}]"), p));
+                    s.shape("returns", sig.returns()).rexes("args", f.args())
+                })
+                .list("collations", collations, collation_tree)
+                .rexes("partitions", partitions)
+        }
+        RelOp::With { input, elements } => {
+            n("RelWith")
+                .rel("input", input)
+                .list("elements", elements, |e| {
+                    TreeNode::new("WithListElement", None)
+                        .text("name", e.name())
+                        .rex("representation", e.representation())
+                })
+        }
+    }
+}
+
+/// The default spelling of a shape in a dump: `PartiqlShape`'s `Display`, recursively, plus
+/// what `Display` leaves out: unspecified parameters (`{unspecified: precision}`) and a non-zero
+/// node id (`#id`).
+pub fn render_shape(shape: &PartiqlShape) -> String {
+    let mut out = String::new();
+    write_shape(&mut out, shape);
+    out
+}
+
+fn write_shape(out: &mut String, shape: &PartiqlShape) {
+    match shape {
+        PartiqlShape::Static(st) => {
+            if st.is_not_nullable() {
+                out.push_str("NOT NULL ");
+            }
+            match st.ty() {
+                Static::Struct(s) => {
+                    out.push_str(if s.is_row() { "Row{" } else { "{" });
+                    for (i, f) in s.fields().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        let opt = if f.is_optional() { "?" } else { "" };
+                        let _ = write!(out, "{}{opt}: ", f.name());
+                        write_shape(out, f.ty());
+                    }
+                    if s.is_partial() {
+                        out.push_str(if s.fields().next().is_some() {
+                            ", ...}"
+                        } else {
+                            "...}"
+                        });
+                    } else {
+                        out.push('}');
+                    }
+                }
+                Static::Bag(b) => {
+                    out.push_str("<<");
+                    write_shape(out, b.element_type());
+                    out.push_str(">>");
+                }
+                Static::Array(a) => {
+                    out.push('[');
+                    write_shape(out, a.element_type());
+                    out.push(']');
+                }
+                Static::Map(m) => {
+                    out.push_str("Map<");
+                    write_shape(out, m.key_type());
+                    out.push_str(", ");
+                    write_shape(out, m.value_type());
+                    out.push('>');
+                }
+                other => {
+                    let _ = write!(out, "{other}");
+                }
+            }
+            let p = st.params();
+            if !p.is_default() {
+                let flags: Vec<&str> = [
+                    (p.unspecified_length, "length"),
+                    (p.unspecified_precision, "precision"),
+                    (p.unspecified_scale, "scale"),
+                    (p.unspecified_fractional_precision, "fractional_precision"),
+                ]
+                .into_iter()
+                .filter_map(|(set, name)| set.then_some(name))
+                .collect();
+                let _ = write!(out, " {{unspecified: {}}}", flags.join(", "));
+            }
+            let id = st.ty_id().0;
+            if id != 0 {
+                let _ = write!(out, " #{id}");
+            }
+        }
+        PartiqlShape::AnyOf(a) => {
+            out.push_str("AnyOf(");
+            for (i, t) in a.types().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                write_shape(out, t);
+            }
+            out.push(')');
+        }
+        other => {
+            let _ = write!(out, "{other}");
+        }
+    }
+}
+
+fn render_rel_type(ty: &RelType, shape: &dyn Fn(&PartiqlShape) -> String) -> String {
+    let fields: Vec<String> = ty
+        .fields()
+        .iter()
+        .map(|f| format!("{}: {}", f.name(), shape(f.ty())))
+        .collect();
+    let ordered = if ty.is_ordered() { " ordered" } else { "" };
+    format!("Rel[{}]{ordered}", fields.join(", "))
+}
+
+impl TreeNode<'_> {
+    /// Writes the tree as indented text, one node per line:
+    /// `role: Kind :: TYPE {attr: value, ..}`, children indented by two spaces.
+    pub fn write_text(&self, out: &mut String, shape: &dyn Fn(&PartiqlShape) -> String) {
+        self.write_at(out, None, 0, shape)
+    }
+
+    fn write_at(
+        &self,
+        out: &mut String,
+        role: Option<&str>,
+        depth: usize,
+        shape: &dyn Fn(&PartiqlShape) -> String,
+    ) {
+        for _ in 0..depth {
+            out.push_str("  ");
+        }
+        if let Some(role) = role {
+            let _ = write!(out, "{role}: ");
+        }
+        out.push_str(self.kind);
+        match self.ty {
+            Some(NodeType::Rex(t)) => {
+                let _ = write!(out, " :: {}", shape(t));
+            }
+            Some(NodeType::Rel(t)) => {
+                let _ = write!(out, " :: {}", render_rel_type(t, shape));
+            }
+            None => {}
+        }
+        if !self.attrs.is_empty() {
+            let attrs: Vec<String> = self
+                .attrs
+                .iter()
+                .map(|(k, v)| match v {
+                    Attr::Text(s) => format!("{k}: {s}"),
+                    Attr::Shape(s) => format!("{k}: {}", shape(s)),
+                    Attr::Value(v) => format!("{k}: {v:?}"),
+                })
+                .collect();
+            let _ = write!(out, " {{{}}}", attrs.join(", "));
+        }
+        out.push('\n');
+        for (role, child) in &self.children {
+            child.write_at(out, Some(role), depth + 1, shape);
+        }
+    }
+}
+
+impl Plan {
+    /// The plan as indented text (see [`TreeNode::write_text`]), shapes spelled by
+    /// [`render_shape`].
+    pub fn dump(&self) -> String {
+        self.dump_with(&render_shape)
+    }
+
+    /// The plan as indented text, shapes spelled by `shape`.
+    pub fn dump_with(&self, shape: &dyn Fn(&PartiqlShape) -> String) -> String {
+        let mut out = String::new();
+        tree(self).write_text(&mut out, shape);
+        out
+    }
+}

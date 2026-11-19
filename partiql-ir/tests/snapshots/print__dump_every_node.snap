@@ -1,0 +1,135 @@
+---
+source: partiql-ir/tests/print.rs
+expression: every_node().dump()
+---
+Plan {version: V1}
+  action: Query
+    rex: RexSelect :: <<Dynamic>>
+      input: RelProject :: Rel[_1: Dynamic]
+        input: RelWith :: Rel[c: Int64, g: Bool, r: Int64]
+          input: RelWindow :: Rel[c: Int64, g: Bool, r: Int64] {name: w, bindings[0]: r}
+            input: RelOffset :: Rel[c: Int64, g: Bool]
+              input: RelLimit :: Rel[c: Int64, g: Bool]
+                input: RelSort :: Rel[c: Int64, g: Bool]
+                  input: RelExclude :: Rel[c: Int64, g: Bool]
+                    input: RelDistinct :: Rel[c: Int64, g: Bool]
+                      input: RelAggregate :: Rel[c: Int64, g: Bool]
+                        input: RelFilter :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}, x: Dynamic, v: Dynamic, k: String]
+                          input: RelJoin :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}, x: Dynamic, v: Dynamic, k: String] {join_type: LEFT}
+                            left: RelCorrelate :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}, x: Dynamic] {join_type: INNER}
+                              left: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+                              right: RelIterate :: Rel[x: Dynamic]
+                                rex: RexPathSymbol :: Dynamic {symbol: arr}
+                                  operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+                            right: RelUnpivot :: Rel[v: Dynamic, k: String]
+                              rex: RexTableRef :: Dynamic {catalog_id: 0, table_id: 1}
+                            condition: RexLit :: Bool {value: true}
+                          predicate: RexSubqueryTest :: Bool {test: EXISTS}
+                            input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                              rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+                        measures[0]: RelAggregate.Measure {distinct: true}
+                          agg: RoutineRef {name: $system.count, specific: count__1, params[0]: Dynamic, returns: Int64}
+                          args[0]: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+                        groups[0]: RexPathKey :: Bool
+                          operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+                          key: RexLit :: String {value: 'a'}
+                    exclusions[0]: Exclusion
+                      var: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+                      items[0]: Exclusion.StructSymbol {symbol: a}
+                        items[0]: Exclusion.CollIndex {index: 0}
+                        items[1]: Exclusion.CollWildcard
+                      items[1]: Exclusion.StructKey {key: B}
+                        items[0]: Exclusion.StructWildcard
+                  collations[0]: Collation {order: DESC, nulls: LAST}
+                    column: RexVar :: Bool {scope: 0, offset: 1}
+                limit: RexLit :: Int32 {value: 10}
+              offset: RexLit :: Int32 {value: 2}
+            functions[0]: WindowFunctionNode {name: rank, ignore_nulls: false, returns: Int64}
+            collations[0]: Collation {order: DESC, nulls: LAST}
+              column: RexVar :: Bool {scope: 0, offset: 1}
+            partitions[0]: RexVar :: Bool {scope: 0, offset: 1}
+          elements[0]: WithListElement {name: w1}
+            representation: RexSelect :: <<Dynamic>>
+              input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+              constructor: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+        projections[0]: RexArray :: [Int32]
+          values[0]: RexLit :: Int32 {value: 1}
+          values[1]: RexLit :: Int32 {value: 2}
+        projections[1]: RexBag :: <<Int32>>
+          values[0]: RexLit :: Int32 {value: 3}
+        projections[2]: RexCall :: Int32
+          function: RoutineRef {name: $system.plus, specific: plus__2, params[0]: Int32, params[1]: Int32, returns: Int32}
+          args[0]: RexLit :: Int32 {value: 1}
+          args[1]: RexLit :: Int32 {value: 2}
+        projections[3]: RexCase :: Int32
+          match: RexLit :: Int32 {value: 1}
+          branches[0]: RexCase.Branch
+            condition: RexLit :: Int32 {value: 1}
+            result: RexLit :: Int32 {value: 2}
+          default: RexLit :: Int32 {value: 3}
+        projections[4]: RexCase :: Dynamic
+          branches[0]: RexCase.Branch
+            condition: RexLit :: Bool {value: false}
+            result: RexLit :: Int32 {value: 2}
+        projections[5]: RexCast :: Int64 {target: Int64}
+          operand: RexLit :: Int32 {value: 1}
+        projections[6]: RexCoalesce :: Int32
+          args[0]: RexLit :: Int32 {value: 1}
+          args[1]: RexLit :: Int32 {value: 2}
+        projections[7]: RexDispatch :: Dynamic {name: abs}
+          functions[0]: RoutineRef {name: $system.abs, specific: abs__1, params[0]: Int32, returns: Int32}
+          functions[1]: RoutineRef {name: $system.abs, specific: abs__1, params[0]: String, returns: String}
+          args[0]: RexVar :: Dynamic {scope: 1, offset: 0}
+        projections[8]: RexError :: Dynamic
+        projections[9]: RexMap :: Map<String, Int32> {key_type: String, value_type: Int32}
+          entries[0]: RexMap.Entry
+            key: RexLit :: String {value: 'k'}
+            value: RexLit :: Int32 {value: 1}
+        projections[10]: RexMapDynamic :: Dynamic
+          entries[0]: RexMap.Entry
+            key: RexLit :: String {value: 'k'}
+            value: RexLit :: Int32 {value: 1}
+        projections[11]: RexNullIf :: Int32
+          v1: RexLit :: Int32 {value: 1}
+          v2: RexLit :: Int32 {value: 2}
+        projections[12]: RexPathIndex :: Dynamic
+          operand: RexVar :: Dynamic {scope: 0, offset: 1}
+          index: RexLit :: Int32 {value: 0}
+        projections[13]: RexPivot :: {...}
+          input: RelUnion :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}] {all: false}
+            left: RelIntersect :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}] {all: false}
+              left: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+              right: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+            right: RelExcept :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}] {all: true}
+              left: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+              right: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+                rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+          key: RexLit :: String {value: 'k'}
+          value: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+        projections[14]: RexSpread :: {...}
+          args[0]: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+          args[1]: RexVar :: Dynamic {scope: 0, offset: 1}
+        projections[15]: RexStruct :: Row{a: Int32}
+          fields[0]: RexStruct.Field
+            key: RexLit :: String {value: 'a'}
+            value: RexLit :: Int32 {value: 1}
+        projections[16]: RexSubquery :: Int32 {scalar: true}
+          input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+            rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+          constructor: RexPathKey :: Int32
+            operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+            key: RexLit :: String {value: 'b'}
+        projections[17]: RexSubqueryComp :: Bool {comparison: GE, quantifier: ANY}
+          input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+            rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+          args[0]: RexLit :: Int32 {value: 1}
+        projections[18]: RexSubqueryIn :: Bool
+          input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+            rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+          args[0]: RexLit :: Int32 {value: 1}
+      constructor: RexVar :: Dynamic {scope: 0, offset: 0}

@@ -1,0 +1,22 @@
+---
+source: partiql-ir/tests/print.rs
+expression: select_from_t().dump()
+---
+Plan {version: V1}
+  action: Query
+    rex: RexSelect :: <<Row{a: Bool, b: Int32}>>
+      input: RelProject :: Rel[_1: Row{a: Bool, b: Int32}]
+        input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
+          rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: default.s.T}
+        projections[0]: RexStruct :: Row{a: Bool, b: Int32}
+          fields[0]: RexStruct.Field
+            key: RexLit :: String {value: 'a'}
+            value: RexPathKey :: Bool
+              operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+              key: RexLit :: String {value: 'a'}
+          fields[1]: RexStruct.Field
+            key: RexLit :: String {value: 'b'}
+            value: RexPathKey :: Int32
+              operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
+              key: RexLit :: String {value: 'b'}
+      constructor: RexVar :: Row{a: Bool, b: Int32} {scope: 0, offset: 0}
