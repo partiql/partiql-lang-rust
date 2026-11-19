@@ -7,7 +7,7 @@ mod parser_state;
 
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
-use crate::lexer::CommentSkippingLexer;
+use crate::lexer::{CommentSkippingLexer, NullTreatmentLexer};
 use crate::parse::parser_state::ParserState;
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
@@ -68,7 +68,7 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
-    let lexer = CommentSkippingLexer::new(lexer);
+    let lexer = NullTreatmentLexer::new(CommentSkippingLexer::new(lexer));
 
     let result: LalrpopResult<'_> = grammar::StatementParser::new().parse(s, &mut state, lexer);
 
@@ -106,7 +106,7 @@ fn parse_partiql_statements_with_state<'input, Id: NodeIdGenerator>(
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
-    let lexer = CommentSkippingLexer::new(lexer);
+    let lexer = NullTreatmentLexer::new(CommentSkippingLexer::new(lexer));
 
     let result: LalrpopListResult<'_> =
         grammar::StatementListParser::new().parse(s, &mut state, lexer);
@@ -202,6 +202,17 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
 
@@ -271,6 +282,228 @@ mod tests {
                               */
                       'b':1} ` "#
             );
+        }
+    }
+
+    mod window {
+        use super::*;
+
+        fn window(q: &str) -> ast::WindowCall {
+            match parse_expr(q) {
+                ast::Expr::WindowCall(w) => w.node,
+                other => panic!("{q}: {other:?}"),
+            }
+        }
+
+        fn spec(w: &ast::WindowCall) -> &ast::WindowSpec {
+            match &w.window {
+                ast::WindowNameOrSpec::Spec(s) => &s.node,
+                other => panic!("{other:?}"),
+            }
+        }
+
+        // `<window function> OVER (...)`
+        #[test]
+        fn window_function() {
+            for (query, name, args, partitions, order_keys) in [
+                ("ROW_NUMBER() OVER (ORDER BY a)", "ROW_NUMBER", 0, 0, 1),
+                ("rank() over (order by a desc)", "rank", 0, 0, 1),
+                (
+                    "DENSE_RANK() OVER (PARTITION BY b ORDER BY a)",
+                    "DENSE_RANK",
+                    0,
+                    1,
+                    1,
+                ),
+                (
+                    "PERCENT_RANK() OVER (PARTITION BY b, t.c)",
+                    "PERCENT_RANK",
+                    0,
+                    2,
+                    0,
+                ),
+                ("CUME_DIST() OVER ()", "CUME_DIST", 0, 0, 0),
+                ("LAG(a) OVER (ORDER BY a)", "LAG", 1, 0, 1),
+                ("LEAD(a, 1) OVER (ORDER BY a)", "LEAD", 2, 0, 1),
+                ("LAG(a, 2, NULL) OVER (ORDER BY a, b, c)", "LAG", 3, 0, 3),
+                (
+                    "RANK() OVER (PARTITION BY a ORDER BY b ASC, c DESC)",
+                    "RANK",
+                    0,
+                    1,
+                    2,
+                ),
+            ] {
+                let w = window(query);
+                assert_eq!(w.call.node.func_name.value, name, "{query}");
+                assert_eq!(w.call.node.args.len(), args, "{query}");
+                assert_eq!(w.null_treatment, None, "{query}");
+                let s = spec(&w);
+                assert_eq!(s.existing_name, None, "{query}");
+                assert_eq!(s.partition_by.len(), partitions, "{query}");
+                assert_eq!(
+                    s.order_by.as_ref().map_or(0, |o| o.node.sort_specs.len()),
+                    order_keys,
+                    "{query}"
+                );
+            }
+            for (query, treatment) in [
+                (
+                    "LAG(a, 1) IGNORE NULLS OVER (ORDER BY a)",
+                    ast::NullTreatment::IgnoreNulls,
+                ),
+                (
+                    "LEAD(a, 1) RESPECT NULLS OVER (ORDER BY a)",
+                    ast::NullTreatment::RespectNulls,
+                ),
+            ] {
+                assert_eq!(window(query).null_treatment, Some(treatment), "{query}");
+            }
+            // a window name, and an existing window name in a specification
+            let w = window("ROW_NUMBER() OVER w");
+            assert!(matches!(w.window, ast::WindowNameOrSpec::Name(ref n) if n.value == "w"));
+            let w = window("ROW_NUMBER() OVER (w ORDER BY a)");
+            assert_eq!(
+                spec(&w).existing_name.as_ref().map(|n| n.value.as_str()),
+                Some("w")
+            );
+            for query in [
+                "SELECT a, ROW_NUMBER() OVER (PARTITION BY b ORDER BY a) FROM T",
+                "SELECT a, COUNT(*), ROW_NUMBER() OVER (ORDER BY COUNT(*)) FROM T GROUP BY a",
+                "SELECT a, LEAD(a, 2, FALSE) OVER (ORDER BY a) AS l FROM T",
+                "WITH cte1 AS (SELECT a, b FROM SIMPLE_T) SELECT ROW_NUMBER() OVER (ORDER BY a) AS rn, COUNT(*) AS cnt, a FROM cte1 GROUP BY a",
+            ] {
+                parse!(query);
+            }
+        }
+
+        // Only the window functions listed on `WindowCall`, with their arguments.
+        #[test]
+        fn window_function_errors() {
+            for query in [
+                "SUM(a) OVER (ORDER BY a)",
+                "COUNT(*) OVER (ORDER BY a)",
+                "foo(a) OVER (ORDER BY a)",
+                "RANK(a) OVER (ORDER BY a)",
+                "ROW_NUMBER() IGNORE NULLS OVER (ORDER BY a)",
+                "LAG() OVER (ORDER BY a)",
+                "LAG(a, b) OVER (ORDER BY a)",
+                "LAG(a, 1, 2, 3) OVER (ORDER BY a)",
+                "ROW_NUMBER() OVER (ORDER BY a",
+                "ROW_NUMBER() OVER",
+                r#""LAG"(a) OVER (ORDER BY a)"#,
+                "ROW_NUMBER() OVER (ORDER BY PRESERVE)",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
+
+        // `OVER`, `PARTITION`, `IGNORE` and `RESPECT` are non-reserved: they still name variables.
+        #[test]
+        fn window_non_reserved() {
+            for query in [
+                "SELECT over, partition, ignore, respect FROM t",
+                "SELECT t.over FROM t",
+                "lag(over, 1) OVER (PARTITION BY partition ORDER BY respect)",
+                "SELECT CAST(t.over AS INT), COUNT(DISTINCT t.partition) FROM t",
+                "SELECT TRIM(LEADING ' ' FROM t.partition), SUBSTRING(t.over FROM 1) FROM t",
+                "SELECT f(over: 1) FROM t",
+                // and a window call inside a special form
+                "SELECT CAST(LAG(a) OVER (ORDER BY a) AS STRING) FROM t",
+                "SELECT COUNT(DISTINCT RANK() OVER (ORDER BY a)) FROM t",
+                "SELECT SUBSTRING(x FROM ROW_NUMBER() OVER (ORDER BY a)) FROM t",
+                // with a null treatment, whose NULLS used to stop the special-form rewrite
+                "SELECT CAST(LAG(a) IGNORE NULLS OVER (ORDER BY a) AS STRING) FROM t",
+                "SELECT COUNT(DISTINCT LAG(a) RESPECT NULLS OVER (ORDER BY a)) FROM t",
+                "SELECT SUBSTRING(x FROM LAG(a) IGNORE NULLS OVER w) FROM t",
+            ] {
+                parse!(query);
+            }
+        }
+
+        // `IGNORE` and `RESPECT` are not reserved: they
+        // name aliases, tables and path steps, which parsed before; only `IGNORE NULLS` and
+        // `RESPECT NULLS` (not followed by FIRST or LAST) are a null treatment.
+        #[test]
+        fn ignore_respect_as_names() {
+            for query in [
+                "SELECT a AS ignore FROM t",
+                "SELECT a ignore, b respect FROM t",
+                "SELECT x FROM t AS ignore AT respect",
+                "SELECT * EXCLUDE t.ignore FROM t",
+                "CREATE TABLE respect",
+                "SELECT f(ignore: 1) FROM t",
+                "SELECT x FROM t ORDER BY ignore NULLS FIRST, respect NULLS LAST",
+                r#"SELECT LAG(a) "ignore" FROM t"#,
+            ] {
+                parse!(query);
+            }
+            let stmt = format!("{:?}", parse!("SELECT a AS ignore FROM t"));
+            assert!(stmt.contains(r#"value: "ignore""#), "{stmt}");
+            // The null treatment still parses, in any case and with a comment in between.
+            for (query, treatment) in [
+                (
+                    "LAG(a) ignore nulls OVER (ORDER BY a)",
+                    ast::NullTreatment::IgnoreNulls,
+                ),
+                (
+                    "LEAD(a) Respect /* c */ NULLS OVER (ORDER BY a)",
+                    ast::NullTreatment::RespectNulls,
+                ),
+            ] {
+                assert_eq!(window(query).null_treatment, Some(treatment), "{query}");
+            }
+        }
+
+        // `OVER` and `PARTITION` are non-reserved keywords: they no longer name an
+        // alias, a table or an EXCLUDE path step unless quoted; these parsed before.
+        #[test]
+        fn over_partition_as_names_need_quotes() {
+            for (bare, quoted) in [
+                ("SELECT x AS over FROM t", r#"SELECT x AS "over" FROM t"#),
+                (
+                    "SELECT x FROM t AS partition",
+                    r#"SELECT x FROM t AS "partition""#,
+                ),
+                (
+                    "SELECT * EXCLUDE t.over FROM t",
+                    r#"SELECT * EXCLUDE t."over" FROM t"#,
+                ),
+                ("CREATE TABLE over", r#"CREATE TABLE "over""#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // A lexing error right after OVER or PARTITION is reported, not dropped.
+        #[test]
+        fn over_lex_error_after() {
+            assert!(parse_partiql("SELECT t.over\u{20ac} FROM t").is_err());
+            assert!(parse_partiql("SELECT t.partition\u{20ac} FROM t").is_err());
+        }
+
+        // PARTITION BY takes any expression, not only column references.
+        #[test]
+        fn partition_by_expressions() {
+            let w = window("RANK() OVER (PARTITION BY a + 1, f(b) ORDER BY c)");
+            assert_eq!(spec(&w).partition_by.len(), 2);
+        }
+
+        // The pretty-printed window function parses back to the same structure.
+        #[test]
+        fn window_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for query in [
+                "LAG(a, 1) IGNORE NULLS OVER (PARTITION BY b ORDER BY a DESC)",
+                "ROW_NUMBER() OVER w",
+                "RANK() OVER ()",
+            ] {
+                let printed = parse_expr(query).to_pretty_string(80).unwrap();
+                assert_eq!(printed, query);
+                let reprinted = parse_expr(&printed).to_pretty_string(80).unwrap();
+                assert_eq!(reprinted, printed);
+            }
         }
     }
 

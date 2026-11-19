@@ -115,11 +115,12 @@ fn category(tok: &Token<'_>) -> Category {
         | Preserve | Recursive | Repeatable | Right | Row | Select | Search | Table | Time
         | Timestamp | Then | Union | Unpivot | Using | Value | Values | When | Where | With
         | Without | Zone | AllDifferent | BindingCount | ElementId | ElementNumber | Graph
-        | GraphTable | MatchNum | PathLength | PathName | PropertyExists | Same => {
-            Category::Keyword
-        }
+        | GraphTable | MatchNum | PathLength | PathName | PropertyExists | Same | IgnoreNulls
+        | RespectNulls => Category::Keyword,
         Any(_)
         | Simple(_)
+        | Over(_)
+        | Partition(_)
         | Acyclic(_)
         | Bindings(_)
         | Bound(_)

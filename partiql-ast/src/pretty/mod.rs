@@ -454,6 +454,7 @@ impl PrettyDoc for Expr {
             Expr::Path(inner) => inner.pretty_doc(arena),
             Expr::Call(inner) => inner.pretty_doc(arena),
             Expr::CallAgg(inner) => inner.pretty_doc(arena),
+            Expr::WindowCall(inner) => inner.pretty_doc(arena),
             Expr::GraphMatch(inner) => inner.pretty_doc(arena),
             Expr::Query(inner) => {
                 let inner = inner.pretty_doc(arena).group();
@@ -946,6 +947,68 @@ impl PrettyDoc for CallAgg {
         name.append(arena.text("("))
             .append(list.nest(PRETTY_INDENT_MINOR_NEST))
             .append(arena.text(")"))
+    }
+}
+
+impl PrettyDoc for WindowCall {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let WindowCall {
+            call,
+            null_treatment,
+            window,
+        } = self;
+        let mut parts = vec![call.pretty_doc(arena)];
+        match null_treatment {
+            Some(NullTreatment::RespectNulls) => parts.push(arena.text("RESPECT NULLS")),
+            Some(NullTreatment::IgnoreNulls) => parts.push(arena.text("IGNORE NULLS")),
+            None => {}
+        }
+        parts.push(arena.text("OVER"));
+        parts.push(match window {
+            WindowNameOrSpec::Name(name) => name.pretty_doc(arena),
+            WindowNameOrSpec::Spec(spec) => spec.pretty_doc(arena),
+        });
+        arena.intersperse(parts, arena.space()).group()
+    }
+}
+
+impl PrettyDoc for WindowSpec {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let WindowSpec {
+            existing_name,
+            partition_by,
+            order_by,
+        } = self;
+        let mut parts = vec![];
+        if let Some(name) = existing_name {
+            parts.push(name.pretty_doc(arena));
+        }
+        if !partition_by.is_empty() {
+            parts.push(pretty_prefixed_doc(
+                "PARTITION BY",
+                pretty_list(partition_by, PRETTY_INDENT_MINOR_NEST, arena),
+                arena,
+            ));
+        }
+        if let Some(order_by) = order_by {
+            parts.push(order_by.pretty_doc(arena));
+        }
+        let inner = arena.intersperse(parts, arena.space());
+        arena
+            .text("(")
+            .append(inner)
+            .append(arena.text(")"))
+            .group()
     }
 }
 

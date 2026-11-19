@@ -352,6 +352,24 @@ pub trait Visitor<'ast> {
     fn exit_in(&mut self, _in: &'ast ast::In) -> Traverse {
         Traverse::Continue
     }
+    fn enter_window_call(&mut self, _window_call: &'ast ast::WindowCall) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_window_call(&mut self, _window_call: &'ast ast::WindowCall) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_window_name_or_spec(&mut self, _window: &'ast ast::WindowNameOrSpec) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_window_name_or_spec(&mut self, _window: &'ast ast::WindowNameOrSpec) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_window_spec(&mut self, _window_spec: &'ast ast::WindowSpec) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_window_spec(&mut self, _window_spec: &'ast ast::WindowSpec) -> Traverse {
+        Traverse::Continue
+    }
     fn enter_case(&mut self, _case: &'ast ast::Case) -> Traverse {
         Traverse::Continue
     }
