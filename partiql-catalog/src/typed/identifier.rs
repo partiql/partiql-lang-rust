@@ -17,12 +17,17 @@ use std::hash::{Hash, Hasher};
 /// form, under which a regular `straße` equals `"STRASSE"`. Consequences to be aware of:
 /// - Some non-ASCII characters match ASCII names: the Kelvin sign `\u{212A}` matches `k`, the
 ///   long s `\u{17F}` matches `s`, and `\u{130}` (capital I with dot above) matches `i`. An
-///   allow-list of table names should check the resolved [`Name`], not the query text.
+///   allow-list of names should therefore not compare the query text: it should check the
+///   object that was resolved. (Through [`super::LegacyCatalogAdapter`], a resolved table's
+///   [`Name`] is the text as written, so it should check the inner catalog's entry.)
+/// - This rule decides [`IdentPart::matches`] and catalog names; each catalog decides how its
+///   own table names match.
 /// - There is no Unicode normalization: a decomposed `e` + U+0301 does not match a precomposed
 ///   `\u{E9}`.
 /// - The result depends on the Unicode version of the Rust toolchain, so other engines using
-///   older case tables can differ for characters added in later Unicode versions. Tests shared
-///   across engines should avoid characters added after Unicode 13.
+///   older case tables can differ, both for newly added characters and for older characters
+///   that gained a case mapping later. Tests shared across engines should avoid characters
+///   whose case mappings are recent.
 #[must_use]
 pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     let mut a = a.chars();

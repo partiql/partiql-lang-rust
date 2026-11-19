@@ -162,6 +162,9 @@ struct Tree {
     children: Vec<Tree>,
 }
 
+/// A simplified test catalog: it returns the table at the deepest node an identifier reaches
+/// (not the longest prefix that is a table), and the first of several case-insensitive matches
+/// (rather than `None` for an ambiguous prefix). The tests here do not depend on either rule.
 impl Tree {
     /// A regular part matches a child ignoring case (the first in order); a delimited one exactly.
     fn get(&self, part: &IdentPart) -> Option<&Tree> {
@@ -518,7 +521,8 @@ fn step3_ambiguous_catalog_name_is_an_error() {
 
 #[test]
 fn resolved_name_without_table_falls_through() {
-    // A catalog that resolves a name it has no table for (step 1), so step 2 is tried.
+    // A catalog that resolves a name it has no table for (step 1), against the `resolve_table`
+    // contract, so step 2 is tried.
     #[derive(Debug)]
     struct Dangling;
     impl TypedCatalog for Dangling {
@@ -977,7 +981,7 @@ fn adapter_delimited_exact_when_inner_catalog_honors_quoting() {
 }
 
 #[test]
-fn adapter_in_a_session_resolves_through_env_order() {
+fn adapter_in_a_session_resolves_through_lookup_order() {
     let adapter: Arc<dyn TypedCatalog> = Arc::new(LegacyCatalogAdapter::new(legacy()));
     let s = session("default", &[], vec![adapter]);
     assert_eq!(
@@ -1292,6 +1296,7 @@ fn regular_matching_edge_cases() {
     assert!(equals_ignore_case("\u{1F80}", "\u{1F88}"));
     // Capital I with dot above and dotless i: both reach `i` or `I`.
     assert!(equals_ignore_case("\u{130}", "I"));
+    assert!(equals_ignore_case("\u{130}", "i"));
     assert!(equals_ignore_case("\u{130}", "\u{131}"));
     assert!(equals_ignore_case("\u{131}", "i"));
     // Capital sigma and final sigma.
@@ -1308,8 +1313,8 @@ fn adapter_alias_resolves_to_the_name_as_written() {
     let adapter = LegacyCatalogAdapter::new(legacy());
     let s = Session::empty();
     assert_eq!(
-        adapter.resolve_table(&s, &reg(&["purchases"])),
-        Some(Name::of(["purchases"]).unwrap())
+        adapter.resolve_table(&s, &reg(&["PURCHASES"])),
+        Some(Name::of(["PURCHASES"]).unwrap())
     );
 }
 
@@ -1335,6 +1340,11 @@ fn step3_catalog_found_without_the_table_is_not_found() {
         ],
     );
     assert_eq!(resolved(&s, &reg(&["archive", "orders"])), None);
+    // Step 3 does find a table the catalog has.
+    assert_eq!(
+        resolved(&s, &reg(&["archive", "other"])),
+        Some(("archive".into(), "\"other\"".into(), vec![]))
+    );
 }
 
 /// The path is the identifier's parts after as many parts as the resolved name has. A catalog

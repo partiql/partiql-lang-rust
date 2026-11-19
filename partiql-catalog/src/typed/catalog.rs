@@ -61,13 +61,16 @@ pub trait TypedCatalog: Debug + Send + Sync {
     ///
     /// The contract:
     /// - The longest prefix of `identifier` that names a table wins.
-    /// - If two or more tables match a prefix of that length (for example `Foo` and `FOO` for a
-    ///   regular `foo`), the identifier is ambiguous and the result is `None`.
+    /// - If two or more tables match a prefix of that length under the catalog's own case rules
+    ///   (for example `Foo` and `FOO` for a regular `foo`, where regular parts ignore case), the
+    ///   identifier is ambiguous and the result is `None`. [`super::LegacyCatalogAdapter`] cannot
+    ///   detect this: its inner catalog answers with at most one entry.
     /// - The returned name has exactly as many parts as the prefix it matched.
-    ///   [`super::resolve_table`] takes the parts of `identifier` after that many parts as the
-    ///   path, so a catalog that resolves bare `orders` to the two-part `public.orders` would make
-    ///   `orders.total` resolve with an empty path, dropping `.total`.
-    /// - [`TypedCatalog::get_table`] of the returned name returns the table it was resolved to.
+    /// - [`TypedCatalog::get_table`] of the returned name returns the table it was resolved to,
+    ///   whose [`Table::name`] is the returned name. [`super::resolve_table`] takes the parts of
+    ///   `identifier` after as many parts as that name has as the path, so a catalog that resolves
+    ///   bare `orders` to the two-part `public.orders` would make `orders.total` resolve with an
+    ///   empty path, dropping `.total`.
     ///
     /// The case rules are the implementation's. [`super::LegacyCatalogAdapter`] applies its
     /// inner catalog's rules: over [`crate::catalog::PartiqlCatalog`], delimited parts also
@@ -117,7 +120,8 @@ pub trait TypedCatalog: Debug + Send + Sync {
 /// [`RoutineCatalog::resolve_aggregations`]:
 /// - The identifier is local to the catalog: it never includes the catalog's own name.
 /// - It matches a routine at its full depth; a prefix of the identifier does not match.
-/// - A regular part matches ignoring case and a delimited part exactly.
+/// - A regular part matches ignoring case and a delimited part exactly, as
+///   [`super::IdentPart::matches`] does.
 /// - The result is authoritative: for a `RoutineCatalog` there is no fallback to the by-text
 ///   lookup, so an empty result means the catalog has no such routine.
 pub trait RoutineCatalog: TypedCatalog {

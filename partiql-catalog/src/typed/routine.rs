@@ -68,11 +68,12 @@ impl RoutineOverloadSignature {
 /// The concrete signature of a routine instance: its parameters, its return type, and two flags
 /// (IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument makes the call return
 /// NULL without invoking it; with `is_missing_call`, a MISSING argument makes it return MISSING.
-/// MISSING is checked first, so with both flags `f(NULL, MISSING)` is MISSING. NULL and MISSING
+/// With both flags, MISSING takes precedence: `f(NULL, MISSING)` is MISSING. NULL and MISSING
 /// are absent values, not types.
 ///
-/// The flags apply to scalar function calls only. The same type is the instance of an
-/// aggregation, whose calls do not read them: `COUNT(NULL)` is not folded to NULL.
+/// A typer or evaluator must apply the flags to scalar function calls only. The same type is the
+/// instance of an aggregation, where the flags are set by default but must be ignored:
+/// `COUNT(NULL)` is not folded to NULL.
 #[derive(Debug, Clone)]
 pub struct RoutineSignature {
     name: String,

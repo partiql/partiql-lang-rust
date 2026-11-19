@@ -44,6 +44,7 @@
 //! let found = resolve_table(&session, &id).unwrap().unwrap();
 //! assert_eq!(found.catalog(), "default");
 //! assert_eq!(found.table().name().name(), "ORDERS"); // the name as written
+//! assert_eq!(found.path().len(), 1);
 //! assert_eq!(found.path()[0].text(), "total");
 //! ```
 
