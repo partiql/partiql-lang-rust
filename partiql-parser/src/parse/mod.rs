@@ -227,6 +227,29 @@ mod tests {
                 },
                 other => panic!("{q}: {other:?}"),
             };
+            // A string ending in a backslash followed later by another quote: a lexing error
+            // before, as `\'` kept the string open.
+            for query in [
+                r"SELECT 'C:\dir\' AS p FROM t",
+                r"SELECT REPLACE(t.c, '\', '/') AS v FROM T AS t",
+                r"SELECT TRIM(BOTH '\' FROM t.c) AS v FROM T AS t",
+                r"SELECT POSITION('\' IN t.c) AS v FROM T AS t",
+                r"SELECT {'k\': t.c} AS v FROM T AS t",
+                r"SELECT 'a\''' || t.c AS v FROM T AS t",
+                r"SELECT t.c AS c FROM T AS t WHERE t.c IN ('a\', 'b')",
+                r"SELECT ['a\', t.c] AS v FROM T AS t",
+                r"SELECT split(c, '\') FROM T",
+                r"SELECT '\' AS v FROM T",
+            ] {
+                parse!(query);
+            }
+            // A later quote in a line comment no longer continues the string: this is a query
+            // over `t`, where it was a single string.
+            let stmt = format!("{:?}", parse!(r"SELECT '\' FROM t --'"));
+            assert!(stmt.contains(r#"CharStringLit("\\")"#), "{stmt}");
+            assert!(stmt.contains("from: Some(AstNode"), "{stmt}");
+            // The value is the text between the quotes as written; these literals parsed
+            // before as well.
             for (query, raw) in [
                 (r"'\'", r"\"),
                 (r"'it''s \'", r"it''s \"),
@@ -239,19 +262,6 @@ mod tests {
                 ("''", ""),
             ] {
                 assert_eq!(string(query), raw, "{query}");
-            }
-            for query in [
-                r"SELECT '\' AS v FROM T",
-                r"SELECT REPLACE(t.c, '\', '/') AS v FROM T AS t",
-                r"SELECT TRIM(BOTH '\' FROM t.c) AS v FROM T AS t",
-                r"SELECT POSITION('\' IN t.c) AS v FROM T AS t",
-                r"SELECT {'k\': t.c} AS v FROM T AS t",
-                r"SELECT 'a\''' || t.c AS v FROM T AS t",
-                r"SELECT t.c AS c FROM T AS t WHERE t.c IN ('a\', 'b')",
-                r"SELECT ['a\', t.c] AS v FROM T AS t",
-                r"SELECT split(c, '\') FROM T",
-            ] {
-                parse!(query);
             }
             // `\'` no longer escapes a quote: the string ends at the quote, and what follows
             // is an unterminated string, which is an error wherever it is.
