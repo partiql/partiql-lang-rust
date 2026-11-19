@@ -69,6 +69,76 @@ where
     }
 }
 
+/// A lexer that wraps another lexer (after comments are skipped) and joins `IGNORE NULLS` and
+/// `RESPECT NULLS`, a window function's null treatment, into one token each.
+///
+/// `IGNORE` and `RESPECT` are not reserved (as in PartiQL Kotlin), so they lex as identifiers and
+/// still name aliases and tables; joining them with `NULLS` here lets the grammar tell a null
+/// treatment from an alias without more look-ahead. `ORDER BY ignore NULLS FIRST` sorts by a
+/// column named `ignore`, so a `NULLS` followed by `FIRST` or `LAST` is not joined.
+pub(crate) struct NullTreatmentLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    lexer: L,
+    buffered: std::collections::VecDeque<LexResult<'input>>,
+}
+
+impl<'input, L> NullTreatmentLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    /// Creates a new `NullTreatmentLexer` wrapping `lexer`
+    #[inline]
+    pub fn new(lexer: L) -> Self {
+        Self {
+            lexer,
+            buffered: std::collections::VecDeque::with_capacity(3),
+        }
+    }
+
+    /// The `i`th upcoming item, reading it from the wrapped lexer if needed.
+    fn peek(&mut self, i: usize) -> Option<&LexResult<'input>> {
+        while self.buffered.len() <= i {
+            let next = self.lexer.next()?;
+            self.buffered.push_back(next);
+        }
+        self.buffered.get(i)
+    }
+}
+
+impl<'input, L> Iterator for NullTreatmentLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    type Item = LexResult<'input>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let joined = match self.peek(0) {
+            Some(Ok((_, Token::UnquotedIdent(id), _))) if id.eq_ignore_ascii_case("ignore") => {
+                Token::IgnoreNulls
+            }
+            Some(Ok((_, Token::UnquotedIdent(id), _))) if id.eq_ignore_ascii_case("respect") => {
+                Token::RespectNulls
+            }
+            _ => return self.buffered.pop_front().or_else(|| self.lexer.next()),
+        };
+        let nulls = matches!(self.peek(1), Some(Ok((_, Token::Nulls, _))));
+        let ordering = matches!(self.peek(2), Some(Ok((_, Token::First | Token::Last, _))));
+        if !nulls || ordering {
+            return self.buffered.pop_front();
+        }
+        let start = match self.buffered.pop_front() {
+            Some(Ok((start, _, _))) => start,
+            other => return other,
+        };
+        match self.buffered.pop_front() {
+            Some(Ok((_, _, end))) => Some(Ok((start, joined, end))),
+            other => other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

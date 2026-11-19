@@ -1440,8 +1440,8 @@ ExprPrecedence01: Synth<ast::Expr> = {
 }
 
 NullTreatment: ast::NullTreatment = {
-    "RESPECT" "NULLS" => ast::NullTreatment::RespectNulls,
-    "IGNORE" "NULLS" => ast::NullTreatment::IgnoreNulls,
+    "RESPECT_NULLS" => ast::NullTreatment::RespectNulls,
+    "IGNORE_NULLS" => ast::NullTreatment::IgnoreNulls,
 }
 
 WindowNameOrSpec: ast::WindowNameOrSpec = {
@@ -2123,8 +2123,6 @@ NonReservedKeyword: &'input str = {
     "SIMPLE",
     "OVER",
     "PARTITION",
-    "IGNORE",
-    "RESPECT",
     <GraphNonReservedKeyword>
 }
 
@@ -2339,8 +2337,8 @@ extern {
         "THEN" => lexer::Token::Then,
         "OVER" => lexer::Token::Over(<&'input str>),
         "PARTITION" => lexer::Token::Partition(<&'input str>),
-        "IGNORE" => lexer::Token::Ignore(<&'input str>),
-        "RESPECT" => lexer::Token::Respect(<&'input str>),
+        "IGNORE_NULLS" => lexer::Token::IgnoreNulls,
+        "RESPECT_NULLS" => lexer::Token::RespectNulls,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,

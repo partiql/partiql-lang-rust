@@ -7,7 +7,7 @@ mod parser_state;
 
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
-use crate::lexer::CommentSkippingLexer;
+use crate::lexer::{CommentSkippingLexer, NullTreatmentLexer};
 use crate::parse::parser_state::ParserState;
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
@@ -68,7 +68,7 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
-    let lexer = CommentSkippingLexer::new(lexer);
+    let lexer = NullTreatmentLexer::new(CommentSkippingLexer::new(lexer));
 
     let result: LalrpopResult<'_> = grammar::StatementParser::new().parse(s, &mut state, lexer);
 
@@ -106,7 +106,7 @@ fn parse_partiql_statements_with_state<'input, Id: NodeIdGenerator>(
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
-    let lexer = CommentSkippingLexer::new(lexer);
+    let lexer = NullTreatmentLexer::new(CommentSkippingLexer::new(lexer));
 
     let result: LalrpopListResult<'_> =
         grammar::StatementListParser::new().parse(s, &mut state, lexer);
@@ -419,6 +419,75 @@ mod tests {
             ] {
                 parse!(query);
             }
+        }
+
+        // `IGNORE` and `RESPECT` are not reserved, as in PartiQL Kotlin's `nonReserved`: they
+        // name aliases, tables and path steps, which parsed before; only `IGNORE NULLS` and
+        // `RESPECT NULLS` (not followed by FIRST or LAST) are a null treatment.
+        #[test]
+        fn ignore_respect_as_names() {
+            for query in [
+                "SELECT a AS ignore FROM t",
+                "SELECT a ignore, b respect FROM t",
+                "SELECT x FROM t AS ignore AT respect",
+                "SELECT * EXCLUDE t.ignore FROM t",
+                "CREATE TABLE respect",
+                "SELECT f(ignore: 1) FROM t",
+                "SELECT x FROM t ORDER BY ignore NULLS FIRST, respect NULLS LAST",
+                r#"SELECT LAG(a) "ignore" FROM t"#,
+            ] {
+                parse!(query);
+            }
+            let stmt = format!("{:?}", parse!("SELECT a AS ignore FROM t"));
+            assert!(stmt.contains(r#"value: "ignore""#), "{stmt}");
+            // The null treatment still parses, in any case and with a comment in between.
+            for (query, treatment) in [
+                (
+                    "LAG(a) ignore nulls OVER (ORDER BY a)",
+                    ast::NullTreatment::IgnoreNulls,
+                ),
+                (
+                    "LEAD(a) Respect /* c */ NULLS OVER (ORDER BY a)",
+                    ast::NullTreatment::RespectNulls,
+                ),
+            ] {
+                assert_eq!(window(query).null_treatment, Some(treatment), "{query}");
+            }
+        }
+
+        // `OVER` and `PARTITION` are reserved, as in PartiQL Kotlin: they no longer name an
+        // alias, a table or an EXCLUDE path step unless quoted; these parsed before.
+        #[test]
+        fn over_partition_as_names_need_quotes() {
+            for (bare, quoted) in [
+                ("SELECT x AS over FROM t", r#"SELECT x AS "over" FROM t"#),
+                (
+                    "SELECT x FROM t AS partition",
+                    r#"SELECT x FROM t AS "partition""#,
+                ),
+                (
+                    "SELECT * EXCLUDE t.over FROM t",
+                    r#"SELECT * EXCLUDE t."over" FROM t"#,
+                ),
+                ("CREATE TABLE over", r#"CREATE TABLE "over""#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // A lexing error right after OVER or PARTITION is reported, not dropped.
+        #[test]
+        fn over_lex_error_after() {
+            assert!(parse_partiql("SELECT t.over\u{20ac} FROM t").is_err());
+            assert!(parse_partiql("SELECT t.partition\u{20ac} FROM t").is_err());
+        }
+
+        // PARTITION BY takes any expression, a superset of PartiQL Kotlin's column references.
+        #[test]
+        fn partition_by_expressions() {
+            let w = window("RANK() OVER (PARTITION BY a + 1, f(b) ORDER BY c)");
+            assert_eq!(spec(&w).partition_by.len(), 2);
         }
 
         // The pretty-printed window function parses back to the same structure.

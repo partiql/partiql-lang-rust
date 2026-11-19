@@ -710,6 +710,10 @@ pub struct Call {
 /// `LAG(a, 1) IGNORE NULLS OVER (PARTITION BY b ORDER BY c)`. As in PartiQL Kotlin, `call` is
 /// one of `RANK()`, `DENSE_RANK()`, `PERCENT_RANK()`, `CUME_DIST()`, `ROW_NUMBER()`, or
 /// `LEAD`/`LAG(<expr> [, <offset> [, <default>]])`; only `LEAD` and `LAG` take a null treatment.
+///
+/// `call` names the window function; it is not a scalar function call, though a visitor's
+/// `enter_call` sees it as one (inside `enter_window_call`). A pass that resolves function names
+/// should handle `WindowCall` before descending into it.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowCall {

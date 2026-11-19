@@ -458,15 +458,16 @@ pub enum Token<'input> {
     Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
-    // `OVER`, `PARTITION`, `IGNORE` and `RESPECT` are non-reserved: they may still name variables
+    // `OVER` and `PARTITION` are non-reserved: they may still name variables
     #[regex("(?i:Over)", |lex| lex.slice())]
     Over(&'input str),
     #[regex("(?i:Partition)", |lex| lex.slice())]
     Partition(&'input str),
-    #[regex("(?i:Ignore)", |lex| lex.slice())]
-    Ignore(&'input str),
-    #[regex("(?i:Respect)", |lex| lex.slice())]
-    Respect(&'input str),
+    // `IGNORE NULLS` and `RESPECT NULLS`, a window function's null treatment. `IGNORE` and
+    // `RESPECT` lex as identifiers; [`crate::lexer::NullTreatmentLexer`] joins one with a
+    // following `NULLS` into these tokens.
+    IgnoreNulls,
+    RespectNulls,
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -577,26 +578,15 @@ impl Token<'_> {
     pub fn is_var_non_reserved(&self) -> bool {
         matches!(
             self,
-            Token::Any(_)
-                | Token::Simple(_)
-                | Token::Over(_)
-                | Token::Partition(_)
-                | Token::Ignore(_)
-                | Token::Respect(_)
+            Token::Any(_) | Token::Simple(_) | Token::Over(_) | Token::Partition(_)
         ) || self.is_graph_non_reserved()
     }
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
-        matches!(
-            self,
-            Token::Any(_)
-                | Token::Simple(_)
-                | Token::Over(_)
-                | Token::Partition(_)
-                | Token::Ignore(_)
-                | Token::Respect(_)
-        ) || self.is_graph_non_reserved()
+        // `OVER` and `PARTITION` are left out: they name no special form, and the
+        // preprocessor's look-ahead after a candidate would hide a lexing error that follows
+        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 
     #[inline]
@@ -805,6 +795,8 @@ impl fmt::Display for Token<'_> {
             Token::String(txt) => write!(f, "<{txt}:STRING>"),
             Token::EmbeddedDocQuote => write!(f, "<DOC>"),
             Token::EmbeddedDoc(txt) => write!(f, "<```{txt}```:DOC>"),
+            Token::IgnoreNulls => write!(f, "IGNORE NULLS"),
+            Token::RespectNulls => write!(f, "RESPECT NULLS"),
             Token::EmptyEmbeddedDocQuote => write!(f, "<``:DOC>"),
             // keywords
             _ => {
