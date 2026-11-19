@@ -2,9 +2,10 @@
 
 use indexmap::IndexSet;
 use partiql_types::{
-    type_int32, type_string, type_struct, IntervalFamily, IntervalQualifier, IntervalType, MapType,
-    PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeResultError, Static,
+    type_int32, type_string, type_struct, AnyOf, IntervalFamily, IntervalQualifier, IntervalType,
+    MapType, PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeResultError, Static,
     StaticCategory, StructConstraint, StructField, StructType, TypeParams, VariantType,
+    DEFAULT_LOB_LENGTH, DEFAULT_TIME_FACTORY_PRECISION, DEFAULT_TIME_PRECISION,
 };
 use std::collections::HashSet;
 
@@ -26,8 +27,6 @@ fn new_scalar_kinds() -> Vec<(Static, &'static str)> {
             Static::Interval(IntervalType::new(IntervalQualifier::YearToMonth, 2, 0)),
             "Interval(Year(2) To Month)",
         ),
-        (Static::Null, "Null"),
-        (Static::Missing, "Missing"),
         (Static::Variant(VariantType::new("ion")), "Variant(ion)"),
     ]
 }
@@ -47,9 +46,6 @@ fn each_new_scalar_kind_constructs_displays_and_is_scalar() {
         assert!(st.params().is_default());
         assert!(matches!(kind.category(), StaticCategory::Scalar(k) if k == &kind));
 
-        if matches!(kind, Static::Null | Static::Missing) {
-            continue; // always nullable, see `absent_value_types_are_always_nullable`
-        }
         let not_null = bld.new_non_nullable_static(kind.clone());
         assert_eq!(format!("{not_null}"), format!("NOT NULL {display}"));
         assert_ne!(shape, not_null);
@@ -78,7 +74,10 @@ fn new_kinds_are_pairwise_distinct_and_distinct_from_existing_kinds() {
     );
     // Parameters take part in equality.
     assert_ne!(Static::Time(3), Static::Time(6));
-    assert_ne!(Static::Null, Static::Missing);
+    assert_ne!(
+        Static::Variant(VariantType::new("ion")),
+        Static::Variant(VariantType::new("json"))
+    );
 }
 
 #[test]
@@ -314,22 +313,51 @@ fn map_key_must_not_be_dynamic() {
         bld.new_map(PartiqlShape::Dynamic, PartiqlShape::Dynamic),
         Err(ShapeResultError::DynamicMapKey)
     );
-    // A dynamic value, or a key that is a union, is fine.
+    // Nor may a union that has a `Dynamic` member, directly or in a nested union.
+    let int = type_int32!(bld);
+    let with_dynamic = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([
+        PartiqlShape::Dynamic,
+        int.clone(),
+    ])));
+    assert_eq!(
+        MapType::new(with_dynamic.clone(), int.clone()),
+        Err(ShapeResultError::DynamicMapKey)
+    );
+    let s = type_string!(bld);
+    let nested = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([s, with_dynamic])));
+    assert_eq!(
+        bld.new_map(nested, int),
+        Err(ShapeResultError::DynamicMapKey)
+    );
+    // A dynamic value, a union key without `Dynamic`, or a collection key is fine.
     let k = type_string!(bld);
     assert!(bld.new_map(k, PartiqlShape::Dynamic).is_ok());
     let (a, b) = (type_string!(bld), type_int32!(bld));
     let union = bld.any_of([a, b]);
     assert!(bld.new_map(union, PartiqlShape::Dynamic).is_ok());
+    let elem = type_int32!(bld);
+    let array_key = bld.new_array_of(elem);
+    let v = type_string!(bld);
+    let map = bld.new_map(array_key, v).unwrap();
+    assert_eq!(format!("{map}"), "Map<[Int32], String>");
 }
 
 #[test]
-fn variant_equality_ignores_the_encoding() {
-    // As partiql-lang-kotlin, where VARIANT compares only its type code.
+fn variant_equality_includes_the_encoding() {
     let (ion, json) = (VariantType::new("ion"), VariantType::new("json"));
-    assert_eq!(ion, json);
-    assert_eq!(Static::Variant(ion.clone()), Static::Variant(json.clone()));
-    let set: HashSet<_> = [Static::Variant(ion.clone()), Static::Variant(json)].into();
-    assert_eq!(set.len(), 1);
+    assert_ne!(ion, json);
+    assert_eq!(ion, VariantType::new("ion"));
+    assert_ne!(Static::Variant(ion.clone()), Static::Variant(json.clone()));
+    let set: HashSet<_> = [Static::Variant(ion.clone()), Static::Variant(json.clone())].into();
+    assert_eq!(set.len(), 2);
+    // A union of the two keeps both encodings.
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let (vi, vj) = (
+        bld.new_static(Static::Variant(ion.clone())),
+        bld.new_static(Static::Variant(json)),
+    );
+    let union = bld.any_of([vi, vj]);
+    assert!(matches!(union, PartiqlShape::AnyOf(ref a) if a.types().count() == 2));
     assert_eq!(ion.encoding(), "ion");
     assert_eq!(format!("{}", Static::Variant(ion)), "Variant(ion)");
     assert_ne!(Static::Variant(VariantType::new("ion")), Static::String);
@@ -380,24 +408,6 @@ fn equal_rows_hash_equally_whatever_the_constraint_order() {
 }
 
 #[test]
-fn absent_value_types_are_always_nullable() {
-    let mut bld = PartiqlNoIdShapeBuilder::default();
-    for kind in [Static::Null, Static::Missing] {
-        let shape = bld.new_non_nullable_static(kind.clone());
-        assert!(shape.expect_static().unwrap().is_nullable());
-        assert_eq!(format!("{shape}"), format!("{kind}"));
-        let nullable = bld.new_static(kind.clone());
-        assert_eq!(shape, nullable);
-        let copy = bld.as_non_nullable(&nullable).unwrap();
-        assert!(copy.expect_static().unwrap().is_nullable());
-        assert!(kind.is_scalar());
-    }
-    // Other kinds are unaffected.
-    let d = bld.new_non_nullable_static(Static::Date);
-    assert!(d.expect_static().unwrap().is_not_nullable());
-}
-
-#[test]
 fn flags_are_kept_only_on_default_payloads() {
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let length = TypeParams::default().with_unspecified_length(true);
@@ -405,16 +415,20 @@ fn flags_are_kept_only_on_default_payloads() {
     assert!(kept.expect_static().unwrap().params().unspecified_length);
     let cleared = bld.new_static_with_params(Static::StringVarying(50), length);
     assert!(cleared.expect_static().unwrap().params().is_default());
-    // partiql-lang-kotlin's planner defaults: BLOB/CLOB i32::MAX, TIME 0, TIMESTAMP 6.
-    let blob = bld.new_static_with_params(Static::Blob(i32::MAX as usize), length);
+    // partiql-lang-kotlin's defaults: BLOB/CLOB i32::MAX, TIME 0 or 6, TIMESTAMP 6.
+    let blob = bld.new_static_with_params(Static::Blob(DEFAULT_LOB_LENGTH), length);
     assert!(blob.expect_static().unwrap().params().unspecified_length);
     let blob_1 = bld.new_static_with_params(Static::Blob(1), length);
     assert!(blob_1.expect_static().unwrap().params().is_default());
     let precision = TypeParams::default().with_unspecified_precision(true);
     for (kind, kept) in [
-        (Static::Time(0), true),
-        (Static::Time(6), false),
+        // TIME keeps the flag on both 0 (the planner's `TIME`) and 6 (`PType.time()`).
+        (Static::Time(DEFAULT_TIME_PRECISION), true),
+        (Static::Time(DEFAULT_TIME_FACTORY_PRECISION), true),
+        (Static::Time(3), false),
         (Static::TimeTz(0), true),
+        (Static::TimeTz(6), true),
+        (Static::TimeTz(1), false),
         (Static::Timestamp(6), true),
         (Static::Timestamp(3), false),
         (Static::TimestampTz(6), true),
@@ -440,7 +454,14 @@ fn interval_display_is_sql_like() {
     let cases = [
         (Year, 2, 0, "Interval(Year(2))"),
         (Month, 3, 6, "Interval(Month(3))"),
+        (Day, 2, 0, "Interval(Day(2))"),
+        (Hour, 3, 0, "Interval(Hour(3))"),
+        (Minute, 4, 0, "Interval(Minute(4))"),
         (Second, 2, 6, "Interval(Second(2,6))"),
+        (DayToMinute, 2, 0, "Interval(Day(2) To Minute)"),
+        (HourToMinute, 2, 0, "Interval(Hour(2) To Minute)"),
+        (DayToSecond, 2, 6, "Interval(Day(2) To Second(6))"),
+        (YearToMonth, 2, 0, "Interval(Year(2) To Month)"),
         (DayToHour, 2, 0, "Interval(Day(2) To Hour)"),
         (HourToSecond, 2, 3, "Interval(Hour(2) To Second(3))"),
         (MinuteToSecond, 1, 0, "Interval(Minute(1) To Second(0))"),
@@ -448,4 +469,67 @@ fn interval_display_is_sql_like() {
     for (q, p, fp, text) in cases {
         assert_eq!(format!("{}", IntervalType::new(q, p, fp)), text);
     }
+}
+
+#[test]
+fn equal_structs_hash_equally_whatever_the_constraint_order() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let hash = |s: &StructType| {
+        let mut h = DefaultHasher::new();
+        s.hash(&mut h);
+        h.finish()
+    };
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let fields = IndexSet::from([
+        StructField::new("a", type_int32!(bld)),
+        StructField::new("b", type_string!(bld)),
+    ]);
+    let reversed: IndexSet<_> = fields.iter().rev().cloned().collect();
+    let one = StructType::new(IndexSet::from([
+        StructConstraint::Fields(fields),
+        StructConstraint::Open(false),
+    ]));
+    let other = StructType::new(IndexSet::from([
+        StructConstraint::Open(false),
+        StructConstraint::Fields(reversed),
+    ]));
+    // `IndexSet` equality ignores order, so the hash must too.
+    assert_eq!(one, other);
+    assert_eq!(hash(&one), hash(&other));
+}
+
+#[test]
+fn equal_unions_hash_equally_whatever_the_member_order() {
+    use partiql_types::AnyOf;
+    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashSet;
+    use std::hash::{Hash, Hasher};
+    let hash = |s: &PartiqlShape| {
+        let mut h = DefaultHasher::new();
+        s.hash(&mut h);
+        h.finish()
+    };
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let ab = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([
+        type_int32!(bld),
+        type_string!(bld),
+    ])));
+    let ba = PartiqlShape::AnyOf(AnyOf::new(IndexSet::from([
+        type_string!(bld),
+        type_int32!(bld),
+    ])));
+    assert_eq!(ab, ba);
+    assert_eq!(hash(&ab), hash(&ba));
+    let set: HashSet<_> = [ab.clone(), ba.clone()].into();
+    assert_eq!(set.len(), 1);
+
+    // The same unions as field types inside struct field sets.
+    let s1 = StructType::new(IndexSet::from([StructConstraint::Fields(IndexSet::from(
+        [StructField::new("u", ab)],
+    ))]));
+    let s2 = StructType::new(IndexSet::from([StructConstraint::Fields(IndexSet::from(
+        [StructField::new("u", ba)],
+    ))]));
+    assert_eq!(s1, s2);
 }
