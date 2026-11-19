@@ -299,7 +299,7 @@ pub enum Token<'input> {
     Real(&'input str),
 
     // strings are single-quoted in SQL/PartiQL; `''` is an escaped `'` and every other
-    // character, a backslash included, stands for itself (as in SQL and PartiQL Kotlin)
+    // character, a backslash included, stands for itself (as in SQL)
     #[regex(r#"'([^']|'')*'"#,
         |lex| { let s = lex.slice(); &s[1..s.len() - 1] })]
     String(&'input str),

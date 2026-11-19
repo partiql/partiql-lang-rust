@@ -216,7 +216,7 @@ mod tests {
     mod literals {
         use super::*;
 
-        // A backslash in a string stands for itself, as in SQL and PartiQL Kotlin; only
+        // A backslash in a string stands for itself, as in SQL; only
         // `''` is an escape. The literal keeps the text between the quotes as written.
         #[test]
         fn string_backslash() {
