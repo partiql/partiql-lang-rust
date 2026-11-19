@@ -528,7 +528,9 @@ impl PrettyDoc for Lit {
             Lit::NumericLit(inner) => inner.pretty_doc(arena),
             Lit::RealLit(inner) => arena.text(inner.to_string()),
             Lit::FloatLit(inner) => arena.text(inner.to_string()),
-            Lit::DoubleLit(inner) => arena.text(inner.to_string()),
+            // exponent notation, so that the text of a finite, non-negative value parses back to
+            // a `DoubleLit`
+            Lit::DoubleLit(inner) => arena.text(format!("{inner:e}")),
             Lit::BoolLit(inner) => arena.text(inner.to_string()),
             Lit::EmbeddedDocLit(inner, _typ) => inner.pretty_doc(arena), // TODO better pretty for embedded doc: https://github.com/partiql/partiql-lang-rust/issues/508
             Lit::CharStringLit(inner) => inner.pretty_doc(arena),
@@ -991,10 +993,13 @@ impl PrettyDoc for SymbolPrimitive {
         D::Doc: Clone,
         A: Clone,
     {
-        let sym = arena.text(self.value.as_str());
         match self.case {
-            CaseSensitivity::CaseSensitive => arena.text("\"").append(sym).append(arena.text("\"")),
-            CaseSensitivity::CaseInsensitive => sym,
+            // a `"` inside a quoted identifier is written `""`
+            CaseSensitivity::CaseSensitive => arena
+                .text("\"")
+                .append(arena.text(self.value.replace('"', "\"\"")))
+                .append(arena.text("\"")),
+            CaseSensitivity::CaseInsensitive => arena.text(self.value.as_str()),
         }
     }
 }

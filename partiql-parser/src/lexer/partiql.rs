@@ -135,6 +135,14 @@ impl<'input> Iterator for PartiqlLexer<'input, '_> {
     }
 }
 
+/// Returns `slice` without its first `open` bytes and its last byte, i.e. the text
+/// between the quotes of a quoted identifier (`open` also covers a leading `@`).
+/// Unlike `trim_matches('"')`, this keeps a trailing escaped quote (`"a"""`).
+#[inline]
+fn strip_outer(slice: &str, open: usize) -> &str {
+    &slice[open..slice.len() - 1]
+}
+
 /// Tokens that the lexer can generate.
 #[derive(Logos, Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 // TODO make pub(crate) ?
@@ -273,8 +281,11 @@ pub enum Token<'input> {
     UnquotedIdent(&'input str),
 
     // quoted identifiers (quoted with double quotes)
-    #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#,
-            |lex| lex.slice().trim_matches('"'))]
+    // As in SQL, a `""` inside the quotes is an escaped `"` and every other character, a
+    // backslash included, stands for itself. The
+    // token keeps the raw text between the outer quotes; the parser unescapes it.
+    #[regex(r#""([^"]|"")*""#,
+            |lex| strip_outer(lex.slice(), 1))]
     QuotedIdent(&'input str),
 
     // unquoted @identifiers
@@ -282,8 +293,8 @@ pub enum Token<'input> {
     UnquotedAtIdentifier(&'input str),
 
     // quoted @identifiers (quoted with double quotes)
-    #[regex(r#"@"([^"\\]|\\t|\\u|\\n|\\")*""#,
-            |lex| lex.slice()[1..].trim_matches('"'))]
+    #[regex(r#"@"([^"]|"")*""#,
+            |lex| strip_outer(lex.slice(), 2))]
     QuotedAtIdentifier(&'input str),
 
     #[regex("[0-9]+", |lex| lex.slice())]

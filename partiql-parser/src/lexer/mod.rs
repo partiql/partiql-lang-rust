@@ -283,6 +283,32 @@ mod tests {
         Ok(())
     }
 
+    // A quoted identifier is `"` ( `""` | any other character )* `"`; the token keeps the raw
+    // text between the outer quotes, so `""` stays doubled and a backslash stands for itself.
+    #[test]
+    fn quoted_identifier_tokens() -> Result<(), ParseError<'static, BytePosition>> {
+        let query = r#""a""b" @"c""d" "" """" "x\" "e""""#;
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+        assert_eq!(
+            vec![
+                Token::QuotedIdent(r#"a""b"#),
+                Token::QuotedAtIdentifier(r#"c""d"#),
+                Token::QuotedIdent(""),
+                Token::QuotedIdent(r#""""#),
+                Token::QuotedIdent(r"x\"),
+                Token::QuotedIdent(r#"e"""#),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        // unterminated
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(r#""a"""#, &mut offset_tracker);
+        assert!(lexer.collect::<Result<Vec<_>, _>>().is_err());
+        Ok(())
+    }
+
     #[test]
     fn select_unicode() -> Result<(), ParseError<'static, BytePosition>> {
         let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";

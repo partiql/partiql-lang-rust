@@ -16,6 +16,10 @@ use crate::parse::parse_util::{
     struct_to_lit,
     bag_to_lit,
     list_to_lit,
+    exp_literal,
+    int_literal,
+    is_i64_min_magnitude,
+    unescape_quoted_ident,
     CallSite,
     Attrs,
     Synth
@@ -1379,13 +1383,19 @@ ExprPrecedence04: Synth<ast::Expr> = {
                expr: Box::new(r.data),
            }, lo..hi)
        )),
-    <lo:@L> "-" <r:ExprPrecedence04> <hi:@R> =>
+    <lo:@L> "-" <rlo:@L> <r:ExprPrecedence04> <hi:@R> => {
+       // The sign is folded into the integer literal so that `-9223372036854775808` is
+       // i64::MIN, a BIGINT; only that literal, written as digits, is folded.
+       if is_i64_min_magnitude(&r.data, &input[rlo.to_usize()..hi.to_usize()]) {
+           return Synth::lit(ast::Expr::Lit(state.node(ast::Lit::Int64Lit(i64::MIN), lo..hi)));
+       }
        Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Neg,
                expr: Box::new(r.data),
            }, lo..hi)
-       )),
+       ))
+    },
     <ExprPrecedence03>,
 }
 
@@ -1671,7 +1681,7 @@ FunctionArgNamed: ast::AstNode<ast::CallArg> = {
 FunctionArgName: ast::SymbolPrimitive = {
     <name:"QuotedIdent"> => {
         ast::SymbolPrimitive {
-            value: name.to_owned(),
+            value: unescape_quoted_ident(name),
             case: ast::CaseSensitivity::CaseSensitive
         }
     },
@@ -1749,7 +1759,7 @@ VarRef: ast::AstNode<ast::VarRef> = {
             qualifier: ast::ScopeQualifier::Unqualified
         }, lo..hi),
     <lo:@L> <ident:"QuotedIdent"> <hi:@R> => state.node(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
+            name: ast::SymbolPrimitive { value: unescape_quoted_ident(ident), case: ast::CaseSensitivity::CaseSensitive },
             qualifier: ast::ScopeQualifier::Unqualified
       }, lo..hi),
     <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
@@ -1757,7 +1767,7 @@ VarRef: ast::AstNode<ast::VarRef> = {
             qualifier: ast::ScopeQualifier::Qualified
         }, lo..hi),
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
+            name: ast::SymbolPrimitive { value: unescape_quoted_ident(ident), case: ast::CaseSensitivity::CaseSensitive },
             qualifier: ast::ScopeQualifier::Qualified
         },lo..hi),
     <lo:@L> <ident:VarNonReservedKeyword> <hi:@R> => state.node(ast::VarRef {
@@ -1837,10 +1847,11 @@ LiteralBool: ast::Lit = {
 LiteralNumber: ast::Lit = {
     // TODO check bounds before parsing?
 
+    // An integer literal is an `Int64Lit` when it fits in `i64`, else an exact
+    // `DecimalLit` with scale 0, so that no digits are lost.
     <lo:@L> <n:"Int"> <hi:@R> =>? {
-        n.parse()
-	        .map(ast::Lit::Int64Lit)
-		    .map_err(|_| lpop::ParseError::User{
+        int_literal(n)
+		    .ok_or_else(|| lpop::ParseError::User{
 	     	    error: ParseError::SyntaxError(
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
 	         })
@@ -1853,10 +1864,11 @@ LiteralNumber: ast::Lit = {
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
 	         })
     },
+    // A literal with an exponent is an approximate numeric (`DoubleLit`), as in
+    // SQL; one beyond the range of `f64` is an error.
     <lo:@L> <r:"ExpReal"> <hi:@R> =>? {
-        rust_decimal::Decimal::from_scientific(r)
-	        .map(ast::Lit::DecimalLit)
-		    .map_err(|_| lpop::ParseError::User{
+        exp_literal(r)
+		    .ok_or_else(|| lpop::ParseError::User{
 	     	    error: ParseError::SyntaxError(
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
 	         })
@@ -2010,7 +2022,7 @@ SymbolPrimitive: ast::SymbolPrimitive = {
         case: ast::CaseSensitivity::CaseInsensitive,
     },
     <ident:"QuotedIdent"> => ast::SymbolPrimitive {
-        value: ident.to_owned(),
+        value: unescape_quoted_ident(ident),
         case: ast::CaseSensitivity::CaseSensitive,
     },
     /*
@@ -2028,7 +2040,7 @@ Identifier: ast::SymbolPrimitive = {
         case: ast::CaseSensitivity::CaseInsensitive,
     },
     <ident:"QuotedIdent"> => ast::SymbolPrimitive {
-        value: ident.to_owned(),
+        value: unescape_quoted_ident(ident),
         case: ast::CaseSensitivity::CaseSensitive,
     },
     <VarNonReservedKeyword>

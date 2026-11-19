@@ -241,3 +241,39 @@ pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstN
         _ => illegal_literal(),
     }
 }
+
+/// Unescapes the text between the quotes of a quoted identifier: `""` stands for `"`.
+#[inline]
+pub(crate) fn unescape_quoted_ident(raw: &str) -> String {
+    raw.replace("\"\"", "\"")
+}
+
+/// An integer literal: an `Int64Lit` when it fits in `i64`, else an exact `DecimalLit`
+/// (scale 0), or `None` when it is too large for a decimal as well.
+pub(crate) fn int_literal(digits: &str) -> Option<Lit> {
+    match digits.parse::<i64>() {
+        Ok(n) => Some(Lit::Int64Lit(n)),
+        Err(_) => rust_decimal::Decimal::from_str_exact(digits)
+            .ok()
+            .map(Lit::DecimalLit),
+    }
+}
+
+/// A numeric literal with an exponent (e.g. `1.5E3`): an approximate `DoubleLit`, or
+/// `None` when it is outside the finite range of `f64`.
+pub(crate) fn exp_literal(text: &str) -> Option<Lit> {
+    text.parse::<f64>()
+        .ok()
+        .filter(|f| f.is_finite())
+        .map(Lit::DoubleLit)
+}
+
+/// Whether `expr`, written as `text`, is the integer literal 9223372036854775808 (the magnitude
+/// of `i64::MIN`) spelled with digits only, so that a minus sign before it makes `i64::MIN`.
+pub(crate) fn is_i64_min_magnitude(expr: &Expr, text: &str) -> bool {
+    const I64_MIN_MAGNITUDE: rust_decimal::Decimal =
+        rust_decimal::Decimal::from_parts(0, 0x8000_0000, 0, false, 0);
+    matches!(expr, Expr::Lit(l) if l.node == Lit::DecimalLit(I64_MIN_MAGNITUDE))
+        && !text.is_empty()
+        && text.bytes().all(|b| b.is_ascii_digit())
+}

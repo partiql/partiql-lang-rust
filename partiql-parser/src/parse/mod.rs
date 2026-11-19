@@ -202,8 +202,111 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
+    /// Parses `q`, a bare literal, and returns that literal.
+    fn parse_lit(q: &str) -> ast::Lit {
+        match parse_expr(q) {
+            ast::Expr::Lit(l) => l.node,
+            other => panic!("{q}: not a literal: {other:?}"),
+        }
+    }
     mod literals {
         use super::*;
+
+        // An integer literal that does not fit in `i64` is an exact decimal; one beyond the
+        // range of a decimal is still an error.
+        #[test]
+        fn integer_beyond_i64() {
+            use std::str::FromStr;
+            let dec = |s: &str| ast::Lit::DecimalLit(rust_decimal::Decimal::from_str(s).unwrap());
+            assert_eq!(
+                parse_lit("9223372036854775807"),
+                ast::Lit::Int64Lit(i64::MAX)
+            );
+            for digits in [
+                "9223372036854775808",
+                "9223372036854775809",
+                "79228162514264337593543950335",
+            ] {
+                assert_eq!(parse_lit(digits), dec(digits), "{digits}");
+            }
+            // A minus sign directly before 9223372036854775808 makes i64::MIN, a BIGINT: the
+            // sign is folded into the integer literal.
+            assert_eq!(
+                parse_lit("-9223372036854775808"),
+                ast::Lit::Int64Lit(i64::MIN)
+            );
+            assert_eq!(
+                parse_lit("- 9223372036854775808"),
+                ast::Lit::Int64Lit(i64::MIN)
+            );
+            // Otherwise the minus sign stays a unary operator over the literal.
+            for (query, inner) in [
+                ("-9223372036854775808.", dec("9223372036854775808")),
+                ("-9223372036854775808.0", dec("9223372036854775808.0")),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::UniOp(u) => {
+                        assert_eq!(u.node.kind, ast::UniOpKind::Neg, "{query}");
+                        assert!(
+                            matches!(*u.node.expr, ast::Expr::Lit(ref l) if l.node == inner),
+                            "{query}"
+                        );
+                    }
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            match parse_expr("-9223372036854775809") {
+                ast::Expr::UniOp(u) => {
+                    assert_eq!(u.node.kind, ast::UniOpKind::Neg);
+                    assert!(
+                        matches!(*u.node.expr, ast::Expr::Lit(ref l) if l.node == dec("9223372036854775809"))
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
+            parse!(
+                "SELECT da FROM t WHERE da BETWEEN -9223372036854775809 AND 9223372036854775808"
+            );
+            assert!(parse_partiql("79228162514264337593543950336").is_err());
+        }
+
+        // A literal with an exponent is an approximate numeric, as in SQL, including values
+        // beyond the range of a decimal.
+        #[test]
+        fn exponent_is_double() {
+            for (text, value) in [
+                ("17e2", 1700.0),
+                ("1.317e-3", 1.317e-3),
+                ("1234.5e-03", 1.2345),
+                (".5E1", 5.0),
+                ("1.7976931348623157E308", f64::MAX),
+                ("3.4028235E38", 3.4028235E38),
+                ("4.9E-324", 4.9E-324),
+            ] {
+                assert_eq!(parse_lit(text), ast::Lit::DoubleLit(value), "{text}");
+            }
+            parse!("ABS(-1.7976931348623157E308)");
+            // The pretty-printed literal parses back to the same value.
+            for text in ["17e2", "1.7976931348623157E308", "4.9E-324", "0.5e0"] {
+                use partiql_common::pretty::ToPretty;
+                let printed = parse_lit(text).to_pretty_string(80).unwrap();
+                assert_eq!(parse_lit(&printed), parse_lit(text), "{text} -> {printed}");
+            }
+            // Beyond the finite range of `f64`.
+            assert!(parse_partiql("1e309").is_err());
+            assert!(parse_partiql("-1.8E308").is_err());
+        }
 
         #[test]
         fn null() {
@@ -277,6 +380,93 @@ mod tests {
     mod non_literal_values {
         use super::*;
 
+        // Inside a quoted identifier `""` is an escaped `"`, as in SQL.
+        #[test]
+        fn quoted_identifier_escaped_quote() {
+            let var = |q: &str| match parse_expr(q) {
+                ast::Expr::VarRef(v) => v.node.name,
+                other => panic!("{q}: {other:?}"),
+            };
+            for (query, value) in [
+                (r#""a""b""#, r#"a"b"#),
+                (r#""""""#, r#"""#),
+                (r#""a""""#, r#"a""#),
+                (r#""""a""#, r#""a"#),
+                (r#""p""q`r""#, r#"p"q`r"#),
+                (r#""e""),f""#, r#"e"),f"#),
+                (r#""""#, ""),
+                // a backslash stands for itself
+                (r#""a\b""#, r#"a\b"#),
+                (r#""a\""#, r#"a\"#),
+                (r#""\\""#, r#"\\"#),
+            ] {
+                let name = var(query);
+                assert_eq!(name.value, value, "{query}");
+                assert_eq!(name.case, ast::CaseSensitivity::CaseSensitive, "{query}");
+            }
+            match parse_expr(r#"@"a""b""#) {
+                ast::Expr::VarRef(v) => {
+                    assert_eq!(v.node.name.value, r#"a"b"#);
+                    assert_eq!(v.node.qualifier, ast::ScopeQualifier::Qualified);
+                }
+                other => panic!("{other:?}"),
+            }
+            // In every identifier position: path steps, aliases, FROM, GROUP BY, WITH, EXCLUDE.
+            for query in [
+                r#"SELECT t."a""b" AS "p""q`r" FROM T_QUOTED_FIELDS AS t"#,
+                r#"SELECT "t""1`2"."a""b" FROM T_QUOTED_FIELDS AS "t""1`2""#,
+                r#"SELECT "k""1`2" FROM T AS t GROUP BY t."a""b" AS "k""1`2""#,
+                r#"WITH "w""1`2" AS (SELECT t."a""b" FROM T AS t) SELECT * FROM "w""1`2""#,
+                r#"SELECT * EXCLUDE t."s""t"."u""v" FROM T AS t"#,
+                r#"SELECT "x""1`" FROM T AS E INNER JOIN E."array" AS "x""1`" ON true"#,
+                r#"SELECT VALUE contains(p."e""),f", 'x') FROM payload AS p"#,
+            ] {
+                let stmt = format!("{:?}", parse!(query));
+                assert!(stmt.contains(r#"\""#), "{query}: {stmt}");
+                assert!(!stmt.contains(r#"\"\""#), "{query}: {stmt}");
+            }
+            // The pretty-printed identifier escapes its quotes again.
+            {
+                use partiql_common::pretty::ToPretty;
+                let printed = parse!(r#"SELECT t."a""b" AS "p""q" FROM t"#)
+                    .to_pretty_string(80)
+                    .unwrap();
+                assert!(printed.contains(r#""a""b""#), "{printed}");
+                assert!(printed.contains(r#""p""q""#), "{printed}");
+                parse!(&printed);
+            }
+            // The names land in their exact positions.
+            for (query, expected) in [
+                (
+                    r#"SELECT t."a""b" AS "p""q`r" FROM T AS t"#,
+                    [
+                        r#"value: "a\"b", case: CaseSensitive"#,
+                        r#"as_alias: Some(SymbolPrimitive { value: "p\"q`r", case: CaseSensitive })"#,
+                    ],
+                ),
+                (
+                    r#"SELECT "t""1`2".x FROM T AS "t""1`2""#,
+                    [
+                        r#"name: SymbolPrimitive { value: "t\"1`2", case: CaseSensitive }"#,
+                        r#"as_alias: Some(SymbolPrimitive { value: "t\"1`2", case: CaseSensitive })"#,
+                    ],
+                ),
+            ] {
+                let stmt = format!("{:?}", parse!(query));
+                for e in expected {
+                    assert!(stmt.contains(e), "{query}: expected {e} in {stmt}");
+                }
+            }
+            // Two quoted identifiers separated by a space are still an identifier and its alias.
+            let stmt = format!("{:?}", parse!(r#"SELECT "a" "b" FROM t"#));
+            assert!(
+                stmt.contains(r#"as_alias: Some(SymbolPrimitive { value: "b""#),
+                "{stmt}"
+            );
+            // An unterminated identifier is still an error.
+            assert!(parse_partiql(r#"SELECT "a"""#).is_err());
+        }
+
         #[test]
         fn identifier() {
             parse!("id");
@@ -299,6 +489,26 @@ mod tests {
                 assert!(stmt.contains(&format!("case: {case} ")), "{query}: {stmt}");
             }
         }
+
+        // A graph-pattern name containing `"` pretty-prints quoted, so it parses back.
+        #[test]
+        fn graph_name_with_quote_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for (query, name) in [
+                (r#"SELECT * FROM (g MATCH (x:"a""b"))"#, r#""a""b""#),
+                (r#"SELECT * FROM (g MATCH ("x""y":L))"#, r#""x""y""#),
+                (
+                    r#"SELECT * FROM (g MATCH (a) -[e:"a""b"]-> (b))"#,
+                    r#""a""b""#,
+                ),
+            ] {
+                let printed = parse!(query).to_pretty_string(80).unwrap();
+                assert!(printed.contains(name), "{query} -> {printed}");
+                let reprinted = parse!(&printed).to_pretty_string(80).unwrap();
+                assert_eq!(reprinted, printed, "{query}");
+            }
+        }
+
         #[test]
         fn array() {
             parse!(r"[]");

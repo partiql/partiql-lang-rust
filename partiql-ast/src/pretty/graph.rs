@@ -7,6 +7,21 @@ use partiql_common::pretty::{
 use pretty::{DocAllocator, DocBuilder};
 use std::borrow::Cow;
 
+/// A name in a graph pattern, written as is, or quoted (with `"` doubled) when it contains a `"`
+/// and so cannot be written bare.
+fn graph_name<'b, D, A>(name: &'b SymbolPrimitive, arena: &'b D) -> DocBuilder<'b, D, A>
+where
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    if name.value.contains('"') {
+        arena.text(format!("\"{}\"", name.value.replace('"', "\"\"")))
+    } else {
+        arena.text(name.value.as_str())
+    }
+}
+
 impl PrettyDoc for GraphMatch {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
@@ -50,10 +65,10 @@ impl PrettyDoc for GraphTableRows {
             GraphTableRows::OneRowPerMatch => arena.text("ONE ROW PER MATCH"),
             GraphTableRows::OneRowPerVertex { v, in_paths } => {
                 let prefix = arena.text("ONE ROW PER NODE");
-                let spec = pretty_parenthesized_doc(arena.text(&v.value), arena);
+                let spec = pretty_parenthesized_doc(graph_name(v, arena), arena);
                 let in_paths = in_paths.as_ref().map(|paths| {
                     let paths = pretty_parenthesized_doc(
-                        pretty_doc_list(paths.iter().map(|p| arena.text(&p.value)), 0, arena),
+                        pretty_doc_list(paths.iter().map(|p| graph_name(p, arena)), 0, arena),
                         arena,
                     );
                     [arena.text("IN"), paths]
@@ -74,14 +89,14 @@ impl PrettyDoc for GraphTableRows {
             } => {
                 let prefix = arena.text("ONE ROW PER STEP");
                 let step = pretty_doc_list(
-                    [v1, e, v2].into_iter().map(|n| arena.text(&n.value)),
+                    [v1, e, v2].into_iter().map(|n| graph_name(n, arena)),
                     0,
                     arena,
                 );
                 let spec = pretty_parenthesized_doc(step, arena);
                 let in_paths = in_paths.as_ref().map(|paths| {
                     let paths =
-                        pretty_doc_list(paths.iter().map(|p| arena.text(&p.value)), 0, arena);
+                        pretty_doc_list(paths.iter().map(|p| graph_name(p, arena)), 0, arena);
                     [arena.text("IN"), pretty_parenthesized_doc(paths, arena)]
                 });
                 arena.intersperse(
@@ -127,7 +142,7 @@ impl PrettyDoc for GraphTableColumnDef {
                     vec![
                         expr.pretty_doc(arena),
                         arena.text("AS"),
-                        arena.text(&as_ident.value),
+                        graph_name(as_ident, arena),
                     ]
                 } else {
                     vec![expr.pretty_doc(arena)]
@@ -153,7 +168,7 @@ impl PrettyDoc for GraphTableExport {
                 let prefix = arena.text("EXPORT ALL SINGLETONS");
                 if let Some(except) = except {
                     let except =
-                        pretty_doc_list(except.iter().map(|s| arena.text(&s.value)), 0, arena);
+                        pretty_doc_list(except.iter().map(|s| graph_name(s, arena)), 0, arena);
                     let parts = [
                         prefix,
                         arena.text("EXCEPT"),
@@ -167,7 +182,7 @@ impl PrettyDoc for GraphTableExport {
             GraphTableExport::Singletons { exports } => {
                 let prefix = arena.text("EXPORT SINGLETONS");
                 let exports =
-                    pretty_doc_list(exports.iter().map(|e| arena.text(&e.value)), 0, arena);
+                    pretty_doc_list(exports.iter().map(|e| graph_name(e, arena)), 0, arena);
                 let parts = [prefix, pretty_parenthesized_doc(exports, arena)];
                 arena.intersperse(parts, arena.space())
             }
@@ -297,7 +312,7 @@ impl PrettyDoc for GraphPathPattern {
         let var = self
             .variable
             .as_ref()
-            .map(|var| arena.intersperse([arena.text(&var.value), arena.text("=")], arena.space()));
+            .map(|var| arena.intersperse([graph_name(var, arena), arena.text("=")], arena.space()));
 
         let prefix = self.prefix.as_ref().map(|prefix| prefix.pretty_doc(arena));
 
@@ -318,7 +333,7 @@ impl PrettyDoc for GraphPathSubPattern {
         let var = self
             .variable
             .as_ref()
-            .map(|var| arena.intersperse([arena.text(&var.value), arena.text("=")], arena.space()));
+            .map(|var| arena.intersperse([graph_name(var, arena), arena.text("=")], arena.space()));
 
         let mode = self.mode.as_ref().map(|prefix| prefix.pretty_doc(arena));
         let where_clause = self.where_clause.as_ref().map(|clause| {
@@ -443,7 +458,7 @@ impl PrettyDoc for GraphMatchSimplifiedPattern {
             GraphMatchSimplifiedPattern::Negated(l) => {
                 arena.concat([arena.text("!"), l.pretty_doc(arena)])
             }
-            GraphMatchSimplifiedPattern::Label(l) => arena.text(&l.value),
+            GraphMatchSimplifiedPattern::Label(l) => graph_name(l, arena),
         }
     }
 }
@@ -456,7 +471,7 @@ impl PrettyDoc for GraphMatchNode {
         A: Clone,
     {
         let name: Vec<_> = [
-            self.variable.as_ref().map(|var| arena.text(&var.value)),
+            self.variable.as_ref().map(|var| graph_name(var, arena)),
             self.label
                 .as_ref()
                 .map(|label| arena.concat([arena.text(":"), label.pretty_doc(arena)])),
@@ -490,7 +505,7 @@ impl PrettyDoc for GraphMatchEdge {
         A: Clone,
     {
         let name: Vec<_> = [
-            self.variable.as_ref().map(|var| arena.text(&var.value)),
+            self.variable.as_ref().map(|var| graph_name(var, arena)),
             self.label
                 .as_ref()
                 .map(|label| arena.concat([arena.text(":"), label.pretty_doc(arena)])),
@@ -550,7 +565,7 @@ impl PrettyDoc for GraphMatchLabel {
         A: Clone,
     {
         match self {
-            GraphMatchLabel::Name(name) => arena.text(&name.value),
+            GraphMatchLabel::Name(name) => graph_name(name, arena),
             GraphMatchLabel::Wildcard => arena.text("%"),
             GraphMatchLabel::Negated(l) => {
                 arena.concat([arena.text("!"), pretty_parenthesized_expr(l, 0, arena)])
