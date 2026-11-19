@@ -67,9 +67,10 @@ pub trait TypedCatalog: Debug + Send + Sync {
         None
     }
 
-    /// Whether the catalog's names can have namespaces. A catalog without them (`false`) is
-    /// never searched with the session namespace prepended by [`super::resolve_table`]; the
-    /// default is `true`, as every partiql-lang-kotlin catalog is treated.
+    /// Whether the catalog's names can have namespaces. As the current catalog, one without
+    /// them (`false`) is searched by [`super::resolve_table`] with the identifier as written
+    /// rather than with the session namespace prepended. The default is `true`, as every
+    /// partiql-lang-kotlin catalog is treated. A catalog that wraps another must forward this.
     fn has_namespaces(&self) -> bool {
         true
     }

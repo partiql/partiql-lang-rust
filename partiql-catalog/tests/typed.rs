@@ -1011,13 +1011,16 @@ fn adapter_follows_partiql_catalog_full_folding() {
         .is_some());
 }
 
-/// With a session namespace, step 1 prepends it, and the adapter matches only the first part.
+/// The adapter has no namespaces, so with a session namespace step 1 looks the identifier up as
+/// written.
 #[test]
 fn adapter_with_session_namespace() {
     let adapter: Arc<dyn TypedCatalog> = Arc::new(LegacyCatalogAdapter::new(legacy()));
     let s = session("default", &["shop"], vec![adapter]);
-    assert_eq!(resolved(&s, &reg(&["orders"])), None);
-    // Qualified, step 2 looks the identifier up as written.
+    assert_eq!(
+        resolved(&s, &reg(&["orders"])),
+        Some(("default".into(), "\"orders\"".into(), vec![]))
+    );
     assert_eq!(
         resolved(&s, &reg(&["orders", "total"])),
         Some(("default".into(), "\"orders\"".into(), strs(&["total"])))
@@ -1077,9 +1080,9 @@ fn adapter_over(names: &[&str]) -> Arc<dyn TypedCatalog> {
     Arc::new(LegacyCatalogAdapter::new(shared))
 }
 
-/// A catalog without namespaces is not searched with the session namespace prepended, so a
-/// namespace never matches a table named like it, and what the user wrote resolves the same
-/// with or without a namespace, quoted or not, qualified by the catalog or not.
+/// A catalog without namespaces is searched with the identifier as written, so a namespace never
+/// matches a table named like it, and what the user wrote resolves the same with or without a
+/// namespace, quoted or not, qualified by the catalog or not.
 #[test]
 fn adapter_namespace_does_not_match_table_named_like_it() {
     let shop = |path: &[&str]| Some(("default".into(), "\"shop\"".into(), strs(path)));
@@ -1107,13 +1110,14 @@ fn adapter_namespace_does_not_match_table_named_like_it() {
             resolved(&s, &reg(&["orders", "x"])),
             Some(("default".into(), "\"orders\"".into(), strs(&["x"])))
         );
-        // A bare name has no step 2, so with a namespace it does not resolve.
-        let bare = resolved(&s, &reg(&["orders"]));
-        if namespace.is_empty() {
-            assert_eq!(bare, Some(("default".into(), "\"orders\"".into(), vec![])));
-        } else {
-            assert_eq!(bare, None);
-        }
+        assert_eq!(
+            resolved(&s, &reg(&["orders"])),
+            Some(("default".into(), "\"orders\"".into(), vec![]))
+        );
+        assert_eq!(
+            resolved(&s, &reg(&["default", "orders"])),
+            Some(("default".into(), "\"orders\"".into(), vec![]))
+        );
     }
     // As a non-current catalog, the adapter is reached catalog-qualified, without the namespace.
     let s = session(
@@ -1187,4 +1191,41 @@ fn fixed_agg_overload_has_one_instance() {
     assert_eq!(instance.parameters()[0].name(), "arg0");
     let binding = RoutineBinding::new(Name::of(["sum"]).unwrap(), vec![agg]).unwrap();
     assert_eq!(binding.overloads().len(), 1);
+}
+
+/// A wrapper that does not forward `has_namespaces` gets partiql-lang-kotlin's order, where the
+/// namespace can match a table named like it; one that forwards it does not.
+#[test]
+fn wrapper_must_forward_has_namespaces() {
+    #[derive(Debug)]
+    struct Wrap(Arc<dyn TypedCatalog>, bool);
+    impl TypedCatalog for Wrap {
+        fn name(&self) -> &str {
+            self.0.name()
+        }
+        fn get_table(&self, s: &Session, name: &Name) -> Option<Table> {
+            self.0.get_table(s, name)
+        }
+        fn resolve_table(&self, s: &Session, id: &Identifier) -> Option<Name> {
+            self.0.resolve_table(s, id)
+        }
+        fn has_namespaces(&self) -> bool {
+            if self.1 {
+                self.0.has_namespaces()
+            } else {
+                true
+            }
+        }
+    }
+    let inner = || adapter_over(&["orders", "shop"]);
+    let s = session("default", &["shop"], vec![Arc::new(Wrap(inner(), true))]);
+    assert_eq!(
+        resolved(&s, &reg(&["orders"])),
+        Some(("default".into(), "\"orders\"".into(), vec![]))
+    );
+    let s = session("default", &["shop"], vec![Arc::new(Wrap(inner(), false))]);
+    assert_eq!(
+        resolved(&s, &reg(&["orders"])),
+        Some(("default".into(), "\"shop\"".into(), strs(&["orders"])))
+    );
 }

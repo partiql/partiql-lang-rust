@@ -20,7 +20,8 @@ pub enum SessionError {
 
 /// A planning session (partiql-lang-kotlin `Session`). Build one with [`Session::builder`].
 ///
-/// Its `Debug` output omits the identity and the property values, which may be sensitive.
+/// Its `Debug` output omits the identity and the property values, which may be sensitive;
+/// property keys are shown, so they should not hold secrets.
 #[derive(Clone)]
 pub struct Session {
     identity: String,
@@ -206,21 +207,20 @@ impl SessionBuilder {
     }
 }
 
+// The catalogs by name, the property keys only, and no identity.
 impl fmt::Debug for Session {
-    /// The catalogs by name, the property keys only, and no identity.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Session")
             .field("catalog", &self.catalog)
             .field("catalogs", &self.catalogs)
             .field("namespace", &self.namespace)
-            .field("path", &self.path())
+            .field("path", &self.path)
             .field("property_keys", &self.properties.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
 
 impl fmt::Debug for SessionBuilder {
-    /// The catalogs by name, the property keys only, and no identity.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SessionBuilder")
             .field("catalog", &self.catalog)

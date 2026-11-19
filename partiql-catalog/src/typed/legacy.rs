@@ -20,7 +20,8 @@ use std::sync::Arc;
 ///   so it matches by the inner catalog's case rules, not by [`super::equals_ignore_case`]
 ///   ([`crate::catalog::PartiqlCatalog`] ignores case with full Unicode case folding, for both).
 ///   [`TypedCatalog::has_namespaces`] is `false`, so [`super::resolve_table`] does not prepend
-///   a session namespace to identifiers looked up in it (see there).
+///   a session namespace to identifiers looked up in it: under any namespace, `orders` and
+///   `default.orders` both find the table `orders` (see there).
 /// - A [`SharedCatalog`] does not report the name an entry was registered under, so the resolved
 ///   [`Name`] is the part's text as written, and [`TypedCatalog::get_table`] looks a name up as
 ///   written ([`BindingsName::CaseSensitive`]) and, failing that, ignoring case

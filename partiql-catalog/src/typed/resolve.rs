@@ -49,9 +49,9 @@ impl ResolvedTable {
 /// The table that `identifier` names in `session`, or `None`. The lookups are, in order:
 ///
 /// 1. in the current catalog, with the session namespace prepended to `identifier` (as
-///    delimited parts); skipped when there is a session namespace and the current catalog
-///    has no namespaces ([`TypedCatalog::has_namespaces`]), where partiql-lang-kotlin would
-///    match the namespace against a table name;
+///    delimited parts), or, if the current catalog has no namespaces
+///    ([`TypedCatalog::has_namespaces`]), as written, so the namespace is never matched against
+///    a table name as partiql-lang-kotlin would;
 /// 2. if `identifier` is qualified, in the current catalog as written (schema-qualified);
 /// 3. if `identifier` is qualified, in the catalog its first part names, matched as that part
 ///    is written (regular: ignoring case, an error if that matches several; delimited:
@@ -69,21 +69,21 @@ pub fn resolve_table(
         .get_catalog(session.catalog(), false)?
         .ok_or_else(|| ResolveError::MissingDefaultCatalog(session.catalog().to_string()))?;
 
-    // 1. The current catalog and namespace; skipped for a namespace the catalog cannot have.
+    // 1. The current catalog and namespace; a catalog without namespaces gets the identifier
+    // as written.
     let path = match session.namespace().as_identifier() {
-        Some(namespace) if default.has_namespaces() => Some(namespace.append(identifier)),
-        Some(_) => None,
-        None => Some(identifier.clone()),
+        Some(namespace) if default.has_namespaces() => namespace.append(identifier),
+        _ => identifier.clone(),
     };
-    if let Some(found) = path.and_then(|path| lookup(session, &default, &path)) {
+    if let Some(found) = lookup(session, &default, &path) {
         return Ok(Some(found));
     }
     if !identifier.has_qualifier() {
         return Ok(None);
     }
 
-    // 2. A schema-qualified identifier; with an empty namespace, the same lookup as 1.
-    if !session.namespace().is_empty() {
+    // 2. A schema-qualified identifier; without a prepended namespace, the same lookup as 1.
+    if !session.namespace().is_empty() && default.has_namespaces() {
         if let Some(found) = lookup(session, &default, identifier) {
             return Ok(Some(found));
         }
