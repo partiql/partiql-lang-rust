@@ -6,22 +6,42 @@
 //! - is built without a node id (`PartiqlNoIdShapeBuilder`, id 0), so that equality is
 //!   structural;
 //! - is not an `AnyOf` union (partiql-lang-kotlin collapses unions to `DYNAMIC`);
-//! - is not `Undefined`;
 //! - is nullable;
 //! - has a partiql-lang-kotlin counterpart: not `Int` (unbounded), `Decimal` (unparameterized),
 //!   `DateTime` or `Graph`; a struct is a row (`ROW`) or `StructType::new_any()` (`STRUCT`),
 //!   and has no optional fields. So a typer normalizes catalog schemas (e.g. an open struct
 //!   with known fields) to these forms before it puts them in a plan.
 //!
+//! `Undefined` is the bottom type, "no present value" (partiql-lang-kotlin's `UNKNOWN`). `NULL`
+//! and `MISSING` are absent values, not types: the typer types a `NULL` or `MISSING` literal
+//! `Undefined`, and a literal typed `Undefined` must hold an absent value. An absent-value
+//! literal may also carry a concrete type: partiql-lang-kotlin replaces the `NULL` / `MISSING`
+//! branches of `CASE` and `COALESCE` with absent literals typed as the supertype
+//! (`DynamicTyper.kt:107-108`). `Undefined` may appear wherever an absent value's type flows: on
+//! an expression that can only produce absent values (a variable or path reading one, a
+//! supertype of only absent values, `PlanTyper.kt:134-136`), nested in rows, collections and
+//! maps (`SELECT NULL AS a`, `[NULL]`), in schemas, in resolved routine signatures
+//! (partiql-lang-kotlin resolves `upper(NULL)` with an `UNKNOWN` parameter, `FnUpper.kt:49`),
+//! and nested in a cast target (a set operation or map constructor coerces `NULL` to the
+//! supertype, e.g. `ARRAY<UNKNOWN>`). It may not be a cast target itself, nor the type of a
+//! constructor, a table reference, a non-scalar subquery or `EXISTS`/`UNIQUE`, which always
+//! produce a present value. An absent value is `Datum::is_absent`, so a null variant counts.
+//! A `RexError` (a failed expression) is typed `Dynamic`, never `Undefined`. partiql-lang-kotlin
+//! types some errors `UNKNOWN` (`PlanTyper.kt:1014,1099,1111`) and that `UNKNOWN` propagates
+//! into parents (e.g. a row field of an unresolved path), so a typer that matches it keeps
+//! PLK's type for those parents: a parent's `Undefined` may come from a `Dynamic` error child.
+//! A conformance comparison maps the error nodes themselves. Not checked: a literal whose type
+//! only nests `Undefined` against the value's elements.
+//!
 //! Two nodes whose type partiql-lang-kotlin derives in the node itself agree with it, including
 //! unspecified-parameter flags: a `RexCast`'s type is its target (`rex/RexCast.java:42`), a
 //! `RexMap`'s type is the map of its key and value types (`rex/RexMap.java:63`), whose key is
 //! not `DYNAMIC`. Other types (e.g. a `RexCall`'s, a `RexLit`'s) are set by the typer
 //! (partiql-lang-kotlin's `PlanTransform` overrides them with `setType`) and are not compared.
-//! Structurally: an `Exclusion` has a `RexVar` variable and at least one item (`Exclusion.kt:15,30`),
-//! (A `RelWindow`'s `bindings` are not checked:
-//! partiql-lang-kotlin takes them as the last names of the window's input schema, possibly
-//! fewer than its functions, `PlanTransform.kt:280`.)
+//! Structurally: an `Exclusion` has a `RexVar` variable and at least one item
+//! (`Exclusion.kt:15,30`). A `RelWindow`'s `bindings` are not checked: partiql-lang-kotlin takes
+//! them as the last names of the window's input schema, possibly fewer than its functions
+//! (`PlanTransform.kt:280`).
 //!
 //! Not checked (left to the typer, whose scoping rules define them): that a `RexVar`'s scope and
 //! offset are in range, and that a `Rel`'s schema matches its operator.
@@ -32,6 +52,7 @@ use crate::print::{tree, Attr, NodeType, Source, TreeNode};
 use crate::rel::RelOp;
 use crate::rex::RexOp;
 use partiql_types::{PartiqlNoIdShapeBuilder, PartiqlShape, Static};
+use partiql_value::datum::Datum;
 use std::fmt::{Display, Formatter};
 
 /// One broken invariant, at a path from the plan root.
@@ -68,8 +89,11 @@ pub enum ViolationKind {
     ShapeWithId { id: u32 },
     /// An `AnyOf` union.
     AnyOf,
-    /// The `Undefined` shape.
+    /// `Undefined` where no absent value can be: a cast target, a literal with a present value,
+    /// or a constructor, table reference or `EXISTS`/`UNIQUE`.
     Undefined,
+    /// A `RexError` not typed `Dynamic`.
+    ErrorNotDynamic,
     /// A non-nullable shape.
     NotNullable,
     /// A shape with no partiql-lang-kotlin counterpart (see the module docs).
@@ -93,7 +117,8 @@ impl Display for ViolationKind {
         match self {
             ViolationKind::ShapeWithId { id } => write!(f, "shape has node id {id}"),
             ViolationKind::AnyOf => write!(f, "AnyOf union"),
-            ViolationKind::Undefined => write!(f, "Undefined shape"),
+            ViolationKind::Undefined => write!(f, "Undefined where no absent value can be"),
+            ViolationKind::ErrorNotDynamic => write!(f, "error node is not typed Dynamic"),
             ViolationKind::NotNullable => write!(f, "non-nullable shape"),
             ViolationKind::NoPlkEquivalent => {
                 write!(f, "shape has no partiql-lang-kotlin counterpart")
@@ -149,13 +174,48 @@ fn check_node(node: &TreeNode<'_>, path: &str, out: &mut Vec<Violation>) {
             check_shape(s, &join(path, name), out);
         }
     }
+    // Constructors, table references, non-scalar subqueries and EXISTS/UNIQUE always produce a
+    // present value.
+    if let Some(Source::Rex(rex)) = node.source {
+        let present = matches!(
+            rex.op(),
+            RexOp::Array { .. }
+                | RexOp::Bag { .. }
+                | RexOp::Struct { .. }
+                | RexOp::Map { .. }
+                | RexOp::MapDynamic { .. }
+                | RexOp::Spread { .. }
+                | RexOp::Select { .. }
+                | RexOp::Pivot { .. }
+                | RexOp::Table { .. }
+                | RexOp::TableRef { .. }
+                | RexOp::SubqueryTest { .. }
+                // A non-scalar subquery builds a collection; a scalar one yields a field value,
+                // which may be absent.
+                | RexOp::Subquery { scalar: false, .. }
+        );
+        if present && rex.ty().is_undefined() {
+            push(out, join(path, "type"), ViolationKind::Undefined)
+        }
+    }
     match node.source {
         Some(Source::Rex(rex)) => match rex.op() {
-            // Shapes with ids are reported above; comparing them would add false mismatches.
-            RexOp::Cast { target, .. }
-                if !has_id(rex.ty()) && !has_id(target) && !same_type(rex.ty(), target) =>
-            {
-                push(out, join(path, "type"), ViolationKind::CastTypeNotTarget)
+            RexOp::Lit { value } => {
+                if rex.ty().is_undefined() && !value.is_absent() {
+                    push(out, join(path, "type"), ViolationKind::Undefined)
+                }
+            }
+            RexOp::Error {} if !rex.ty().is_dynamic() => {
+                push(out, join(path, "type"), ViolationKind::ErrorNotDynamic)
+            }
+            RexOp::Cast { target, .. } => {
+                if target.is_undefined() {
+                    push(out, join(path, "target"), ViolationKind::Undefined)
+                }
+                // Shapes with ids are reported above; comparing them would add false mismatches.
+                if !has_id(rex.ty()) && !has_id(target) && !same_type(rex.ty(), target) {
+                    push(out, join(path, "type"), ViolationKind::CastTypeNotTarget)
+                }
             }
             RexOp::Map {
                 key_type,
@@ -250,7 +310,8 @@ fn check_shape(shape: &PartiqlShape, path: &str, out: &mut Vec<Violation>) {
                 check_shape(t, &format!("{path}.any_of[{i}]"), out);
             }
         }
-        PartiqlShape::Undefined => here(out, ViolationKind::Undefined),
+        // The bottom type; where it may not appear is checked per node (see the module docs).
+        PartiqlShape::Undefined => {}
         PartiqlShape::Static(st) => {
             let id = st.ty_id().0;
             if id != 0 {
@@ -280,8 +341,6 @@ fn check_shape(shape: &PartiqlShape, path: &str, out: &mut Vec<Violation>) {
                 | Static::Timestamp(_)
                 | Static::TimestampTz(_)
                 | Static::Interval(_)
-                | Static::Null
-                | Static::Missing
                 | Static::Variant(_) => {}
                 Static::Int | Static::Decimal | Static::DateTime | Static::Graph() => {
                     here(out, ViolationKind::NoPlkEquivalent)

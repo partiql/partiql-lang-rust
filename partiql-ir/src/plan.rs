@@ -6,8 +6,7 @@ use crate::rex::Rex;
 /// A typed plan: a version and the action it performs.
 ///
 /// Equality (`==`) is structural and, as `PartiqlShape`'s, ignores the unspecified-parameter
-/// flags of a shape (`TypeParams`) and the encoding of a `Variant`; compare [`Plan::dump`] or
-/// `Debug` to see those.
+/// flags of a shape (`TypeParams`); compare [`Plan::dump`] or `Debug` to see them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     version: Version,

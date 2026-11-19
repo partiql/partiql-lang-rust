@@ -5,7 +5,7 @@ expression: every_node().dump()
 Plan {version: V1}
   action: Query
     rex: RexSelect :: <<Dynamic>>
-      input: RelProject :: Rel[_1: [Int32], _2: <<Int32>>, _3: Int32, _4: Int32, _5: Dynamic, _6: Int64, _7: Int32, _8: Dynamic, _9: Dynamic, _10: Map<String, Int32>, _11: Dynamic, _12: Int32, _13: Dynamic, _14: {...}, _15: {...}, _16: Row{a: Int32}, _17: Int32, _18: Bool, _19: Bool]
+      input: RelProject :: Rel[_1: [Int32], _2: <<Int32>>, _3: Int32, _4: Int32, _5: Dynamic, _6: Int64, _7: Int32, _8: Dynamic, _9: Dynamic, _10: Undefined, _11: Map<String, Int32>, _12: Dynamic, _13: Int32, _14: Dynamic, _15: {...}, _16: {...}, _17: Row{a: Int32}, _18: Int32, _19: Bool, _20: Bool]
         input: RelWith :: Rel[c: Int64, g: Bool, r: Int64]
           input: RelWindow :: Rel[c: Int64, g: Bool, r: Int64] {name: w, bindings[0]: r}
             input: RelOffset :: Rel[c: Int64, g: Bool]
@@ -83,21 +83,22 @@ Plan {version: V1}
           functions[1]: RoutineRef {name: "$system"."abs", specific: abs__String, params[0]: String, returns: String}
           args[0]: RexVar :: Dynamic {scope: 0, offset: 1}
         projections[8]: RexError :: Dynamic
-        projections[9]: RexMap :: Map<String, Int32> {key_type: String, value_type: Int32}
+        projections[9]: RexLit :: Undefined {value: NULL}
+        projections[10]: RexMap :: Map<String, Int32> {key_type: String, value_type: Int32}
           entries[0]: RexMap.Entry
             key: RexLit :: String {value: String "k"}
             value: RexLit :: Int32 {value: Integer 1}
-        projections[10]: RexMapDynamic :: Dynamic
+        projections[11]: RexMapDynamic :: Dynamic
           entries[0]: RexMap.Entry
             key: RexLit :: String {value: String "k"}
             value: RexLit :: Int32 {value: Integer 1}
-        projections[11]: RexNullIf :: Int32
+        projections[12]: RexNullIf :: Int32
           v1: RexLit :: Int32 {value: Integer 1}
           v2: RexLit :: Int32 {value: Integer 2}
-        projections[12]: RexPathIndex :: Dynamic
+        projections[13]: RexPathIndex :: Dynamic
           operand: RexVar :: Dynamic {scope: 0, offset: 1}
           index: RexLit :: Int32 {value: Integer 0}
-        projections[13]: RexPivot :: {...}
+        projections[14]: RexPivot :: {...}
           input: RelUnion :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}] {all: false}
             left: RelIntersect :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}] {all: false}
               left: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
@@ -111,24 +112,24 @@ Plan {version: V1}
                 rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: "default"."s"."T"}
           key: RexLit :: String {value: String "k"}
           value: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
-        projections[14]: RexSpread :: {...}
+        projections[15]: RexSpread :: {...}
           args[0]: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
           args[1]: RexVar :: Dynamic {scope: 0, offset: 1}
-        projections[15]: RexStruct :: Row{a: Int32}
+        projections[16]: RexStruct :: Row{a: Int32}
           fields[0]: RexStruct.Field
             key: RexLit :: String {value: String "a"}
             value: RexLit :: Int32 {value: Integer 1}
-        projections[16]: RexSubquery :: Int32 {scalar: true}
+        projections[17]: RexSubquery :: Int32 {scalar: true}
           input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
             rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: "default"."s"."T"}
           constructor: RexPathKey :: Int32
             operand: RexVar :: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}} {scope: 0, offset: 0}
             key: RexLit :: String {value: String "b"}
-        projections[17]: RexSubqueryComp :: Bool {comparison: GE, quantifier: ANY}
+        projections[18]: RexSubqueryComp :: Bool {comparison: GE, quantifier: ANY}
           input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
             rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: "default"."s"."T"}
           args[0]: RexLit :: Int32 {value: Integer 1}
-        projections[18]: RexSubqueryIn :: Bool
+        projections[19]: RexSubqueryIn :: Bool
           input: RelScan :: Rel[t: Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}]
             rex: RexTable :: <<Row{a: Bool, b: Int32, ts: Timestamp(6) {unspecified: precision}}>> {table: "default"."s"."T"}
           args[0]: RexLit :: Int32 {value: Integer 1}

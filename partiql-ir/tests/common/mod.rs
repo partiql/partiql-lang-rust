@@ -238,7 +238,8 @@ pub fn every_node() -> Plan {
             vec![abs_int, abs_str],
             vec![Rex::var(dynamic(), 0, 1)],
         ),
-        Rex::error(dynamic()),
+        Rex::error(),
+        Rex::lit(PartiqlShape::Undefined, Value::Null),
         Rex::map(
             map_ty.clone(),
             string(),

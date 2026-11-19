@@ -110,22 +110,107 @@ fn rejects_any_of_in_a_routine_signature_and_a_map_value() {
 }
 
 #[test]
-fn rejects_undefined_and_non_nullable_shapes() {
+fn rejects_non_nullable_shapes() {
     let not_null = b().new_non_nullable_static(Static::Int32);
+    let plan = Plan::query(Rex::array(b().new_array_of(not_null), vec![]));
+    assert_eq!(
+        kinds(&plan),
+        [(
+            "action.rex.type.element".to_string(),
+            ViolationKind::NotNullable
+        )]
+    );
+}
+
+/// `Undefined` is the bottom type: the type of absent-value literals and of what can only hold
+/// them, also nested, in schemas and in resolved signatures.
+#[test]
+fn accepts_undefined_where_absent_values_flow() {
+    use partiql_ir::{QualifiedName, RoutineRef};
+    use partiql_value::Value;
+    let undef = || PartiqlShape::Undefined;
+    let upper = RoutineRef::new(
+        QualifiedName::new("$system", Vec::<String>::new(), "upper"),
+        "upper__Undefined",
+        vec![undef()],
+        string(),
+    );
+    let a = row(&[("a", undef())]);
+    let scan = Rel::scan(rel_type(&[("t", a.clone())]), Rex::var(a.clone(), 0, 0));
+    let projection = Rex::bag(
+        bag(undef()),
+        vec![
+            Rex::lit(undef(), Value::Null),
+            Rex::lit(undef(), Value::Missing),
+            Rex::path_key(undef(), Rex::var(a.clone(), 0, 0), str_lit("a")),
+            Rex::call(string(), upper, vec![Rex::lit(undef(), Value::Null)]),
+        ],
+    );
+    let plan = Plan::query(Rex::select(bag(bag(undef())), scan, projection));
+    assert_eq!(validate(&plan), Ok(()));
+}
+
+/// What PLK produces around absent values: a `NULL` typed as the `CASE`/`COALESCE` supertype
+/// (`DynamicTyper.kt:107`), and a coercion cast whose target nests `UNKNOWN` (`[NULL]` in a set
+/// operation).
+#[test]
+fn accepts_plk_typed_absent_literals_and_nested_undefined_cast_targets() {
+    use partiql_value::Value;
+    let undef = || PartiqlShape::Undefined;
+    let arr = || b().new_array_of(undef());
+    let plan = Plan::query(Rex::coalesce(
+        int(),
+        vec![
+            int_lit(1),
+            Rex::lit(int(), Value::Null),
+            Rex::cast(arr(), Rex::lit(undef(), Value::Null), arr()),
+        ],
+    ));
+    assert_eq!(validate(&plan), Ok(()));
+}
+
+#[test]
+fn rejects_undefined_where_no_absent_value_can_be() {
+    use partiql_value::Value;
+    let undef = || PartiqlShape::Undefined;
     let plan = Plan::query(Rex::array(
-        b().new_array_of(not_null),
-        vec![Rex::error(PartiqlShape::Undefined)],
+        dynamic(),
+        vec![
+            Rex::lit(undef(), Value::from(1)),
+            Rex::from_parts(undef(), partiql_ir::Rex::error().into_parts().1),
+            Rex::cast(undef(), int_lit(1), undef()),
+            Rex::bag(undef(), vec![int_lit(1)]),
+            Rex::struct_(undef(), vec![]),
+            // A cast whose target nests Undefined still checks its type against the target.
+            Rex::cast(int(), int_lit(1), b().new_array_of(undef())),
+        ],
     ));
     assert_eq!(
         kinds(&plan),
         [
             (
-                "action.rex.type.element".to_string(),
-                ViolationKind::NotNullable
-            ),
-            (
                 "action.rex.values[0].type".to_string(),
                 ViolationKind::Undefined
+            ),
+            (
+                "action.rex.values[1].type".to_string(),
+                ViolationKind::ErrorNotDynamic
+            ),
+            (
+                "action.rex.values[2].target".to_string(),
+                ViolationKind::Undefined
+            ),
+            (
+                "action.rex.values[3].type".to_string(),
+                ViolationKind::Undefined
+            ),
+            (
+                "action.rex.values[4].type".to_string(),
+                ViolationKind::Undefined
+            ),
+            (
+                "action.rex.values[5].type".to_string(),
+                ViolationKind::CastTypeNotTarget
             ),
         ]
     );
@@ -206,10 +291,10 @@ fn rejects_shapes_without_a_plk_counterpart() {
         bag(dynamic()),
         vec![
             Rex::lit(s(Static::Int), Value::from(1)),
-            Rex::error(s(Static::Graph())),
-            Rex::error(optional),
-            Rex::error(closed_set),
-            Rex::error(open_with_fields),
+            Rex::var(s(Static::Graph()), 0, 0),
+            Rex::var(optional, 0, 0),
+            Rex::var(closed_set, 0, 0),
+            Rex::var(open_with_fields, 0, 0),
         ],
     ));
     assert_eq!(
@@ -269,7 +354,7 @@ fn rejects_a_cast_or_map_whose_type_disagrees_with_its_declared_types() {
 #[test]
 fn paths_name_duplicate_fields_by_position() {
     let idd = PartiqlShapeBuilder::default().new_static(Static::Int32);
-    let plan = Plan::query(Rex::error(row(&[("a", int()), ("a", idd)])));
+    let plan = Plan::query(Rex::var(row(&[("a", int()), ("a", idd)]), 0, 0));
     let paths: Vec<String> = kinds(&plan).into_iter().map(|(p, _)| p).collect();
     assert_eq!(paths, ["action.rex.type.fields[1:a]"]);
 }
@@ -364,21 +449,41 @@ fn rejects_a_dynamic_map_key() {
     );
 }
 
-/// Shapes that are `==` but built differently (constraint order, variant encoding) agree.
+/// Shapes that are `==` but built differently (constraint insertion order) agree; a variant
+/// cast to another encoding does not (the encoding takes part in equality).
 #[test]
-fn cast_check_has_no_false_positive_for_equal_shapes() {
+fn cast_check_compares_shapes_not_their_construction() {
     use partiql_types::VariantType;
-    let ion = s(Static::Variant(VariantType::new("ion")));
+    let fields = || vec![StructField::new("a", int())];
+    let row_fwd = b().new_struct(StructType::new_row(fields()));
+    let row_rev = b().new_struct(StructType::new(
+        [
+            StructConstraint::FieldList(fields()),
+            StructConstraint::DuplicateAttrs(true),
+            StructConstraint::Ordered(true),
+            StructConstraint::Open(false),
+        ]
+        .into_iter()
+        .collect(),
+    ));
+    assert_ne!(format!("{row_fwd:?}"), format!("{row_rev:?}"));
+    let ion = || s(Static::Variant(VariantType::new("ion")));
     let json = s(Static::Variant(VariantType::new("json")));
-    let rows = |a: &str, b: &str| row(&[(a, int()), (b, string())]);
     let plan = Plan::query(Rex::array(
         dynamic(),
         vec![
-            Rex::cast(ion, str_lit("x"), json),
-            Rex::cast(rows("a", "b"), str_lit("x"), rows("a", "b")),
+            Rex::cast(row_fwd, str_lit("x"), row_rev),
+            Rex::cast(ion(), str_lit("x"), ion()),
+            Rex::cast(ion(), str_lit("x"), json),
         ],
     ));
-    assert_eq!(validate(&plan), Ok(()));
+    assert_eq!(
+        kinds(&plan),
+        [(
+            "action.rex.values[2].type".to_string(),
+            ViolationKind::CastTypeNotTarget
+        )]
+    );
 }
 
 /// Only `StructType::new_any()` stands for PLK's `STRUCT`.
@@ -390,7 +495,7 @@ fn only_the_canonical_open_struct_is_accepted() {
     let any = b().new_struct(StructType::new_any());
     let plan = Plan::query(Rex::array(
         dynamic(),
-        vec![Rex::error(open), Rex::error(any)],
+        vec![Rex::var(open, 0, 0), Rex::var(any, 0, 0)],
     ));
     assert_eq!(
         kinds(&plan),
@@ -414,7 +519,7 @@ fn rejects_a_row_with_extra_constraints() {
         .into_iter()
         .collect(),
     ));
-    let plan = Plan::query(Rex::error(mixed));
+    let plan = Plan::query(Rex::var(mixed, 0, 0));
     assert!(kinds(&plan).contains(&(
         "action.rex.type".to_string(),
         ViolationKind::NoPlkEquivalent
@@ -430,7 +535,7 @@ fn reports_problems_inside_any_of_members() {
         ids.new_static(Static::String),
     );
     let u = ids.any_of([x, y]);
-    let kinds = kinds(&Plan::query(Rex::error(u)));
+    let kinds = kinds(&Plan::query(Rex::var(u, 0, 0)));
     assert_eq!(
         kinds[0],
         ("action.rex.type".to_string(), ViolationKind::AnyOf)
@@ -440,4 +545,78 @@ fn reports_problems_inside_any_of_members() {
         .all(|(p, k)| p.starts_with("action.rex.type.any_of[")
             && matches!(k, ViolationKind::ShapeWithId { .. })));
     assert_eq!(kinds.len(), 3);
+}
+
+/// Every node that always produces a present value rejects `Undefined`, and its other checks
+/// still run (a map's DYNAMIC key is still reported).
+#[test]
+fn present_value_nodes_reject_undefined() {
+    use partiql_ir::{QualifiedName, SubqueryTest};
+    let u = || PartiqlShape::Undefined;
+    let scan = || Rel::scan(rel_type(&[("t", dynamic())]), Rex::var(dynamic(), 0, 0));
+    let nodes = vec![
+        Rex::array(u(), vec![]),
+        Rex::bag(u(), vec![]),
+        Rex::struct_(u(), vec![]),
+        Rex::map(u(), dynamic(), int(), vec![]),
+        Rex::map_dynamic(u(), vec![]),
+        Rex::spread(u(), vec![]),
+        Rex::select(u(), scan(), Rex::var(dynamic(), 0, 0)),
+        Rex::pivot(u(), scan(), str_lit("k"), Rex::var(dynamic(), 0, 0)),
+        Rex::table(u(), QualifiedName::new("c", Vec::<String>::new(), "t")),
+        Rex::table_ref(u(), 0, 0),
+        Rex::subquery_test(u(), scan(), SubqueryTest::Exists),
+        Rex::subquery(u(), scan(), Rex::var(dynamic(), 0, 0), false),
+    ];
+    let n = nodes.len();
+    let got = kinds(&Plan::query(Rex::array(dynamic(), nodes)));
+    let undefined: Vec<String> = got
+        .iter()
+        .filter(|(_, k)| *k == ViolationKind::Undefined)
+        .map(|(p, _)| p.clone())
+        .collect();
+    let want: Vec<String> = (0..n)
+        .map(|i| format!("action.rex.values[{i}].type"))
+        .collect();
+    assert_eq!(undefined, want);
+    assert!(got.contains(&(
+        "action.rex.values[3].key_type".to_string(),
+        ViolationKind::DynamicMapKey
+    )));
+}
+
+/// Nodes PLK legitimately types `UNKNOWN`, or whose parts it types `UNKNOWN`, are accepted.
+#[test]
+fn accepts_plk_legal_undefined_placements() {
+    use partiql_value::Value;
+    let u = || PartiqlShape::Undefined;
+    let null = || Rex::lit(u(), Value::Null);
+    let scan = || Rel::scan(rel_type(&[("t", dynamic())]), Rex::var(dynamic(), 0, 0));
+    let map = b().new_map(u(), int()).unwrap();
+    let nodes = vec![
+        // MAP{NULL: 1}: the key type is the supertype of UNKNOWNs.
+        Rex::map(
+            map,
+            u(),
+            int(),
+            vec![partiql_ir::MapEntry::new(null(), int_lit(1))],
+        ),
+        Rex::case(
+            u(),
+            None,
+            vec![partiql_ir::CaseBranch::new(
+                Rex::lit(bool_(), Value::from(true)),
+                null(),
+            )],
+            Some(null()),
+        ),
+        Rex::coalesce(u(), vec![null(), null()]),
+        Rex::null_if(u(), null(), null()),
+        // A MISSING branch typed as the CASE supertype (`DynamicTyper.kt:108`).
+        Rex::lit(int(), Value::Missing),
+        // A scalar subquery over SELECT NULL.
+        Rex::subquery(u(), scan(), null(), true),
+    ];
+    let plan = Plan::query(Rex::array(dynamic(), nodes));
+    assert_eq!(validate(&plan), Ok(()));
 }

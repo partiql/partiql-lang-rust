@@ -324,8 +324,9 @@ impl Rex {
         )
     }
 
-    pub fn error(ty: PartiqlShape) -> Self {
-        Rex::from_parts(ty, RexOp::Error {})
+    /// A failed expression, typed `Dynamic` (see [`crate::validate`]).
+    pub fn error() -> Self {
+        Rex::from_parts(PartiqlShape::Dynamic, RexOp::Error {})
     }
 
     pub fn lit(ty: PartiqlShape, value: Value) -> Self {

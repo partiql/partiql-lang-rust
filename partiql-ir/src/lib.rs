@@ -17,8 +17,9 @@
 //!   default traversal as [`visit::walk_rex`] / [`rewrite::walk_rex`] (and `walk_rel`,
 //!   `walk_plan`).
 //! - [`Plan::dump`] prints a plan as an indented tree; [`tree`] gives the same tree as data.
-//! - [`validate`] checks the invariants of a typed planner's output (no-id, non-union,
-//!   nullable shapes with a partiql-lang-kotlin counterpart).
+//! - [`validate`] checks the invariants of a typed planner's output: no-id, non-union,
+//!   nullable shapes with a partiql-lang-kotlin counterpart; `Undefined` (the bottom type) only
+//!   where absent values flow; failed expressions typed `Dynamic`.
 //!
 //! Plans are not `Send`/`Sync`: a literal holds a `partiql_value::Value`, which is not (the
 //! same holds for `partiql-logical`'s plan).
