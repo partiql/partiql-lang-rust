@@ -24,7 +24,7 @@ impl Table {
         Table { name, schema }
     }
 
-    /// A table whose schema is `DYNAMIC`, for a table whose schema is not known.
+    /// A table whose schema is `DYNAMIC`: its schema is not known.
     #[must_use]
     pub fn dynamic(name: Name) -> Self {
         Table::new(name, PartiqlShape::Dynamic)
@@ -149,7 +149,8 @@ impl RoutineCatalog for SystemCatalog {
 }
 
 /// The error of [`Catalogs::get_catalog`] when a name that ignores case matches several
-/// catalogs. The names are sorted by exact name.
+/// catalogs. The names are sorted by exact name, comparing UTF-16 code units, so the error's name
+/// list has a stable, documented order.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error("Catalog name is ambiguous; matched {}.", .catalog_names.join(", "))]
 pub struct CatalogNameAmbiguous {
@@ -159,7 +160,7 @@ pub struct CatalogNameAmbiguous {
 impl CatalogNameAmbiguous {
     #[must_use]
     pub fn new(mut catalog_names: Vec<String>) -> Self {
-        // Ordered by UTF-16 code unit, not by Unicode scalar value.
+        // By UTF-16 code unit, not by Unicode scalar value (see the type's docs).
         catalog_names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
         CatalogNameAmbiguous { catalog_names }
     }
@@ -170,8 +171,7 @@ impl CatalogNameAmbiguous {
     }
 }
 
-/// The catalogs of a session, by name. Its `Debug` output lists
-/// the catalogs' names only.
+/// The catalogs of a session, by name. Its `Debug` output lists the catalogs' names only.
 #[derive(Clone, Default)]
 pub struct Catalogs {
     catalogs: Vec<Arc<dyn TypedCatalog>>,

@@ -12,8 +12,8 @@ use std::sync::Arc;
 /// A [`TypedCatalog`] over a [`SharedCatalog`]'s type entries.
 ///
 /// - The catalog's name is the inner catalog's [`crate::catalog::ReadOnlyCatalog::name`].
-/// - A [`SharedCatalog`] has no namespaces, so [`TypedCatalog::resolve_table`] matches only the identifier's first part, and the rest is a
-///   path into the table. The part is looked up with
+/// - A [`SharedCatalog`] has no namespaces, so [`TypedCatalog::resolve_table`] matches only the
+///   identifier's first part, and the rest is a path into the table. The part is looked up with
 ///   [`crate::catalog::ReadOnlyCatalog::resolve_binding_type`]: a regular part as
 ///   [`BindingsName::CaseInsensitive`] and a delimited one as [`BindingsName::CaseSensitive`],
 ///   so it matches by the inner catalog's case rules, not by [`super::equals_ignore_case`]

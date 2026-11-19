@@ -35,9 +35,9 @@ pub fn equals_ignore_case(a: &str, b: &str) -> bool {
     }
 }
 
-/// The simple (single-character) uppercase mapping. Rust's `char::to_uppercase` is the full
-/// mapping; where that is several characters (e.g. `ß` to `SS`) the character is kept
-/// unchanged.
+/// The uppercase mapping when it is a single character; otherwise the character itself. Rust's
+/// `char::to_uppercase` is the full mapping, so where that is several characters (e.g. `ß` to
+/// `SS`, or `\u{1F80}` to two characters) the character is kept unchanged.
 fn simple_upper(c: char) -> char {
     let mut up = c.to_uppercase();
     match (up.next(), up.next()) {
@@ -46,9 +46,9 @@ fn simple_upper(c: char) -> char {
     }
 }
 
-/// The simple (single-character) lowercase mapping. The only
-/// character whose full lowercase mapping is several characters is U+0130 (LATIN CAPITAL LETTER
-/// I WITH DOT ABOVE), whose single-character mapping is `i`.
+/// The lowercase mapping when it is a single character. The only character whose full lowercase
+/// mapping is several characters is U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE), which maps
+/// to `i`.
 fn simple_lower(c: char) -> char {
     if c == '\u{130}' {
         return 'i';
