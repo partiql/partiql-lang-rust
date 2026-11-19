@@ -6,9 +6,13 @@
 //! tables are keyed by kind only, as in PLK, where they are keyed by `PType.code()`: type
 //! parameters never take part.
 //!
-//! Only the tables are ported. The algorithms that use them (PLK's `FnResolver` steps: exact
-//! match, dynamic dispatch, best match; and the builtin operators' widening) belong to the
-//! typer and the builtin signatures.
+//! Only the tables keyed by kind are ported. Out of scope here, and owned by the typer and the
+//! builtin signatures: PLK's `FnResolver` steps (exact match, dynamic dispatch, best match), the
+//! builtin operators' widening, and the common-supertype rules of CASE, COALESCE and set
+//! operations (`DynamicTyper.getCommonSuperType`, `coerceTypeBase` and `mergeParameterized`,
+//! `DynamicTyper.kt:192-349`). Those rules are directed and depend on type parameters (e.g.
+//! `DECIMAL(5,2)` with `INTEGER` is `DECIMAL(12,2)`, and `DATE` with `TIME` has no supertype), so
+//! neither [`can_coerce`] nor [`TYPE_PRECEDENCE`] can stand in for them.
 
 use crate::ShapeKind;
 use std::cmp::Ordering;
@@ -77,6 +81,11 @@ pub fn coercion_family(kind: ShapeKind) -> CoercionFamily {
 /// function: always from `UNKNOWN`, always to `DYNAMIC`, and otherwise when both are in the same
 /// [`CoercionFamily`]. As in PLK the rule has no direction (`DOUBLE` coerces to `TINYINT`).
 ///
+/// PLK applies it only after an exact match fails and only when no argument is `DYNAMIC` or
+/// `VARIANT`: a call with such an argument is dispatched dynamically over every candidate first
+/// (`FnResolver.kt:47-52`). So `false` for a `VARIANT` argument does not mean that no overload
+/// applies.
+///
 /// Port of `CoercionFamily.canCoerce` (`partiql-planner/.../internal/CoercionFamily.kt:82-90`).
 pub fn can_coerce(from: ShapeKind, to: ShapeKind) -> bool {
     from == ShapeKind::Unknown
@@ -121,7 +130,8 @@ pub const FN_PRECEDENCE: &[ShapeKind] = &[
 
 /// The precedence of operand kinds used by the builtin operators to pick the wider operand
 /// (e.g. `INTEGER + BIGINT` is computed as `BIGINT`), lowest first. Unlike [`FN_PRECEDENCE`] it
-/// starts with `UNKNOWN` and has no `MAP` (and no `VARIANT`).
+/// starts with `UNKNOWN` and has no `MAP` (and no `VARIANT`). It is a total order, not a
+/// supertype relation: it ranks `TIME` above `DATE`, which have no common supertype in PLK.
 ///
 /// Port of `TypePrecedence.TYPE_PRECEDENCE`
 /// (`partiql-spi/.../function/builtins/TypePrecedence.kt:11-39`).

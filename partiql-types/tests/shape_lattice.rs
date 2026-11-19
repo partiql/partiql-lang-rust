@@ -473,7 +473,7 @@ fn kind_per_static_type() {
         (Static::Missing, Some(K::Unknown)),
         (Static::Variant(VariantType::new("ion")), Some(K::Variant)),
         (Static::Struct(row), Some(K::Row)),
-        (Static::Struct(closed_set), Some(K::Struct)),
+        (Static::Struct(closed_set), Some(K::Row)),
         (Static::Struct(StructType::new_any()), Some(K::Struct)),
         (Static::Bag(BagType::new_any()), Some(K::Bag)),
         (Static::Array(ArrayType::new_any()), Some(K::Array)),
@@ -525,4 +525,90 @@ fn kind_of_non_static_shapes() {
     let union = b.any_of([shape(Static::Int32), shape(Static::String)]);
     assert!(matches!(union, PartiqlShape::AnyOf(_)));
     assert_eq!(union.kind(), None);
+}
+
+/// PLK types every closed struct as `ROW`, also when its fields are unordered or there are none,
+/// and only an open struct as `STRUCT` (`PlanTyper.kt:1434-1437`, `:1576`, `:1687-1691`;
+/// `PType.struct()` carries no fields, `PType.java:1182-1184`).
+#[test]
+fn closed_structs_are_rows_open_structs_are_structs() {
+    let a = || StructField::new("a", shape(Static::Int32));
+    let closed_unordered = StructType::new(
+        [
+            StructConstraint::Open(false),
+            StructConstraint::Fields([a()].into()),
+        ]
+        .into(),
+    );
+    let closed_empty = StructType::new([StructConstraint::Open(false)].into());
+    let open_with_fields = StructType::new(
+        [
+            StructConstraint::Open(true),
+            StructConstraint::Fields([a()].into()),
+        ]
+        .into(),
+    );
+    let no_open_constraint = StructType::new([StructConstraint::Fields([a()].into())].into());
+    let cases = [
+        (closed_unordered, K::Row),
+        (closed_empty, K::Row),
+        (StructType::new_row([]), K::Row),
+        (open_with_fields, K::Struct),
+        (no_open_constraint, K::Struct),
+        (StructType::new_any(), K::Struct),
+    ];
+    for (s, kind) in cases {
+        let ty = Static::Struct(s);
+        assert_eq!(ty.kind(), Some(kind), "{ty:?}");
+    }
+    // So a closed table schema casts as PLK's ROW does.
+    let closed = Static::Struct(StructType::new(
+        [
+            StructConstraint::Open(false),
+            StructConstraint::Fields([a()].into()),
+        ]
+        .into(),
+    ));
+    let k = closed.kind().unwrap();
+    assert!(can_cast(k, K::Row));
+    assert!(!can_cast(k, K::Struct));
+}
+
+/// The properties a sort with `compare_fn_precedence` relies on, over every pair and triple of
+/// kinds.
+#[test]
+fn compare_fn_precedence_is_a_partial_order() {
+    let unranked = |k: K| matches!(k, K::Unknown | K::Variant);
+    for a in K::ALL.iter().copied() {
+        assert_eq!(compare_fn_precedence(a, a), Some(Ordering::Equal), "{a}");
+        for b in K::ALL.iter().copied() {
+            let ab = compare_fn_precedence(a, b);
+            // `None` exactly when the kinds differ and one has no precedence.
+            assert_eq!(
+                ab.is_none(),
+                a != b && (unranked(a) || unranked(b)),
+                "{a} {b}"
+            );
+            // Antisymmetric, and `Equal` only for equal kinds.
+            assert_eq!(
+                ab,
+                compare_fn_precedence(b, a).map(Ordering::reverse),
+                "{a} {b}"
+            );
+            if a != b {
+                assert_ne!(ab, Some(Ordering::Equal), "{a} {b}");
+            }
+            for c in K::ALL.iter().copied() {
+                // Transitive.
+                if ab == Some(Ordering::Less) && compare_fn_precedence(b, c) == Some(Ordering::Less)
+                {
+                    assert_eq!(
+                        compare_fn_precedence(a, c),
+                        Some(Ordering::Less),
+                        "{a} {b} {c}"
+                    );
+                }
+            }
+        }
+    }
 }
