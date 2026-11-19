@@ -60,6 +60,12 @@ pub enum ShapeKind {
     Bag,
     /// `ROW(fields)`: a closed [`Static::Struct`] (whatever its field constraint, or none). PLK
     /// types every closed struct as a `ROW` (`PlanTyper.kt:1434-1437`, `:1687-1691`).
+    ///
+    /// The kind matches, but only a [`crate::StructConstraint::FieldList`] holds what a PLK
+    /// `ROW` holds: PLK's fields are ordered, may repeat, and are never optional, and its row
+    /// supertype merges fields by position. A `Fields` set ignores order in equality and merges
+    /// equal fields, so a typer must fix an order, and decide what an optional field means,
+    /// before it can give PLK's results for such a struct.
     Row,
     /// `STRUCT`: an open [`Static::Struct`]; PLK's `STRUCT` has no fields
     /// (`PType.java:1182-1184`).
@@ -163,13 +169,17 @@ impl Static {
     /// (and `NULL` / `MISSING` the `Undefined` shape); a user of the lattice must first narrow
     /// such shapes as partiql-lang-kotlin's planner types literals (`RexConverter.kt:195-224`):
     /// an integer literal is `Int32` if it fits in 32 bits, else `Int64` if it fits in 64, else
-    /// `DecimalP(p, 0)`; an exact-numeric literal is `DecimalP` with its own precision and scale,
-    /// rounded to 38 digits; `NULL` and `MISSING` are `Null` and `Missing`.
+    /// `DecimalP(p, 0)`; an exact-numeric literal is `DecimalP` with its own (Java `BigDecimal`)
+    /// precision and scale, rounded to 38 digits, so `0.05` is `DecimalP(1, 2)`, scale above
+    /// precision; `NULL` and `MISSING` are `Null` and `Missing`.
     ///
     /// `Missing` is `Unknown`, which is right for the `MISSING` literal and for an unresolved
-    /// variable (`PlanTyper.kt:1014`). partiql-lang-kotlin types a path step that can never
-    /// succeed as `DYNAMIC` instead (`PlanTyper.kt:194-196`, used at `:1049`, `:1054`), so a
-    /// typer must give such a step the `Dynamic` shape, not `Missing`.
+    /// variable (`PlanTyper.kt:1014`), but partiql-lang-kotlin does not type every expression
+    /// that evaluates to `MISSING` that way. A path step that can never succeed is `DYNAMIC`
+    /// for an index step (`PlanTyper.kt:1049`, `:1054`), a symbol step (`:1131`, `:1136`,
+    /// `:1143`) and a key step with a non-string key (`:1094`), but `UNKNOWN` for a key step on
+    /// a non-struct root or naming a field the row lacks (`:1099`, `:1111`). A typer must follow
+    /// that per step, using the `Dynamic` shape where partiql-lang-kotlin gives `DYNAMIC`.
     pub fn kind(&self) -> Option<ShapeKind> {
         let kind = match self {
             Static::Int | Static::Decimal | Static::DateTime | Static::Graph() => return None,
@@ -222,9 +232,9 @@ impl PartiqlShape {
     /// [`PartiqlShape::Static`] (see [`Static::kind`]), and `None` for
     /// [`PartiqlShape::Undefined`], for the `Static` types listed at [`Static::kind`], and for
     /// [`PartiqlShape::AnyOf`]. partiql-lang-kotlin has no union type: it collapses a set of
-    /// types to the type itself when there is one distinct type, and to `DYNAMIC` otherwise
-    /// (`PlanTyper.anyOf`, `PlanTyper.kt:110-117`), so a typer should do the same before taking
-    /// the kind.
+    /// types to the type itself when there is one distinct type and to `DYNAMIC` when there are
+    /// several (`PlanTyper.anyOf`, `PlanTyper.kt:110-117`, which returns nothing for an empty
+    /// set), so a typer should do the same before taking the kind.
     pub fn kind(&self) -> Option<ShapeKind> {
         match self {
             PartiqlShape::Dynamic => Some(ShapeKind::Dynamic),

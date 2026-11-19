@@ -10,9 +10,10 @@
 //! builtin signatures: PLK's `FnResolver` steps (exact match, dynamic dispatch, best match), the
 //! builtin operators' widening, and the common-supertype rules of CASE, COALESCE and set
 //! operations (`DynamicTyper.getCommonSuperType`, `coerceTypeBase` and `mergeParameterized`,
-//! `DynamicTyper.kt:192-349`). Those rules are directed and depend on type parameters (e.g.
-//! `DECIMAL(5,2)` with `INTEGER` is `DECIMAL(12,2)`, and `DATE` with `TIME` has no supertype), so
-//! neither [`can_coerce`] nor [`TYPE_PRECEDENCE`] can stand in for them.
+//! `DynamicTyper.kt:192-349`). Those rules widen along a directed relation
+//! (`coerceTypeBase`) and depend on type parameters (e.g. `DECIMAL(5,2)` with `INTEGER` is
+//! `DECIMAL(12,2)`, and `DATE` with `TIME` has no supertype), so neither [`can_coerce`] nor
+//! [`TYPE_PRECEDENCE`] can stand in for them.
 
 use crate::ShapeKind;
 use std::cmp::Ordering;
@@ -130,8 +131,9 @@ pub const FN_PRECEDENCE: &[ShapeKind] = &[
 
 /// The precedence of operand kinds used by the builtin operators to pick the wider operand
 /// (e.g. `INTEGER + BIGINT` is computed as `BIGINT`), lowest first. Unlike [`FN_PRECEDENCE`] it
-/// starts with `UNKNOWN` and has no `MAP` (and no `VARIANT`). It is a total order, not a
-/// supertype relation: it ranks `TIME` above `DATE`, which have no common supertype in PLK.
+/// starts with `UNKNOWN` and has no `MAP` (and no `VARIANT`). It orders every kind it lists and
+/// is not a supertype relation: it ranks `TIME` above `DATE`, which have no common supertype
+/// in PLK.
 ///
 /// Port of `TypePrecedence.TYPE_PRECEDENCE`
 /// (`partiql-spi/.../function/builtins/TypePrecedence.kt:11-39`).
