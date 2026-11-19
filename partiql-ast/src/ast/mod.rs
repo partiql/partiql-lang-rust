@@ -507,7 +507,9 @@ pub enum Lit {
     BagLit(AstNode<BagLit>),
     #[visit(skip)]
     ListLit(AstNode<ListLit>),
-    /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
+    /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`;
+    /// an interval literal such as `INTERVAL '1-2' YEAR TO MONTH` is a `TypedLit` of
+    /// [`Type::IntervalType`]
     #[visit(skip)]
     TypedLit(String, Type),
 }
@@ -996,8 +998,47 @@ pub enum Type {
     ListType,
     BagType,
     AnyType,
+    /// `INTERVAL <qualifier>`, e.g. `INTERVAL DAY TO SECOND(3)`
+    IntervalType(IntervalQualifier),
 
     CustomType(CustomType),
+}
+
+/// The `<interval qualifier>` of an interval type or literal (SQL:2023 10.1),
+/// e.g. `DAY(2)`, `SECOND(2, 3)` or `HOUR TO SECOND(3)`. A single field's
+/// `fractional_precision` is only set together with its `precision`, and a range's
+/// `end_fractional_precision` only when its `end` is `SECOND`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum IntervalQualifier {
+    /// A single field: `<field> [(<precision>)]`, or `SECOND [(<precision> [, <fractional precision>])]`
+    Single {
+        field: DatetimeField,
+        precision: Option<u32>,
+        fractional_precision: Option<u32>,
+    },
+    /// `<start field> [(<precision>)] TO <end field>`, where an end field of `SECOND` may have
+    /// a fractional precision: `SECOND [(<fractional precision>)]`
+    Range {
+        start: DatetimeField,
+        start_precision: Option<u32>,
+        end: DatetimeField,
+        end_fractional_precision: Option<u32>,
+    },
+}
+
+/// A datetime field of an interval qualifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum DatetimeField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
 }
 
 #[derive(Clone, Debug, PartialEq)]

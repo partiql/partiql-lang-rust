@@ -16,6 +16,8 @@ use crate::parse::parse_util::{
     struct_to_lit,
     bag_to_lit,
     list_to_lit,
+    datetime_field,
+    interval_qualifier,
     CallSite,
     Attrs,
     Synth
@@ -1425,6 +1427,19 @@ ExprTerm: Synth<ast::Expr> = {
     <s:SubQuery> => Synth::empty(s),
     <lo:@L> <lit:Literal> <hi:@R> => Synth::lit(ast::Expr::Lit( state.node(lit, lo..hi) )),
     <v:VarRefExpr> => Synth::empty(v),
+    // `INTERVAL <sign> <string> <qualifier>`: a minus sign before the string
+    // applies to the literal, a plus sign is dropped
+    <lo:@L> "INTERVAL" <neg:IntervalSign> <ls:@L> <s:"String"> <q:IntervalQualifier> <hi:@R> => {
+        let lit = ast::Lit::TypedLit(s.to_owned(), ast::Type::IntervalType(q));
+        // the literal spans `INTERVAL` too when the sign is dropped
+        let lit = ast::Expr::Lit(state.node(lit, if neg { ls..hi } else { lo..hi }));
+        if neg {
+            Synth::empty(ast::Expr::UniOp(state.node(ast::UniOp{ kind: ast::UniOpKind::Neg, expr: Box::new(lit) }, lo..hi)))
+        } else {
+            // a plus sign changes nothing
+            Synth::lit(lit)
+        }
+    },
     <lo:@L> <c:ExprTermCollection> <hi:@R> => {
         if c.attrs.contains(Attrs::LIT) {
             match c.data {
@@ -1659,12 +1674,14 @@ FunctionArgPositional: ast::AstNode<ast::CallArg> = {
     <lo:@L> "*" <hi:@R> => state.node(ast::CallArg::Star(), lo..hi),
     <lo:@L> <expr:ExprQuery> <hi:@R> => state.node(ast::CallArg::Positional(expr), lo..hi),
     <lo:@L> <ty:TypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
+    <lo:@L> <ty:IntervalTypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
 }
 
 #[inline]
 FunctionArgNamed: ast::AstNode<ast::CallArg> = {
     <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named(ast::CallArgNamed{name, value}), lo..hi),
-    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <ty:IntervalTypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
 }
 
 #[inline]
@@ -1680,7 +1697,9 @@ FunctionArgName: ast::SymbolPrimitive = {
             value: name.to_owned(),
             case: ast::CaseSensitivity::CaseInsensitive
         }
-    }
+    },
+    // a non-reserved keyword may name an argument; the `:` tells the name from a variable
+    <VarNonReservedKeyword>,
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1908,9 +1927,61 @@ TypeName: ast::Type = {
     <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts } ),
 }
 
+// `INTERVAL <qualifier>`
+IntervalTypeName: ast::Type = {
+    "INTERVAL" <q:IntervalQualifier> => ast::Type::IntervalType(q),
+}
+
+// `<interval qualifier>`: `<field> [(<p> [, <s>])]` or `<field> [(<p>)] TO <field> [(<s>)]`;
+// which fields take which precisions is checked by `interval_qualifier`
+IntervalQualifier: ast::IntervalQualifier = {
+    <lo:@L> <f:IntervalField> <p:IntervalPrecision?> <hi:@R> =>?
+        interval_qualifier(f, p, None)
+            .map_err(|msg| lpop::ParseError::User{
+                error: ParseError::SyntaxError(msg.to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+            }),
+    <lo:@L> <f:IntervalField> <p:IntervalPrecision?> "TO" <e:IntervalField> <ep:IntervalPrecision?> <hi:@R> =>?
+        interval_qualifier(f, p, Some((e, ep)))
+            .map_err(|msg| lpop::ParseError::User{
+                error: ParseError::SyntaxError(msg.to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+            }),
+}
+
+// `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE` or `SECOND`, which are not keywords here
+IntervalField: ast::DatetimeField = {
+    <lo:@L> <id:"UnquotedIdent"> <hi:@R> =>? datetime_field(id)
+        .ok_or_else(|| lpop::ParseError::User{
+            error: ParseError::SyntaxError(
+                format!("expected an interval field (YEAR, MONTH, DAY, HOUR, MINUTE or SECOND), found `{id}`")
+                    .to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+        }),
+}
+
+#[inline]
+IntervalSign: bool = {
+    "+" => false,
+    "-" => true,
+}
+
+IntervalPrecision: (u32, Option<u32>) = {
+    "(" <p:IntervalPrecisionValue> <s:("," <IntervalPrecisionValue>)?> ")" => (p, s),
+}
+
+IntervalPrecisionValue: u32 = {
+    // a 32-bit integer
+    <lo:@L> <n:"Int"> <hi:@R> =>? n.parse::<i32>().ok().and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| lpop::ParseError::User{
+            error: ParseError::SyntaxError(
+                "invalid interval precision".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+        }),
+}
+
 #[inline]
 TypedLiteral: ast::Lit = {
     <ty:TypeName> <s:"String"> => ast::Lit::TypedLit(s.to_owned(), ty),
+    // `INTERVAL <string> <qualifier>`; for the
+    // optional sign before the string, see `ExprTerm`
+    "INTERVAL" <s:"String"> <q:IntervalQualifier> => ast::Lit::TypedLit(s.to_owned(), ast::Type::IntervalType(q)),
     // TODO we could support postgres-style literals with the following:
     //<s:"String"> "::" <ty:TypeName> => ast::Lit::TypedLit(s.to_owned(), ty),
 }
@@ -2072,6 +2143,7 @@ FnNonReservedKeyword: ast::SymbolPrimitive = {
 NonReservedKeyword: &'input str = {
     "ANY",
     "SIMPLE",
+    "TO",
     <GraphNonReservedKeyword>
 }
 
@@ -2284,6 +2356,8 @@ extern {
         "TIMESTAMP" => lexer::Token::Timestamp,
         "SIMPLE" => lexer::Token::Simple(<&'input str>),
         "THEN" => lexer::Token::Then,
+        "INTERVAL" => lexer::Token::Interval,
+        "TO" => lexer::Token::To(<&'input str>),
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,

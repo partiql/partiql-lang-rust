@@ -241,3 +241,97 @@ pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstN
         _ => illegal_literal(),
     }
 }
+
+/// The interval field named `name` (case-insensitive), e.g. `DAY`.
+pub(crate) fn datetime_field(name: &str) -> Option<ast::DatetimeField> {
+    use ast::DatetimeField as F;
+    [
+        ("YEAR", F::Year),
+        ("MONTH", F::Month),
+        ("DAY", F::Day),
+        ("HOUR", F::Hour),
+        ("MINUTE", F::Minute),
+        ("SECOND", F::Second),
+    ]
+    .into_iter()
+    .find_map(|(n, f)| n.eq_ignore_ascii_case(name).then_some(f))
+}
+
+/// The largest start precision and end fractional seconds precision of an interval range.
+const MAX_INTERVAL_PRECISION: u32 = 9;
+
+/// The parenthesized `(<precision> [, <fractional precision>])` after an interval field.
+pub(crate) type FieldPrecision = (u32, Option<u32>);
+
+/// Builds an interval qualifier: a single field takes a
+/// precision, and `SECOND` also a fractional precision; in a range, the start field is not
+/// `SECOND` and takes a precision, and the end field takes a (fractional) precision only when
+/// it is `SECOND`. The values are bounded: a single
+/// field's precision is at least 1, and a range's start precision is 1 to 9 and its end
+/// fractional seconds precision 0 to 9. It does not check the order of the fields of a range.
+pub(crate) fn interval_qualifier(
+    start: ast::DatetimeField,
+    start_precision: Option<FieldPrecision>,
+    end: Option<(ast::DatetimeField, Option<FieldPrecision>)>,
+) -> Result<ast::IntervalQualifier, String> {
+    use ast::DatetimeField::Second;
+    match end {
+        None => {
+            let (precision, fractional_precision) = match start_precision {
+                Some((p, s)) => (Some(p), s),
+                None => (None, None),
+            };
+            if fractional_precision.is_some() && start != Second {
+                return Err("only SECOND takes a fractional seconds precision".to_string());
+            }
+            if precision == Some(0) {
+                return Err("an interval field's precision must be at least 1".to_string());
+            }
+            Ok(ast::IntervalQualifier::Single {
+                field: start,
+                precision,
+                fractional_precision,
+            })
+        }
+        Some((end, end_precision)) => {
+            if start == Second {
+                return Err("an interval range cannot start with SECOND".to_string());
+            }
+            let start_precision = match start_precision {
+                Some((_, Some(_))) => {
+                    return Err(
+                        "the start field of an interval range takes one precision".to_string()
+                    )
+                }
+                Some((p, None)) if (1..=MAX_INTERVAL_PRECISION).contains(&p) => Some(p),
+                Some((_, None)) => {
+                    return Err(format!(
+                        "the start precision of an interval range must be 1 to {MAX_INTERVAL_PRECISION}"
+                    ))
+                }
+                None => None,
+            };
+            let end_fractional_precision = match end_precision {
+                None => None,
+                Some((s, None)) if end == Second && s <= MAX_INTERVAL_PRECISION => Some(s),
+                Some((_, None)) if end == Second => {
+                    return Err(format!(
+                        "the fractional seconds precision of an interval range must be 0 to {MAX_INTERVAL_PRECISION}"
+                    ))
+                }
+                Some(_) => {
+                    return Err(
+                        "only an end field of SECOND takes a precision, its fractional seconds precision"
+                            .to_string(),
+                    )
+                }
+            };
+            Ok(ast::IntervalQualifier::Range {
+                start,
+                start_precision,
+                end,
+                end_fractional_precision,
+            })
+        }
+    }
+}

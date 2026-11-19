@@ -538,6 +538,15 @@ impl PrettyDoc for Lit {
             Lit::StructLit(inner) => inner.pretty_doc(arena),
             Lit::BagLit(inner) => inner.pretty_doc(arena),
             Lit::ListLit(inner) => inner.pretty_doc(arena),
+            Lit::TypedLit(s, Type::IntervalType(q)) => {
+                let s = s.pretty_doc(arena);
+                pretty_seperated_doc(
+                    arena.space(),
+                    [arena.text("INTERVAL"), s, q.pretty_doc(arena)],
+                    0,
+                    arena,
+                )
+            }
             Lit::TypedLit(s, ty) => {
                 let ty = ty.pretty_doc(arena);
                 let s = s.pretty_doc(arena);
@@ -581,6 +590,49 @@ impl PrettyDoc for Type {
             Type::ListType => arena.text("LIST"),
             Type::BagType => arena.text("BAG"),
             Type::AnyType => arena.text("ANY"),
+            Type::IntervalType(q) => arena.text("INTERVAL ").append(q.pretty_doc(arena)),
+        }
+    }
+}
+
+impl PrettyDoc for IntervalQualifier {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let field = |f: &DatetimeField, p: &Option<u32>, s: &Option<u32>| {
+            let name = match f {
+                DatetimeField::Year => "YEAR",
+                DatetimeField::Month => "MONTH",
+                DatetimeField::Day => "DAY",
+                DatetimeField::Hour => "HOUR",
+                DatetimeField::Minute => "MINUTE",
+                DatetimeField::Second => "SECOND",
+            };
+            match (p, s) {
+                (Some(p), Some(s)) => format!("{name}({p}, {s})"),
+                (Some(p), None) => format!("{name}({p})"),
+                _ => name.to_string(),
+            }
+        };
+        match self {
+            IntervalQualifier::Single {
+                field: f,
+                precision,
+                fractional_precision,
+            } => arena.text(field(f, precision, fractional_precision)),
+            IntervalQualifier::Range {
+                start,
+                start_precision,
+                end,
+                end_fractional_precision,
+            } => arena.text(format!(
+                "{} TO {}",
+                field(start, start_precision, &None),
+                field(end, end_fractional_precision, &None)
+            )),
         }
     }
 }
@@ -959,13 +1011,14 @@ impl PrettyDoc for CallArg {
         match self {
             CallArg::Star() => arena.text("*"),
             CallArg::Positional(arg) => arg.pretty_doc(arena),
-            CallArg::PositionalType(_) => {
-                todo!("CallArg::PositionalType")
-            }
+            CallArg::PositionalType(ty) => ty.pretty_doc(arena),
             CallArg::Named(arg) => arg.pretty_doc(arena),
-            CallArg::NamedType(_) => {
-                todo!("CallArg::NamedType")
-            }
+            CallArg::NamedType(CallArgNamedType { name, ty }) => pretty_seperated_doc(
+                ":",
+                [name.pretty_doc(arena), ty.pretty_doc(arena)],
+                0,
+                arena,
+            ),
         }
     }
 }

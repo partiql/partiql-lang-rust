@@ -458,6 +458,13 @@ pub enum Token<'input> {
     Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
+    // `INTERVAL` is reserved: `INTERVAL -'1' DAY` must not read as a
+    // subtraction from a variable named `interval`
+    #[regex("(?i:Interval)")]
+    Interval,
+    // `TO` is non-reserved: it may still name a variable
+    #[regex("(?i:To)", |lex| lex.slice())]
+    To(&'input str),
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -566,11 +573,14 @@ pub enum Token<'input> {
 impl Token<'_> {
     #[inline]
     pub fn is_var_non_reserved(&self) -> bool {
-        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
+        matches!(self, Token::Any(_) | Token::Simple(_) | Token::To(_))
+            || self.is_graph_non_reserved()
     }
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
+        // `TO` is left out: it names no special form, and the preprocessor's look-ahead after a
+        // candidate would hide a lexing error that follows it
         matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 

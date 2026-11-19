@@ -202,6 +202,17 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
 
@@ -271,6 +282,356 @@ mod tests {
                               */
                       'b':1} ` "#
             );
+        }
+    }
+
+    mod interval {
+        use super::*;
+        use ast::DatetimeField::*;
+        use ast::IntervalQualifier::{Range, Single};
+
+        fn single(
+            field: ast::DatetimeField,
+            p: Option<u32>,
+            s: Option<u32>,
+        ) -> ast::IntervalQualifier {
+            Single {
+                field,
+                precision: p,
+                fractional_precision: s,
+            }
+        }
+
+        fn range(
+            start: ast::DatetimeField,
+            p: Option<u32>,
+            end: ast::DatetimeField,
+            s: Option<u32>,
+        ) -> ast::IntervalQualifier {
+            Range {
+                start,
+                start_precision: p,
+                end,
+                end_fractional_precision: s,
+            }
+        }
+
+        // `INTERVAL <string> <qualifier>`
+        #[test]
+        fn interval_literal() {
+            for (query, text, qualifier) in [
+                ("INTERVAL '10' YEAR", "10", single(Year, None, None)),
+                ("interval '-3' month", "-3", single(Month, None, None)),
+                ("INTERVAL '5' DAY", "5", single(Day, None, None)),
+                ("INTERVAL '8' HOUR", "8", single(Hour, None, None)),
+                ("INTERVAL '45' MINUTE", "45", single(Minute, None, None)),
+                (
+                    "INTERVAL '10.234' SECOND",
+                    "10.234",
+                    single(Second, None, None),
+                ),
+                ("INTERVAL '10' YEAR (2)", "10", single(Year, Some(2), None)),
+                (
+                    "INTERVAL '10.234' SECOND (2, 3)",
+                    "10.234",
+                    single(Second, Some(2), Some(3)),
+                ),
+                (
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                    "10-3",
+                    range(Year, None, Month, None),
+                ),
+                (
+                    "INTERVAL '10-3' YEAR (2) TO MONTH",
+                    "10-3",
+                    range(Year, Some(2), Month, None),
+                ),
+                (
+                    "INTERVAL '10 3' DAY TO HOUR",
+                    "10 3",
+                    range(Day, None, Hour, None),
+                ),
+                (
+                    "INTERVAL '10 3:4' DAY TO MINUTE",
+                    "10 3:4",
+                    range(Day, None, Minute, None),
+                ),
+                (
+                    "INTERVAL '10 3:4:5.678' DAY TO SECOND",
+                    "10 3:4:5.678",
+                    range(Day, None, Second, None),
+                ),
+                (
+                    "INTERVAL '2 3:4:5.000006' DAY (2) TO SECOND (6)",
+                    "2 3:4:5.000006",
+                    range(Day, Some(2), Second, Some(6)),
+                ),
+                (
+                    "INTERVAL '10:30' HOUR TO MINUTE",
+                    "10:30",
+                    range(Hour, None, Minute, None),
+                ),
+                (
+                    "INTERVAL '3:4.567' MINUTE (2) TO SECOND (3)",
+                    "3:4.567",
+                    range(Minute, Some(2), Second, Some(3)),
+                ),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::Lit(l) => assert_eq!(
+                        l.node,
+                        ast::Lit::TypedLit(text.to_string(), ast::Type::IntervalType(qualifier)),
+                        "{query}"
+                    ),
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            parse!("SELECT INTERVAL '10' YEAR AS i FROM T");
+            parse!("SELECT INTERVAL '1' DAY d FROM T");
+            parse!("SELECT t.a + INTERVAL '1-6' YEAR TO MONTH FROM t WHERE t.b > INTERVAL '5' DAY");
+        }
+
+        // `INTERVAL <qualifier>` as a type
+        #[test]
+        fn interval_type() {
+            let cast_type = |q: &str| match parse_expr(q) {
+                ast::Expr::Call(c) => match &c.node.args[1].node {
+                    ast::CallArg::NamedType(t) => t.ty.clone(),
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            for (query, qualifier) in [
+                ("CAST(t.a AS INTERVAL YEAR)", single(Year, None, None)),
+                (
+                    "CAST(t.a AS INTERVAL MONTH (2))",
+                    single(Month, Some(2), None),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL SECOND (2, 3))",
+                    single(Second, Some(2), Some(3)),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL YEAR TO MONTH)",
+                    range(Year, None, Month, None),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL DAY TO SECOND (9))",
+                    range(Day, None, Second, Some(9)),
+                ),
+                (
+                    "CAST(t.a AS interval hour(2) to second(3))",
+                    range(Hour, Some(2), Second, Some(3)),
+                ),
+            ] {
+                assert_eq!(
+                    cast_type(query),
+                    ast::Type::IntervalType(qualifier),
+                    "{query}"
+                );
+            }
+        }
+
+        // Malformed qualifiers are errors: a missing or unknown field, SECOND as a range start,
+        // a precision where none is allowed or too many, and a precision beyond 32 bits.
+        #[test]
+        fn interval_errors() {
+            for query in [
+                "INTERVAL '1' WEEK",
+                "INTERVAL '1'",
+                "INTERVAL '1' MONTH (2, 3)",
+                "INTERVAL '1' SECOND TO MINUTE",
+                "INTERVAL '1' YEAR TO MONTH (2)",
+                "INTERVAL '1' DAY (2, 3) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND (2, 3)",
+                "INTERVAL '1' DAY (99999999999)",
+                "CAST(t.a AS INTERVAL fortnight)",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
+
+        // `INTERVAL` is reserved; `TO` is non-reserved and still names
+        // a variable, also inside special forms and as a named argument.
+        #[test]
+        fn interval_keywords() {
+            for query in [
+                "to",
+                "SELECT to, t.to FROM t",
+                "SELECT CAST(t.to AS INT) FROM t",
+                "SELECT COUNT(DISTINCT t.to) FROM t",
+                "SELECT SUBSTRING(t.to FROM 2) FROM t",
+                "SELECT TRIM(LEADING 'a' FROM t.to) FROM t",
+                "SELECT f(to: 1) FROM t",
+                // an interval literal after the first token of a special form's argument
+                "SELECT CAST(t.a + INTERVAL '1' DAY AS STRING) FROM t",
+                "SELECT CAST(-INTERVAL '1' DAY AS STRING) FROM t",
+                "SELECT COUNT(DISTINCT t.d + INTERVAL '1' DAY) FROM t",
+                r#"SELECT "interval" FROM t"#,
+            ] {
+                parse!(query);
+            }
+            for query in ["SELECT interval FROM t", "interval - '1'"] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
+
+        // A minus sign before the string applies to the literal: `INTERVAL -'1' DAY` is
+        // `-(INTERVAL '1' DAY)`, the same as a minus sign before INTERVAL; a plus sign is
+        // dropped.
+        #[test]
+        fn interval_signed() {
+            match parse_expr("INTERVAL -'1' DAY") {
+                ast::Expr::UniOp(u) => {
+                    assert_eq!(u.node.kind, ast::UniOpKind::Neg);
+                    assert!(
+                        matches!(*u.node.expr, ast::Expr::Lit(ref l) if matches!(l.node, ast::Lit::TypedLit(_, ast::Type::IntervalType(_)))),
+                        "{u:?}"
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
+            assert_eq!(
+                shape("INTERVAL + '1-2' YEAR TO MONTH"),
+                shape("INTERVAL '1-2' YEAR TO MONTH")
+            );
+            // the minus sign is then the same as one before INTERVAL
+            assert_eq!(shape("INTERVAL -'1' DAY"), shape("-INTERVAL '1' DAY"));
+            parse!("SELECT INTERVAL -'1' DAY AS d FROM t");
+        }
+
+        // Precisions in their allowed ranges: a single
+        // field's precision at least 1, a range's start precision 1 to 9 and its end
+        // fractional precision 0 to 9, and every precision a 32-bit integer.
+        #[test]
+        fn interval_precision_bounds() {
+            for query in [
+                "INTERVAL '1' DAY(0)",
+                "INTERVAL '1' SECOND(0)",
+                "INTERVAL '1' YEAR(0) TO MONTH",
+                "INTERVAL '1' DAY(10) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND(10)",
+                "INTERVAL '1' DAY(3000000000)",
+                "INTERVAL '1' SECOND(2, 3000000000)",
+                "CAST(x AS INTERVAL DAY(0))",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            for query in [
+                "INTERVAL '1' DAY(1)",
+                "INTERVAL '1' DAY(12)",
+                "INTERVAL '1' SECOND(1, 0)",
+                "INTERVAL '1' YEAR(1) TO MONTH",
+                "INTERVAL '1' DAY(9) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND(0)",
+                "INTERVAL '1' DAY TO SECOND(9)",
+            ] {
+                parse!(query);
+            }
+        }
+
+        // `TO` and `INTERVAL` are keywords, so they no longer name an alias, a table or an
+        // EXCLUDE path step unless quoted; these parsed before. `INTERVAL` is also no longer a
+        // path step in an expression, nor a type name by itself.
+        #[test]
+        fn interval_keywords_as_names_need_quotes() {
+            for (bare, quoted) in [
+                ("SELECT a AS to FROM t", r#"SELECT a AS "to" FROM t"#),
+                ("SELECT a to FROM t", r#"SELECT a "to" FROM t"#),
+                ("SELECT a FROM t AS to", r#"SELECT a FROM t AS "to""#),
+                (
+                    "SELECT a FROM t AS x AT to",
+                    r#"SELECT a FROM t AS x AT "to""#,
+                ),
+                (
+                    "SELECT * EXCLUDE t.to FROM t",
+                    r#"SELECT * EXCLUDE t."to" FROM t"#,
+                ),
+                (
+                    "SELECT x FROM t GROUP BY x GROUP AS to",
+                    r#"SELECT x FROM t GROUP BY x GROUP AS "to""#,
+                ),
+                ("CREATE TABLE to", r#"CREATE TABLE "to""#),
+                ("SELECT t.interval FROM t", r#"SELECT t."interval" FROM t"#),
+                ("CAST(x AS INTERVAL)", r#"CAST(x AS "INTERVAL")"#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // A lexing error right after TO is reported, not dropped.
+        #[test]
+        fn to_lex_error_after() {
+            assert!(parse_partiql("SELECT t.to\u{20ac} FROM t").is_err());
+        }
+
+        // Any non-reserved keyword may name a function argument, as an identifier may.
+        #[test]
+        fn non_reserved_keyword_argument_name() {
+            for query in ["f(to: 1)", "f(any: 1)", "f(simple: 1, to: 2)"] {
+                parse!(query);
+            }
+        }
+
+        /// The Debug text of the statement parsed from `q`, without its node ids, so that two
+        /// parses can be compared.
+        fn shape(q: &str) -> String {
+            let debug = format!("{:?}", parse!(q));
+            let mut out = String::with_capacity(debug.len());
+            let mut rest = debug.as_str();
+            while let Some(i) = rest.find("NodeId(") {
+                out.push_str(&rest[..i + "NodeId(".len()]);
+                rest = rest[i + "NodeId(".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+            }
+            out.push_str(rest);
+            out
+        }
+
+        // The pretty-printed literal and type parse back to the same AST.
+        #[test]
+        fn interval_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for (text, expected) in [
+                ("INTERVAL '10' YEAR(2)", "INTERVAL '10' YEAR(2)"),
+                (
+                    "INTERVAL '10.234' SECOND(2, 3)",
+                    "INTERVAL '10.234' SECOND(2, 3)",
+                ),
+                (
+                    "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
+                    "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
+                ),
+                (
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                ),
+                // no field-order check
+                ("INTERVAL '1' MONTH TO YEAR", "INTERVAL '1' MONTH TO YEAR"),
+                ("INTERVAL -'1' DAY", "-INTERVAL '1' DAY"),
+                (
+                    "CAST(t.a AS INTERVAL DAY(2) TO SECOND(3))",
+                    r#"CAST(t.a, "AS":INTERVAL DAY(2) TO SECOND(3))"#,
+                ),
+            ] {
+                let printed = parse!(text).to_pretty_string(80).unwrap();
+                assert_eq!(printed, expected, "{text}");
+                assert_eq!(shape(&printed), shape(text), "{text}");
+            }
+        }
+
+        // A type argument of a call pretty-prints (it panicked in `todo!` before) and parses back.
+        #[test]
+        fn type_argument_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for text in [
+                "CAST(x AS DATE)",
+                "CAST(x AS VARCHAR(5))",
+                "CAST(x AS TIME WITH TIME ZONE)",
+            ] {
+                let printed = parse!(text).to_pretty_string(80).unwrap();
+                assert_eq!(shape(&printed), shape(text), "{text} -> {printed}");
+            }
         }
     }
 
