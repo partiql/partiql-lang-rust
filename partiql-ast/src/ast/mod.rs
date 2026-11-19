@@ -592,7 +592,8 @@ pub enum BinOpKind {
     // String
     Concat,
     // Bitwise
-    /// `&`
+    /// `&`, one of PartiQL Kotlin's generic "other" operators (`exprOperator("&", l, r)`),
+    /// which gives it no meaning; reading it as a bitwise AND is PLR's assumption
     BitwiseAnd,
     // Comparison
     Eq,
@@ -678,13 +679,16 @@ pub struct ExprPair {
     pub second: Box<Expr>,
 }
 
-/// `<value> IS <ty>`, a type test (`IS NOT <ty>` is the `NOT` of it)
+/// `<value> IS [NOT] <ty>`, a type test, as PartiQL Kotlin's `exprIsType(value, type, not)`
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IsType {
     pub value: Box<Expr>,
     #[visit(skip)]
     pub ty: Type,
+    /// `IS NOT <ty>`
+    #[visit(skip)]
+    pub not: bool,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]

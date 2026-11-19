@@ -886,12 +886,12 @@ impl PrettyDoc for IsType {
         D::Doc: Clone,
         A: Clone,
     {
-        let IsType { value, ty } = self;
+        let IsType { value, ty, not } = self;
         let expr = arena
             .intersperse(
                 [
                     value.pretty_doc(arena),
-                    arena.text("IS"),
+                    arena.text(if *not { "IS NOT" } else { "IS" }),
                     ty.pretty_doc(arena),
                 ],
                 arena.space(),

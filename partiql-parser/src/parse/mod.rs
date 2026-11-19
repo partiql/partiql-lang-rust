@@ -330,16 +330,10 @@ mod tests {
                 ("t1 IS MAP<STRING, INT>", false, "MapType"),
                 ("t1 IS NOT MAP<STRING, MAP<STRING, INT>>", true, "MapType"),
             ] {
-                let is = match (not, parse_expr(query)) {
-                    (false, e) => e,
-                    (true, ast::Expr::UniOp(u)) if u.node.kind == ast::UniOpKind::Not => {
-                        *u.node.expr
-                    }
-                    (_, other) => panic!("{query}: {other:?}"),
-                };
-                match is {
+                match parse_expr(query) {
                     ast::Expr::IsType(i) => {
-                        assert!(name(&i.node.ty).contains(ty), "{query}: {:?}", i.node.ty)
+                        assert!(name(&i.node.ty).contains(ty), "{query}: {:?}", i.node.ty);
+                        assert_eq!(i.node.not, not, "{query}");
                     }
                     other => panic!("{query}: {other:?}"),
                 }
@@ -395,13 +389,11 @@ mod tests {
                 other => panic!("{other:?}"),
             };
             for (query, expected) in [
-                ("CAST('abc' AS CHARACTER VARYING)", "CHARACTER VARYING"),
                 (
                     "CAST('abc' AS character varying(5))",
                     "CHARACTER VARYING(1)",
                 ),
                 ("CAST('abc' AS CHAR VARYING(5))", "CHAR VARYING(1)"),
-                ("CAST(1 AS DOUBLE PRECISION)", "DOUBLE PRECISION"),
             ] {
                 assert_eq!(words(&cast_type(query)), expected, "{query}");
             }
@@ -421,10 +413,6 @@ mod tests {
             }
             parse!("SELECT CAST(T.col_map_str_key AS MAP<STRING, BIGINT>) FROM T_ALL_TYPES AS T");
             parse!("SELECT CAST(x AS MAP /* c */ <STRING, INT>) FROM t");
-            match cast_type(r#"CAST(x AS MAP<"s", INT>)"#) {
-                ast::Type::MapType(k, _) => assert_eq!(words(&k), "s"),
-                other => panic!("{other:?}"),
-            }
             // A missing comma between arguments is still reported as such.
             let err = format!("{:?}", parse_partiql("SELECT foo(a b) FROM t"));
             assert!(err.contains("UNQUOTED_IDENT"), "{err}");
@@ -446,6 +434,122 @@ mod tests {
             assert!(parse_partiql("CAST(x AS CHAR VARYING(5, 6))").is_err());
             assert!(parse_partiql("CAST(x AS CHARACTER VARYING(DATE))").is_err());
             assert!(parse_partiql("CAST(1 AS MAP<STRING>)").is_err());
+        }
+
+        /// The Debug text of the statement parsed from `q`, without its node ids.
+        fn shape(q: &str) -> String {
+            let debug = format!("{:?}", parse!(q));
+            let mut out = String::with_capacity(debug.len());
+            let mut rest = debug.as_str();
+            while let Some(i) = rest.find("NodeId(") {
+                out.push_str(&rest[..i + "NodeId(".len()]);
+                rest = rest[i + "NodeId(".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+            }
+            out.push_str(rest);
+            out
+        }
+
+        // The type forms follow PartiQL Kotlin's `type` rule and builder.
+        #[test]
+        fn type_forms_as_plk() {
+            let cast_type = |q: &str| match parse_expr(q) {
+                ast::Expr::Call(c) => match &c.node.args[1].node {
+                    ast::CallArg::NamedType(t) => t.ty.clone(),
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            // The two-word names without a length are the existing `Type` variants.
+            assert_eq!(
+                cast_type("CAST(1 AS DOUBLE PRECISION)"),
+                ast::Type::DoublePrecisionType
+            );
+            assert_eq!(
+                cast_type("CAST('a' AS CHARACTER VARYING)"),
+                ast::Type::CharacterVaryingType
+            );
+            assert_eq!(
+                cast_type("CAST('a' AS char varying)"),
+                ast::Type::CharacterVaryingType
+            );
+            // A map's key and value types are PartiQL Kotlin's types, without BAG or a
+            // user-defined (unknown or quoted) name, and with their own parameters only.
+            for query in [
+                "CAST(x AS MAP<BAG, INT>)",
+                "CAST(x AS MAP<INT, BAG>)",
+                "CAST(x AS MAP<foo, bar>)",
+                r#"CAST(x AS MAP<"s", INT>)"#,
+                "CAST(x AS MAP<INT(3), INT>)",
+                "CAST(x AS MAP<STRING, ZONE>)",
+                "x IS MAP<STRING, TIME(10)>",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            for query in [
+                "CAST(x AS MAP<VARCHAR(3), DECIMAL(5, 2)>)",
+                "CAST(x AS MAP<string, any>)",
+                "CAST(x AS MAP<INT, CHARACTER VARYING(3)>)",
+                "CAST(x AS MAP<DATE, TIME(3) WITH TIME ZONE>)",
+                "CAST(x AS MAP<BIGINT, MAP<SYMBOL, DOUBLE PRECISION>>)",
+            ] {
+                parse!(query);
+            }
+            // A time precision is 0 to 9, as in PartiQL Kotlin.
+            for query in ["x IS TIME(10)", "x IS TIMESTAMP(12) WITH TIME ZONE"] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            parse!("x IS TIME(0)");
+            parse!("x IS TIMESTAMP(9) WITHOUT TIME ZONE");
+            // Two words that are not a type in a named argument are an unexpected token, as
+            // before, not a type error.
+            let err = format!("{:?}", parse_partiql("foo(x: a b)"));
+            assert!(err.contains("UnexpectedToken"), "{err}");
+            assert!(!err.contains("unknown type"), "{err}");
+        }
+
+        // `IS NOT <type>` is one node, as PartiQL Kotlin's `exprIsType(value, type, not)`, so it
+        // pretty-prints and parses back inside other predicates.
+        #[test]
+        fn is_not_type_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for query in [
+                "x IS NOT DATE IS NULL",
+                "NOT x IS NOT MAP<STRING, INT>",
+                "x IS DATE IS NOT NULL",
+            ] {
+                let printed = parse!(query).to_pretty_string(80).unwrap();
+                assert_eq!(shape(&printed), shape(query), "{query} -> {printed}");
+            }
+        }
+
+        // Known limits: `IS <type>` makes `IsType` only for DATE, TIME, TIMESTAMP and MAP; other
+        // types keep the `IS <expr>` tree, and two words after `IS` are a type and an alias.
+        #[test]
+        fn is_type_partial() {
+            for query in ["x IS INT", "x IS STRING", "x IS DECIMAL(5, 2)"] {
+                match parse_expr(query) {
+                    ast::Expr::BinOp(b) => assert_eq!(b.node.kind, ast::BinOpKind::Is, "{query}"),
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            let stmt = format!("{:?}", parse!("SELECT x IS DOUBLE PRECISION FROM t"));
+            assert!(stmt.contains(r#"value: "PRECISION""#), "{stmt}");
+        }
+
+        // MAP is reserved, as in PartiQL Kotlin: `map` needs quotes wherever it names something.
+        // These parsed before.
+        #[test]
+        fn map_as_name_needs_quotes() {
+            for (bare, quoted) in [
+                ("SELECT map FROM t", r#"SELECT "map" FROM t"#),
+                ("SELECT t.map FROM t", r#"SELECT t."map" FROM t"#),
+                ("SELECT map(1) FROM t", r#"SELECT "map"(1) FROM t"#),
+                ("SELECT * FROM map", r#"SELECT * FROM "map""#),
+                ("SELECT x AS map FROM t", r#"SELECT x AS "map" FROM t"#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
         }
 
         // `&` is one of PartiQL Kotlin's "other" operators, at the level of `||`

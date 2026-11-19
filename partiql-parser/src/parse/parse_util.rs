@@ -263,6 +263,15 @@ pub(crate) fn two_word_type(
     if !ok {
         return None;
     }
+    // without a length, the existing `Type` variants, as PartiQL Kotlin's VARCHAR and
+    // DOUBLE_PRECISION
+    if args.is_empty() {
+        return Some(if b == "VARYING" {
+            ast::Type::CharacterVaryingType
+        } else {
+            ast::Type::DoublePrecisionType
+        });
+    }
     let word = |value: String| ast::SymbolPrimitive {
         value,
         case: ast::CaseSensitivity::CaseInsensitive,
@@ -278,8 +287,8 @@ pub(crate) fn two_word_type(
 }
 
 /// Whether `ty`, a [`ast::Type::CustomType`] of type keywords, is a datetime type: `DATE`,
-/// or `TIME` or `TIMESTAMP` with an optional precision and an optional `WITH TIME ZONE` or
-/// `WITHOUT TIME ZONE`.
+/// or `TIME` or `TIMESTAMP` with an optional precision of 0 to 9 and an optional
+/// `WITH TIME ZONE` or `WITHOUT TIME ZONE`.
 pub(crate) fn is_datetime_type(ty: &ast::Type) -> bool {
     let ast::Type::CustomType(ast::CustomType { parts }) = ty else {
         return false;
@@ -287,11 +296,12 @@ pub(crate) fn is_datetime_type(ty: &ast::Type) -> bool {
     let word = |p: &ast::CustomTypePart| match p {
         ast::CustomTypePart::Name(n) => Some((n.value.to_ascii_uppercase(), false)),
         ast::CustomTypePart::Parameterized(n, args) => {
-            let one_int = matches!(
+            // one precision, 0 to 9 as PartiQL Kotlin allows
+            let precision_ok = matches!(
                 args.as_slice(),
-                [ast::CustomTypeParam::Lit(Lit::Int64Lit(_))]
+                [ast::CustomTypeParam::Lit(Lit::Int64Lit(0..=9))]
             );
-            one_int.then(|| (n.value.to_ascii_uppercase(), true))
+            precision_ok.then(|| (n.value.to_ascii_uppercase(), true))
         }
         _ => None,
     };
@@ -310,4 +320,46 @@ pub(crate) fn is_datetime_type(ty: &ast::Type) -> bool {
         Some(&"TIME" | &"TIMESTAMP") => zone_ok && params_ok,
         _ => false,
     }
+}
+
+/// A key or value type of a `MAP<key, value>` written as a name with optional parameters: one of
+/// PartiQL Kotlin's types other than BAG (its `visitTypeMap` rejects BAG and user-defined
+/// types), with the parameters its grammar allows for that name.
+pub(crate) fn map_arg_type(
+    name: ast::SymbolPrimitive,
+    args: Option<Vec<ast::CustomTypeParam>>,
+) -> Result<ast::Type, String> {
+    const NO_PARAMS: &[&str] = &[
+        "BOOL", "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER2", "INT2", "INTEGER", "INT", "INTEGER4",
+        "INT4", "INTEGER8", "INT8", "BIGINT", "REAL", "STRING", "SYMBOL", "ANY", "STRUCT", "TUPLE",
+        "LIST", "ARRAY", "SEXP",
+    ];
+    const ONE_PARAM: &[&str] = &["CHAR", "CHARACTER", "FLOAT", "VARCHAR", "CLOB", "BLOB"];
+    const TWO_PARAMS: &[&str] = &["DECIMAL", "DEC", "NUMERIC"];
+    let upper = name.value.to_ascii_uppercase();
+    let max_params = if NO_PARAMS.contains(&upper.as_str()) {
+        0
+    } else if ONE_PARAM.contains(&upper.as_str()) {
+        1
+    } else if TWO_PARAMS.contains(&upper.as_str()) {
+        2
+    } else {
+        return Err(format!(
+            "`{}` is not a type a MAP may hold as its key or value",
+            name.value
+        ));
+    };
+    let part = match args {
+        None => ast::CustomTypePart::Name(name),
+        Some(args) => {
+            let all_ints = args
+                .iter()
+                .all(|a| matches!(a, ast::CustomTypeParam::Lit(Lit::Int64Lit(_))));
+            if args.len() > max_params || !all_ints {
+                return Err(format!("invalid parameters for the type `{}`", name.value));
+            }
+            ast::CustomTypePart::Parameterized(name, args)
+        }
+    };
+    Ok(ast::Type::CustomType(ast::CustomType { parts: vec![part] }))
 }

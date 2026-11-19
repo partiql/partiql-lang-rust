@@ -17,6 +17,7 @@ use crate::parse::parse_util::{
     bag_to_lit,
     list_to_lit,
     is_datetime_type,
+    map_arg_type,
     two_word_type,
     CallSite,
     Attrs,
@@ -1178,17 +1179,12 @@ ExprPrecedence12: Synth<ast::Expr> = {
     // `IS [NOT] <type>`, as in PartiQL Kotlin's `PredicateIs`
     <lo:@L> <l:ExprPrecedence12> "IS" <ty:IsTypeName> <hi:@R> =>
        Synth::empty(ast::Expr::IsType(
-           state.node(ast::IsType { value: Box::new(l.data), ty }, lo..hi)
+           state.node(ast::IsType { value: Box::new(l.data), ty, not: false }, lo..hi)
        )),
-    <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <ty:IsTypeName> <hi:@R> => {
-       let is = ast::Expr::IsType(state.node(ast::IsType { value: Box::new(l.data), ty }, lo..hi));
-       Synth::empty(ast::Expr::UniOp(
-           state.node(ast::UniOp {
-               kind: ast::UniOpKind::Not,
-               expr: Box::new(is),
-           }, lo..hi)
-       ))
-    },
+    <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <ty:IsTypeName> <hi:@R> =>
+       Synth::empty(ast::Expr::IsType(
+           state.node(ast::IsType { value: Box::new(l.data), ty, not: true }, lo..hi)
+       )),
     <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <r:ExprPrecedence11> <hi:@R> => {
        let is =  ast::Expr::BinOp(
            state.node(ast::BinOp {
@@ -1956,16 +1952,21 @@ ArgTypeName: ast::Type = {
 // identifier is an alias (`SELECT x IS a b`).
 #[inline]
 IsTypeName: ast::Type = {
+    <DatetimeTypeName>,
+    <MapTypeName>,
+}
+
+// `DATE`, or `TIME` or `TIMESTAMP` with an optional precision of 0 to 9 and time zone
+DatetimeTypeName: ast::Type = {
     <lo:@L> <ty:TypeName> <hi:@R> =>? if is_datetime_type(&ty) {
         Ok(ty)
     } else {
         Err(lpop::ParseError::User{
             error: ParseError::SyntaxError(
-                "expected a type: DATE, TIME, TIMESTAMP or MAP<k, v>".to_string()
+                "expected a type: DATE, or TIME or TIMESTAMP with a precision of 0 to 9".to_string()
                     .to_located(BytePosition::from(lo)..BytePosition::from(hi)))
         })
     },
-    <MapTypeName>,
 }
 
 // `MAP<key, value>`, as in PartiQL Kotlin's `TypeMap`
@@ -1976,31 +1977,33 @@ MapTypeName: ast::Type = {
         ast::Type::MapType(Box::new(k), Box::new(ast::Type::MapType(Box::new(k2), Box::new(v2)))),
 }
 
-// The key or value type of a `MAP<key, value>`
+// The key or value type of a `MAP<key, value>`: one of PartiQL Kotlin's types other than BAG and a
+// user-defined (unknown or quoted) name, as its `visitTypeMap` allows
 MapTypeArg: ast::Type = {
-    <TypeName>,
+    <DatetimeTypeName>,
     <MapTypeName>,
     <TwoWordTypeName>,
-    <name:TypeIdent> => ast::Type::CustomType( ast::CustomType{ parts: vec![ast::CustomTypePart::Name(name)] } ),
-    <name:TypeIdent> "(" <args:CommaSepPlus<TypeParam>> ")" =>
-        ast::Type::CustomType( ast::CustomType{ parts: vec![ast::CustomTypePart::Parameterized(name, args)] } ),
+    <lo:@L> <name:TypeIdent> <args:("(" <CommaSepPlus<TypeParam>> ")")?> <hi:@R> =>? map_arg_type(name, args)
+        .map_err(|msg| lpop::ParseError::User{
+            error: ParseError::SyntaxError(msg.to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+        }),
 }
 
 #[inline]
 TypeIdent: ast::SymbolPrimitive = {
     <id:"UnquotedIdent"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
-    <id:"QuotedIdent"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
     <id:"ANY"> => ast::SymbolPrimitive { value: id.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
 }
 
 // `CHARACTER VARYING [(n)]`, `CHAR VARYING [(n)]` and `DOUBLE PRECISION`, the SQL type names
 // made of two words that are not keywords here
 TwoWordTypeName: ast::Type = {
-    <lo:@L> <a:"UnquotedIdent"> <b:"UnquotedIdent"> <args:("(" <CommaSepPlus<TypeParam>> ")")?> <hi:@R> =>?
+    <a:"UnquotedIdent"> <bl:@L> <b:"UnquotedIdent"> <br:@R> <args:("(" <CommaSepPlus<TypeParam>> ")")?> =>?
+        // two words that are no type: the second is an unexpected token, as without this rule
         two_word_type(a, b, args.unwrap_or_default())
-            .ok_or_else(|| lpop::ParseError::User{
-                error: ParseError::SyntaxError(
-                    format!("unknown type `{a} {b}`").to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+            .ok_or(lpop::ParseError::UnrecognizedToken{
+                token: (bl, lexer::Token::UnquotedIdent(b), br),
+                expected: vec![],
             }),
 }
 
