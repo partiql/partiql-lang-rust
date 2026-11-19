@@ -110,16 +110,16 @@ fn category(tok: &Token<'_>) -> Category {
         All | Asc | And | As | At | Between | By | Case | Columns | Create | Cross | Cycle
         | Date | Desc | Distinct | Element | Else | End | Escape | Except | Exclude | Export
         | First | For | Full | From | Group | Groups | Having | In | Inner | Insert | Into | Is
-        | Intersect | Join | Keep | Last | Lateral | Left | Like | Limit | Match | Natural | No
-        | Not | Nulls | Offset | On | One | Or | Order | Outer | Path | Partial | Per | Pivot
-        | Preserve | Recursive | Repeatable | Right | Row | Select | Search | Table | Time
-        | Timestamp | Then | Union | Unpivot | Using | Value | Values | When | Where | With
-        | Without | Zone | AllDifferent | BindingCount | ElementId | ElementNumber | Graph
-        | GraphTable | MatchNum | PathLength | PathName | PropertyExists | Same => {
-            Category::Keyword
-        }
+        | Intersect | Interval | Join | Keep | Last | Lateral | Left | Like | Limit | Match
+        | Natural | No | Not | Nulls | Offset | On | One | Or | Order | Outer | Path | Partial
+        | Per | Pivot | Preserve | Recursive | Repeatable | Right | Row | Select | Search
+        | Table | Time | Timestamp | Then | Union | Unpivot | Using | Value | Values | When
+        | Where | With | Without | Zone | AllDifferent | BindingCount | ElementId
+        | ElementNumber | Graph | GraphTable | MatchNum | PathLength | PathName
+        | PropertyExists | Same => Category::Keyword,
         Any(_)
         | Simple(_)
+        | To(_)
         | Acyclic(_)
         | Bindings(_)
         | Bound(_)

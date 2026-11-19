@@ -202,6 +202,17 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
 
@@ -271,6 +282,245 @@ mod tests {
                               */
                       'b':1} ` "#
             );
+        }
+    }
+
+    mod interval {
+        use super::*;
+        use ast::DatetimeField::*;
+        use ast::IntervalQualifier::{Range, Single};
+
+        fn single(
+            field: ast::DatetimeField,
+            p: Option<u32>,
+            s: Option<u32>,
+        ) -> ast::IntervalQualifier {
+            Single {
+                field,
+                precision: p,
+                fractional_precision: s,
+            }
+        }
+
+        fn range(
+            start: ast::DatetimeField,
+            p: Option<u32>,
+            end: ast::DatetimeField,
+            s: Option<u32>,
+        ) -> ast::IntervalQualifier {
+            Range {
+                start,
+                start_precision: p,
+                end,
+                end_fractional_precision: s,
+            }
+        }
+
+        // `INTERVAL <string> <qualifier>`, as in PartiQL Kotlin's `intervalLiteral`
+        #[test]
+        fn interval_literal() {
+            for (query, text, qualifier) in [
+                ("INTERVAL '10' YEAR", "10", single(Year, None, None)),
+                ("interval '-3' month", "-3", single(Month, None, None)),
+                ("INTERVAL '5' DAY", "5", single(Day, None, None)),
+                ("INTERVAL '8' HOUR", "8", single(Hour, None, None)),
+                ("INTERVAL '45' MINUTE", "45", single(Minute, None, None)),
+                (
+                    "INTERVAL '10.234' SECOND",
+                    "10.234",
+                    single(Second, None, None),
+                ),
+                ("INTERVAL '10' YEAR (2)", "10", single(Year, Some(2), None)),
+                (
+                    "INTERVAL '10.234' SECOND (2, 3)",
+                    "10.234",
+                    single(Second, Some(2), Some(3)),
+                ),
+                (
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                    "10-3",
+                    range(Year, None, Month, None),
+                ),
+                (
+                    "INTERVAL '10-3' YEAR (2) TO MONTH",
+                    "10-3",
+                    range(Year, Some(2), Month, None),
+                ),
+                (
+                    "INTERVAL '10 3' DAY TO HOUR",
+                    "10 3",
+                    range(Day, None, Hour, None),
+                ),
+                (
+                    "INTERVAL '10 3:4' DAY TO MINUTE",
+                    "10 3:4",
+                    range(Day, None, Minute, None),
+                ),
+                (
+                    "INTERVAL '10 3:4:5.678' DAY TO SECOND",
+                    "10 3:4:5.678",
+                    range(Day, None, Second, None),
+                ),
+                (
+                    "INTERVAL '2 3:4:5.000006' DAY (2) TO SECOND (6)",
+                    "2 3:4:5.000006",
+                    range(Day, Some(2), Second, Some(6)),
+                ),
+                (
+                    "INTERVAL '10:30' HOUR TO MINUTE",
+                    "10:30",
+                    range(Hour, None, Minute, None),
+                ),
+                (
+                    "INTERVAL '3:4.567' MINUTE (2) TO SECOND (3)",
+                    "3:4.567",
+                    range(Minute, Some(2), Second, Some(3)),
+                ),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::Lit(l) => assert_eq!(
+                        l.node,
+                        ast::Lit::TypedLit(text.to_string(), ast::Type::IntervalType(qualifier)),
+                        "{query}"
+                    ),
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            parse!("SELECT INTERVAL '10' YEAR AS i FROM T");
+            parse!("SELECT INTERVAL '1' DAY d FROM T");
+            parse!("SELECT t.a + INTERVAL '1-6' YEAR TO MONTH FROM t WHERE t.b > INTERVAL '5' DAY");
+        }
+
+        // `INTERVAL <qualifier>` as a type, as in PartiQL Kotlin's `intervalType`
+        #[test]
+        fn interval_type() {
+            let cast_type = |q: &str| match parse_expr(q) {
+                ast::Expr::Call(c) => match &c.node.args[1].node {
+                    ast::CallArg::NamedType(t) => t.ty.clone(),
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            for (query, qualifier) in [
+                ("CAST(t.a AS INTERVAL YEAR)", single(Year, None, None)),
+                (
+                    "CAST(t.a AS INTERVAL MONTH (2))",
+                    single(Month, Some(2), None),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL SECOND (2, 3))",
+                    single(Second, Some(2), Some(3)),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL YEAR TO MONTH)",
+                    range(Year, None, Month, None),
+                ),
+                (
+                    "CAST(t.a AS INTERVAL DAY TO SECOND (9))",
+                    range(Day, None, Second, Some(9)),
+                ),
+                (
+                    "CAST(t.a AS interval hour(2) to second(3))",
+                    range(Hour, Some(2), Second, Some(3)),
+                ),
+            ] {
+                assert_eq!(
+                    cast_type(query),
+                    ast::Type::IntervalType(qualifier),
+                    "{query}"
+                );
+            }
+        }
+
+        // Precisions PartiQL Kotlin's grammar does not allow, and unknown fields, are errors.
+        #[test]
+        fn interval_errors() {
+            for query in [
+                "INTERVAL '1' WEEK",
+                "INTERVAL '1'",
+                "INTERVAL '1' MONTH (2, 3)",
+                "INTERVAL '1' SECOND TO MINUTE",
+                "INTERVAL '1' YEAR TO MONTH (2)",
+                "INTERVAL '1' DAY (2, 3) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND (2, 3)",
+                "INTERVAL '1' DAY (99999999999)",
+                "CAST(t.a AS INTERVAL fortnight)",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
+
+        // `INTERVAL` is reserved, as in PartiQL Kotlin; `TO` is non-reserved and still names
+        // a variable, also inside special forms and as a named argument.
+        #[test]
+        fn interval_keywords() {
+            for query in [
+                "to",
+                "SELECT to, t.to FROM t",
+                "SELECT CAST(t.to AS INT) FROM t",
+                "SELECT COUNT(DISTINCT t.to) FROM t",
+                "SELECT SUBSTRING(t.to FROM 2) FROM t",
+                "SELECT TRIM(LEADING 'a' FROM t.to) FROM t",
+                "SELECT f(to: 1) FROM t",
+                // an interval literal after the first token of a special form's argument
+                "SELECT CAST(t.a + INTERVAL '1' DAY AS STRING) FROM t",
+                "SELECT CAST(-INTERVAL '1' DAY AS STRING) FROM t",
+                "SELECT COUNT(DISTINCT t.d + INTERVAL '1' DAY) FROM t",
+                r#"SELECT "interval" FROM t"#,
+            ] {
+                parse!(query);
+            }
+            for query in ["SELECT interval FROM t", "interval - '1'"] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+        }
+
+        // A sign before the string applies to the literal, as `INTERVAL -'1' DAY` in
+        // PartiQL Kotlin's `intervalLiteral`.
+        #[test]
+        fn interval_signed() {
+            for (query, kind) in [
+                ("INTERVAL -'1' DAY", ast::UniOpKind::Neg),
+                ("INTERVAL + '1-2' YEAR TO MONTH", ast::UniOpKind::Pos),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::UniOp(u) => {
+                        assert_eq!(u.node.kind, kind, "{query}");
+                        assert!(
+                            matches!(*u.node.expr, ast::Expr::Lit(ref l) if matches!(l.node, ast::Lit::TypedLit(_, ast::Type::IntervalType(_)))),
+                            "{query}"
+                        );
+                    }
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            parse!("SELECT INTERVAL -'1' DAY AS d FROM t");
+        }
+
+        // The pretty-printed literal and type parse back to the same AST.
+        #[test]
+        fn interval_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for text in [
+                "INTERVAL '10' YEAR(2)",
+                "INTERVAL '10.234' SECOND(2, 3)",
+                "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
+                "INTERVAL '10-3' YEAR TO MONTH",
+            ] {
+                let lit = parse_expr(text);
+                let printed = lit.to_pretty_string(80).unwrap();
+                assert_eq!(printed, text);
+            }
+            // a CAST to an interval type pretty-prints (a type argument panicked before)
+            let printed = parse!("CAST(t.a AS INTERVAL DAY(2) TO SECOND(3))")
+                .to_pretty_string(80)
+                .unwrap();
+            assert!(
+                printed.contains("INTERVAL DAY(2) TO SECOND(3)"),
+                "{printed}"
+            );
+            let reprinted = parse!(&printed).to_pretty_string(80).unwrap();
+            assert_eq!(reprinted, printed);
         }
     }
 
