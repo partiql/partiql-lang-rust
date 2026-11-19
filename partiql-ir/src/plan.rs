@@ -1,5 +1,4 @@
-//! The plan root (`Plan.java:8`, `Action.java:9`, `Version.java:10`, relative to
-//! `partiql-plan/src/main/java/org/partiql/plan/` in partiql-lang-kotlin v1.6.1).
+//! The plan root: a version and the action the plan performs.
 
 use crate::rex::Rex;
 

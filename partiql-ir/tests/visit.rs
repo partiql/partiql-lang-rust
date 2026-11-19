@@ -11,8 +11,8 @@ fn kinds<'a>(n: &TreeNode<'a>, out: &mut BTreeSet<&'static str>) {
     n.children.iter().for_each(|(_, c)| kinds(c, out));
 }
 
-/// partiql-lang-kotlin v1.6.1's public `org.partiql.plan.rel` and `.rex` classes.
-const PLK_NODES: [&str; 44] = [
+/// The plan's 18 relational operator and 26 expression kinds.
+const PLAN_NODES: [&str; 44] = [
     "RelAggregate",
     "RelCorrelate",
     "RelDistinct",
@@ -60,18 +60,18 @@ const PLK_NODES: [&str; 44] = [
 ];
 
 #[test]
-fn every_node_plan_covers_the_plk_node_set() {
+fn every_node_plan_covers_the_node_set() {
     let plan = every_node();
     let mut seen = BTreeSet::new();
     kinds(&tree(&plan), &mut seen);
-    let missing: Vec<_> = PLK_NODES.iter().filter(|k| !seen.contains(*k)).collect();
+    let missing: Vec<_> = PLAN_NODES.iter().filter(|k| !seen.contains(*k)).collect();
     assert!(missing.is_empty(), "missing {missing:?}");
     let extra: Vec<_> = seen
         .iter()
         .filter(|k| (k.starts_with("Rex") || k.starts_with("Rel")) && !k.contains('.'))
-        .filter(|k| !PLK_NODES.contains(k))
+        .filter(|k| !PLAN_NODES.contains(k))
         .collect();
-    assert!(extra.is_empty(), "not a PLK node {extra:?}");
+    assert!(extra.is_empty(), "not a plan node {extra:?}");
 }
 
 fn count_sources(n: &TreeNode<'_>) -> usize {

@@ -150,11 +150,10 @@ fn accepts_undefined_where_absent_values_flow() {
     assert_eq!(validate(&plan), Ok(()));
 }
 
-/// What PLK produces around absent values: a `NULL` typed as the `CASE`/`COALESCE` supertype
-/// (`DynamicTyper.kt:107`), and a coercion cast whose target nests `UNKNOWN` (`[NULL]` in a set
-/// operation).
+/// Typed plans around absent values: a `NULL` typed as the `CASE`/`COALESCE` supertype, and a
+/// coercion cast whose target nests `Undefined` (`[NULL]` in a set operation).
 #[test]
-fn accepts_plk_typed_absent_literals_and_nested_undefined_cast_targets() {
+fn accepts_typed_absent_literals_and_nested_undefined_cast_targets() {
     use partiql_value::Value;
     let undef = || PartiqlShape::Undefined;
     let arr = || b().new_array_of(undef());
@@ -270,7 +269,7 @@ fn checks_every_attached_shape() {
 }
 
 #[test]
-fn rejects_shapes_without_a_plk_counterpart() {
+fn rejects_shapes_outside_the_type_set() {
     let optional = b().new_struct(StructType::new_row([StructField::new_optional("o", int())]));
     let closed_set = b().new_struct(StructType::new(
         [
@@ -381,10 +380,10 @@ fn rejects_an_exclusion_without_items() {
     );
 }
 
-/// PLK names window functions after the last fields of the window's input, possibly fewer
-/// names than functions (`PlanTransform.kt:280`); such a window is valid.
+/// Window bindings taken from the last fields of the window's input, possibly fewer names than
+/// functions: such a window is valid.
 #[test]
-fn accepts_window_bindings_as_plk_derives_them() {
+fn accepts_window_bindings_from_the_input_schema() {
     let scan = Rel::scan(rel_type(&[("t", dynamic())]), Rex::var(dynamic(), 0, 0));
     let rank = || {
         partiql_ir::WindowFunction::new(
@@ -486,7 +485,7 @@ fn cast_check_compares_shapes_not_their_construction() {
     );
 }
 
-/// Only `StructType::new_any()` stands for PLK's `STRUCT`.
+/// Only `StructType::new_any()` stands for `STRUCT`.
 #[test]
 fn only_the_canonical_open_struct_is_accepted() {
     let open = b().new_struct(StructType::new(
@@ -506,7 +505,7 @@ fn only_the_canonical_open_struct_is_accepted() {
     );
 }
 
-/// A closed, ordered struct with extra constraints is not a PLK ROW.
+/// A closed, ordered struct with extra constraints is not a `ROW`.
 #[test]
 fn rejects_a_row_with_extra_constraints() {
     let mixed = b().new_struct(StructType::new(
@@ -585,15 +584,15 @@ fn present_value_nodes_reject_undefined() {
     )));
 }
 
-/// Nodes PLK legitimately types `UNKNOWN`, or whose parts it types `UNKNOWN`, are accepted.
+/// Nodes legitimately typed `Undefined`, or whose parts are typed `Undefined`, are accepted.
 #[test]
-fn accepts_plk_legal_undefined_placements() {
+fn accepts_legal_undefined_placements() {
     use partiql_value::Value;
     let u = || PartiqlShape::Undefined;
     let null = || Rex::lit(u(), Value::Null);
     let scan = || Rel::scan(rel_type(&[("t", dynamic())]), Rex::var(dynamic(), 0, 0));
     let nodes = vec![
-        // A NULL map value: MAP<STRING, UNKNOWN>.
+        // A NULL map value: MAP<STRING, Undefined>.
         Rex::map(
             b().new_map(string(), u()).unwrap(),
             string(),
@@ -611,7 +610,7 @@ fn accepts_plk_legal_undefined_placements() {
         ),
         Rex::coalesce(u(), vec![null(), null()]),
         Rex::null_if(u(), null(), null()),
-        // A MISSING branch typed as the CASE supertype (`DynamicTyper.kt:108`).
+        // A MISSING branch typed as the CASE supertype.
         Rex::case(
             int(),
             None,
@@ -629,8 +628,8 @@ fn accepts_plk_legal_undefined_placements() {
 }
 
 /// partiql-types follows the MAP type RFC: a key that is or contains `Undefined` (NULL and
-/// MISSING keys) has no map type, so a `RexMap` declaring one is rejected (PLK would type
-/// `MAP{NULL: 1}` as `MAP<UNKNOWN, INT>`).
+/// MISSING keys) has no map type, so a `RexMap` declaring one (e.g. for `MAP{NULL: 1}`) is
+/// rejected.
 #[test]
 fn rejects_a_map_with_an_undefined_key() {
     use partiql_value::Value;
@@ -653,12 +652,11 @@ fn rejects_a_map_with_an_undefined_key() {
     );
 }
 
-/// PLK produces absent literals with a concrete type in several places, so they are accepted
-/// anywhere: e.g. the INT length NULL of `x IS VARCHAR` (`RexConverter.kt:1392`), and a CASE
-/// folded into its first branch, leaving a retyped NULL with no CASE parent
-/// (`PlanTyper.kt:1296`).
+/// Absent literals with a concrete type occur in several places, so they are accepted anywhere:
+/// e.g. the INT length NULL of `x IS VARCHAR`, and a CASE folded into its first branch, leaving
+/// a retyped NULL with no CASE parent.
 #[test]
-fn accepts_typed_absent_literals_wherever_plk_makes_them() {
+fn accepts_typed_absent_literals_anywhere() {
     use partiql_ir::{QualifiedName, RoutineRef};
     use partiql_value::Value;
     let is_varchar = RoutineRef::new(

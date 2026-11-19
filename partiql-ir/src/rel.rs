@@ -1,8 +1,8 @@
 //! Typed relational operators (`Rel`).
 //!
-//! One [`RelOp`] variant per public `Rel*` class of partiql-lang-kotlin v1.6.1's
-//! `org.partiql.plan.rel` package; each variant cites its class as `rel/<Class>.java:<line>`,
-//! relative to `partiql-plan/src/main/java/org/partiql/plan/`.
+//! One [`RelOp`] variant per kind of relational operator: scan, iterate, unpivot, filter,
+//! project, join, correlate, aggregate, distinct, sort, limit, offset, union, intersect,
+//! except, EXCLUDE, window and WITH.
 
 use crate::refs::RoutineRef;
 use crate::rex::Rex;
@@ -18,7 +18,6 @@ pub struct Rel {
 }
 
 /// The schema of a [`Rel`]: its fields in order, and whether its rows are ordered.
-/// `rel/RelType.java:9`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelType {
     fields: Vec<RelField>,
@@ -48,7 +47,7 @@ impl RelType {
     }
 }
 
-/// A named field of a [`RelType`] (partiql-lang-kotlin's `PTypeField`).
+/// A named field of a [`RelType`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelField {
     name: String,
@@ -80,40 +79,36 @@ impl RelField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RelOp {
-    /// `GROUP BY` and aggregation: `measures` then `groups`. `rel/RelAggregate.java:33`
+    /// `GROUP BY` and aggregation: `measures` then `groups`.
     #[non_exhaustive]
     Aggregate {
         input: Box<Rel>,
         measures: Vec<Measure>,
         groups: Vec<Rex>,
     },
-    /// A lateral join: `right` may refer to `left`'s fields. `rel/RelCorrelate.java:27`
+    /// A lateral join: `right` may refer to `left`'s fields.
     #[non_exhaustive]
     Correlate {
         left: Box<Rel>,
         right: Box<Rel>,
         join_type: JoinType,
     },
-    /// `rel/RelDistinct.java:12`
     #[non_exhaustive]
     Distinct { input: Box<Rel> },
-    /// `rel/RelExcept.java:12`
     #[non_exhaustive]
     Except {
         left: Box<Rel>,
         right: Box<Rel>,
         all: bool,
     },
-    /// `EXCLUDE` paths. `rel/RelExclude.java:13`
+    /// `EXCLUDE` paths.
     #[non_exhaustive]
     Exclude {
         input: Box<Rel>,
         exclusions: Vec<Exclusion>,
     },
-    /// `rel/RelFilter.java:13`
     #[non_exhaustive]
     Filter { input: Box<Rel>, predicate: Rex },
-    /// `rel/RelIntersect.java:12`
     #[non_exhaustive]
     Intersect {
         left: Box<Rel>,
@@ -121,10 +116,8 @@ pub enum RelOp {
         all: bool,
     },
     /// Iterates a collection, binding each element (`FROM x AS v` over a non-table value).
-    /// `rel/RelIterate.java:13`
     #[non_exhaustive]
     Iterate { rex: Rex },
-    /// `rel/RelJoin.java:20`
     #[non_exhaustive]
     Join {
         left: Box<Rel>,
@@ -132,40 +125,35 @@ pub enum RelOp {
         condition: Rex,
         join_type: JoinType,
     },
-    /// `rel/RelLimit.java:13`
     #[non_exhaustive]
     Limit { input: Box<Rel>, limit: Rex },
-    /// `rel/RelOffset.java:13`
     #[non_exhaustive]
     Offset { input: Box<Rel>, offset: Rex },
-    /// `rel/RelProject.java:13`
     #[non_exhaustive]
     Project {
         input: Box<Rel>,
         projections: Vec<Rex>,
     },
-    /// Scans a collection, binding each element. `rel/RelScan.java:13`
+    /// Scans a collection, binding each element.
     #[non_exhaustive]
     Scan { rex: Rex },
-    /// `rel/RelSort.java:13`
     #[non_exhaustive]
     Sort {
         input: Box<Rel>,
         collations: Vec<Collation>,
     },
-    /// `rel/RelUnion.java:12`
     #[non_exhaustive]
     Union {
         left: Box<Rel>,
         right: Box<Rel>,
         all: bool,
     },
-    /// `UNPIVOT`: binds each (value, key) of a struct. `rel/RelUnpivot.java:13`
+    /// `UNPIVOT`: binds each (value, key) of a struct.
     #[non_exhaustive]
     Unpivot { rex: Rex },
     /// Window functions over `input`, partitioned by `partitions` and sorted by `collations`;
-    /// `bindings[i]` names the output of `functions[i]`. Deprecated in partiql-lang-kotlin
-    /// (experimental). `rel/RelWindow.java:29`
+    /// `bindings` name the functions' outputs; a typer may take them from the last field names
+    /// of the input schema, so there can be fewer bindings than functions. Experimental.
     #[non_exhaustive]
     Window {
         input: Box<Rel>,
@@ -175,7 +163,7 @@ pub enum RelOp {
         collations: Vec<Collation>,
         partitions: Vec<Rex>,
     },
-    /// `WITH name AS (..), .. input`. `rel/RelWith.java:19`
+    /// `WITH name AS (..), .. input`.
     #[non_exhaustive]
     With {
         input: Box<Rel>,
@@ -183,7 +171,7 @@ pub enum RelOp {
     },
 }
 
-/// The join type of [`RelOp::Join`] and [`RelOp::Correlate`] (`JoinType.java:10`).
+/// The join type of [`RelOp::Join`] and [`RelOp::Correlate`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum JoinType {
@@ -193,7 +181,7 @@ pub enum JoinType {
     Full,
 }
 
-/// A sort key (`Collation.java:11`).
+/// A sort key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Collation {
     column: Rex,
@@ -223,7 +211,6 @@ impl Collation {
     }
 }
 
-/// `Collation.java:34`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Order {
@@ -231,7 +218,6 @@ pub enum Order {
     Desc,
 }
 
-/// `Collation.java:71`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Nulls {
@@ -239,7 +225,7 @@ pub enum Nulls {
     Last,
 }
 
-/// An aggregation of [`RelOp::Aggregate`] (`rel/RelAggregate.java:134`).
+/// An aggregation of [`RelOp::Aggregate`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measure {
     agg: RoutineRef,
@@ -270,7 +256,7 @@ impl Measure {
     }
 }
 
-/// One `EXCLUDE` path: a variable and the steps below it (`Exclusion.kt:8`).
+/// One `EXCLUDE` path: a variable and the steps below it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exclusion {
     var: Rex,
@@ -293,7 +279,7 @@ impl Exclusion {
     }
 }
 
-/// A step of an [`Exclusion`] path and the steps below it (`Exclusion.kt:60-210`).
+/// A step of an [`Exclusion`] path and the steps below it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ExclusionItem {
@@ -358,7 +344,7 @@ impl ExclusionItem {
     }
 }
 
-/// A window function call of [`RelOp::Window`] (`WindowFunctionNode.java:14`).
+/// A window function call of [`RelOp::Window`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowFunction {
     signature: WindowSignature,
@@ -380,7 +366,7 @@ impl WindowFunction {
     }
 }
 
-/// The signature of a [`WindowFunction`] (`WindowFunctionSignature.java:14`).
+/// The signature of a [`WindowFunction`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowSignature {
     name: String,
@@ -420,7 +406,7 @@ impl WindowSignature {
     }
 }
 
-/// A `name AS (representation)` element of [`RelOp::With`] (`WithListElement.java:15`).
+/// A `name AS (representation)` element of [`RelOp::With`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithElement {
     name: String,
@@ -618,7 +604,7 @@ impl Rel {
         Rel::from_parts(ty, RelOp::Unpivot { rex })
     }
 
-    /// Argument order as partiql-lang-kotlin's `RelWindow.create` (`rel/RelWindow.java:41`).
+    /// Arguments after the schema: name, input, bindings, functions, collations, partitions.
     pub fn window(
         ty: RelType,
         name: Option<String>,

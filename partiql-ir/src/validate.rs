@@ -1,53 +1,49 @@
 //! Invariants of a typed plan produced by the typed planner.
 //!
-//! The typed planner matches partiql-lang-kotlin's (v1.6.1) typing exactly, whose types have no
-//! unions, no nullability and no identity. So in its output every attached shape, and every
-//! shape nested in one,
+//! The typed planner's types have no unions, no nullability and no identity. So in its output
+//! every attached shape, and every shape nested in one,
 //! - is built without a node id (`PartiqlNoIdShapeBuilder`, id 0), so that equality is
 //!   structural;
-//! - is not an `AnyOf` union (partiql-lang-kotlin collapses unions to `DYNAMIC`);
+//! - is not an `AnyOf` union (unions are typed `DYNAMIC`);
 //! - is nullable;
-//! - has a partiql-lang-kotlin counterpart: not `Int` (unbounded), `Decimal` (unparameterized),
+//! - is in the typed planner's type set: not `Int` (unbounded), `Decimal` (unparameterized),
 //!   `DateTime` or `Graph`; a struct is a row (`ROW`) or `StructType::new_any()` (`STRUCT`),
 //!   and has no optional fields. So a typer normalizes catalog schemas (e.g. an open struct
 //!   with known fields) to these forms before it puts them in a plan.
 //!
-//! `Undefined` is the bottom type, "no present value" (partiql-lang-kotlin's `UNKNOWN`). `NULL` and
-//! `MISSING` are absent values, not types: the typer types a `NULL` or `MISSING` literal
-//! `Undefined`, and a literal typed `Undefined` must hold an absent value. The other direction is
-//! not checked: an absent-value literal may carry a concrete type, because partiql-lang-kotlin
-//! produces such literals in several places that a positional rule would have to track (the
-//! `NULL` / `MISSING` branches of `CASE` and arguments of `COALESCE`, retyped as the supertype by
-//! `DynamicTyper.kt:107-108`, even after a constant `CASE` is folded into its first branch,
-//! `PlanTyper.kt:1296`; the `INT` length `NULL` of `x IS VARCHAR`, `RexConverter.kt:1392`). The
-//! typer types the `NULL` and `MISSING` literals a query writes `Undefined`.
-//! `Undefined` may appear wherever an absent value's type flows: on an expression that can only
-//! produce absent values (a variable or path reading one, a supertype of only absent values,
-//! `PlanTyper.kt:134-136`), nested in rows, collections and map values (`SELECT NULL AS a`,
-//! `[NULL]`; not map keys, see below), in schemas, in resolved routine signatures
-//! (partiql-lang-kotlin resolves `upper(NULL)` with an `UNKNOWN` parameter, `FnUpper.kt:49`), and
-//! nested in a cast target (a set operation or map constructor coerces `NULL` to the supertype,
-//! e.g. `ARRAY<UNKNOWN>`). It may not be a cast target itself, nor the type of a constructor, a
-//! table reference, a non-scalar subquery or `EXISTS`/`UNIQUE`, which always produce a present
-//! value. An absent value is `Datum::is_absent`, so a null variant counts. A `RexError` (a failed
-//! expression) is typed `Dynamic`, never `Undefined`. partiql-lang-kotlin types some errors
-//! `UNKNOWN` (`PlanTyper.kt:1014,1099,1111`) and that `UNKNOWN` propagates into parents (e.g. a row
-//! field of an unresolved path), so a typer that matches it keeps PLK's type for those parents: a
-//! parent's `Undefined` may come from a `Dynamic` error child. A conformance comparison maps the
-//! error nodes themselves. Not checked: a literal whose type only nests `Undefined` against the
-//! value's elements.
+//! `Undefined` is the bottom type, "no present value". `NULL` and `MISSING` are
+//! absent values, not types: the typer types a `NULL` or `MISSING` literal `Undefined`, and a
+//! literal typed `Undefined` must hold an absent value. The other direction is not checked: an
+//! absent-value literal may carry a concrete type, because typed plans contain such literals in
+//! several places that a positional rule would have to track (the `NULL` / `MISSING` branches of
+//! `CASE` and arguments of `COALESCE`, retyped as the supertype, also after a constant `CASE` is
+//! folded into its first branch; the `INT` length `NULL` of `x IS VARCHAR`). The typer types the
+//! `NULL` and `MISSING` literals a query writes `Undefined`.
 //!
-//! Two nodes whose type partiql-lang-kotlin derives in the node itself agree with it, including
-//! unspecified-parameter flags: a `RexCast`'s type is its target (`rex/RexCast.java:42`), a
-//! `RexMap`'s type is the map of its key and value types (`rex/RexMap.java:63`), whose key is
-//! neither `DYNAMIC` nor `Undefined`, nor a union with such a member, as `MapType::new` requires
-//! (the MAP type RFC disallows NULL and MISSING keys). This departs from partiql-lang-kotlin, which
-//! types `MAP{NULL: 1}` as `MAP<UNKNOWN, INT>`; a typer reports such a map as an error instead.
-//! Other types (e.g. a `RexCall`'s, a `RexLit`'s) are set by the typer (partiql-lang-kotlin's
-//! `PlanTransform` overrides them with `setType`) and are not compared. Structurally: an
-//! `Exclusion` has a `RexVar` variable and at least one item (`Exclusion.kt:15,30`). A
-//! `RelWindow`'s `bindings` are not checked: partiql-lang-kotlin takes them as the last names of
-//! the window's input schema, possibly fewer than its functions (`PlanTransform.kt:280`).
+//! `Undefined` may appear wherever an absent value's type flows: on an expression that can only
+//! produce absent values (a variable or path reading one, a supertype of only absent values),
+//! nested in rows, collections and map values (`SELECT NULL AS a`, `[NULL]`; not map keys, see
+//! below), in schemas, in resolved routine signatures (a function resolved for a `NULL` argument
+//! has an `Undefined` parameter), and nested in a cast target (a set operation or map constructor
+//! coerces `NULL` to the supertype, e.g. `ARRAY<Undefined>`). It may not be a cast target itself,
+//! nor the type of a constructor, a table reference, a non-scalar subquery or `EXISTS`/`UNIQUE`,
+//! which always produce a present value. An absent value is `Datum::is_absent`, so a null variant
+//! counts. A `RexError` (a failed expression) is typed `Dynamic`, never `Undefined`. Some failed
+//! expressions (e.g. an unresolved path or field) are typed `Undefined` while typing, and that type
+//! propagates into their parents (e.g. a row field of an unresolved path); the parents keep it,
+//! while the error node itself is then typed `Dynamic`, so a parent's `Undefined` may come from a
+//! `Dynamic` error child. A conformance comparison maps the error nodes themselves. Not checked: a
+//! literal whose type only nests `Undefined` against the value's elements.
+//!
+//! Two nodes whose type is derived in the node itself agree with it, including
+//! unspecified-parameter flags: a `RexCast`'s type is its target, and a `RexMap`'s type is the
+//! map of its key and value types, whose key is neither `DYNAMIC` nor `Undefined`, nor a union
+//! with such a member, as `MapType::new` requires (the MAP type RFC disallows NULL and MISSING
+//! keys); so `MAP{NULL: 1}` has no map type, and a typer reports such a map as an error. Other
+//! types (e.g. a `RexCall`'s, a `RexLit`'s) are set by the typer and are not compared.
+//! Structurally: an `Exclusion` has a `RexVar` variable and at least one item. A `RelWindow`'s
+//! `bindings` are not checked (see [`crate::RelOp::Window`]): there may be fewer of them than
+//! functions.
 //!
 //! A plan nesting deeper than [`MAX_DEPTH`] (counting `Rex`/`Rel` nodes, nested shapes, nested
 //! literal values and EXCLUDE path steps) is rejected before anything else is checked, without
@@ -57,7 +53,7 @@
 //! offset are in range, and that a `Rel`'s schema matches its operator.
 
 use crate::plan::Plan;
-use crate::print::{is_plk_struct, name_text};
+use crate::print::{is_canonical_struct, name_text};
 use crate::print::{tree, Attr, NodeType, Source, TreeNode};
 use crate::rel::{Rel, RelOp};
 use crate::rex::{Rex, RexOp};
@@ -113,7 +109,7 @@ pub enum ViolationKind {
     ErrorNotDynamic,
     /// A non-nullable shape.
     NotNullable,
-    /// A shape with no partiql-lang-kotlin counterpart (see the module docs).
+    /// A shape outside the typed planner's type set (see the module docs).
     NoPlkEquivalent,
     /// A shape kind this crate does not know (`PartiqlShape` and `Static` are non-exhaustive).
     UnsupportedShape,
@@ -566,9 +562,9 @@ fn check_shape(shape: &PartiqlShape, path: &str, out: &mut Vec<Violation>) {
                     here(out, ViolationKind::NoPlkEquivalent)
                 }
                 Static::Struct(s) => {
-                    // PLK's STRUCT is the one canonical open struct, `StructType::new_any()`.
-                    let plk_struct = is_plk_struct(s);
-                    if !plk_struct {
+                    // `STRUCT` is the one canonical open struct, `StructType::new_any()`.
+                    let canonical_struct = is_canonical_struct(s);
+                    if !canonical_struct {
                         here(out, ViolationKind::NoPlkEquivalent);
                     }
                     for (i, f) in s.fields().enumerate() {
@@ -586,7 +582,7 @@ fn check_shape(shape: &PartiqlShape, path: &str, out: &mut Vec<Violation>) {
                     check_shape(m.value_type(), &format!("{path}.value"), out);
                 }
                 // `Static` is non-exhaustive: a kind added later may nest shapes this check
-                // cannot see, and is not one partiql-lang-kotlin's typing produces.
+                // cannot see, and is not in the typed planner's type set.
                 _ => here(out, ViolationKind::UnsupportedShape),
             }
         }

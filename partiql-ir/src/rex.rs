@@ -1,8 +1,8 @@
 //! Typed scalar expressions (`Rex`).
 //!
-//! One [`RexOp`] variant per public `Rex*` class of partiql-lang-kotlin v1.6.1's
-//! `org.partiql.plan.rex` package; each variant cites its class as `rex/<Class>.java:<line>`,
-//! relative to `partiql-plan/src/main/java/org/partiql/plan/`.
+//! One [`RexOp`] variant per kind of scalar expression: literals, variables, paths, calls and
+//! dispatches, casts, CASE/COALESCE/NULLIF, constructors (array, bag, struct, map, spread),
+//! SELECT/PIVOT, subqueries, table references and errors.
 
 use crate::refs::{QualifiedName, RoutineRef};
 use crate::rel::Rel;
@@ -27,35 +27,31 @@ pub struct Rex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RexOp {
-    /// `rex/RexArray.java:13`
     #[non_exhaustive]
     Array { values: Vec<Rex> },
-    /// `rex/RexBag.java:16`
     #[non_exhaustive]
     Bag { values: Vec<Rex> },
-    /// A call of a resolved scalar function. `rex/RexCall.java:33`
+    /// A call of a resolved scalar function.
     #[non_exhaustive]
     Call {
         function: RoutineRef,
         args: Vec<Rex>,
     },
-    /// `CASE [match] WHEN .. THEN .. [ELSE default] END`. `rex/RexCase.java:13`
+    /// `CASE [match] WHEN .. THEN .. [ELSE default] END`.
     #[non_exhaustive]
     Case {
         match_: Option<Box<Rex>>,
         branches: Vec<CaseBranch>,
         default: Option<Box<Rex>>,
     },
-    /// `rex/RexCast.java:13`
     #[non_exhaustive]
     Cast {
         operand: Box<Rex>,
         target: PartiqlShape,
     },
-    /// `rex/RexCoalesce.java:12`
     #[non_exhaustive]
     Coalesce { args: Vec<Rex> },
-    /// A call whose overload is chosen at run time from `functions`. `rex/RexDispatch.java:34`
+    /// A call whose overload is chosen at run time from `functions`.
     #[non_exhaustive]
     Dispatch {
         name: String,
@@ -63,62 +59,58 @@ pub enum RexOp {
         args: Vec<Rex>,
     },
     /// An expression that failed to plan; the problem is reported to the planner's listener.
-    /// `rex/RexError.java:14`
     #[non_exhaustive]
     Error {},
-    /// A literal, typed by its [`Rex`]'s shape. `rex/RexLit.java:13`
+    /// A literal, typed by its [`Rex`]'s shape.
     #[non_exhaustive]
     Lit { value: Value },
-    /// A map constructor with declared key and value types. `rex/RexMap.java:15`
+    /// A map constructor with declared key and value types.
     #[non_exhaustive]
     Map {
         key_type: PartiqlShape,
         value_type: PartiqlShape,
         entries: Vec<MapEntry>,
     },
-    /// A map constructor whose key and value types are not declared. `rex/RexMapDynamic.java:15`
+    /// A map constructor whose key and value types are not declared.
     #[non_exhaustive]
     MapDynamic { entries: Vec<MapEntry> },
-    /// `rex/RexNullIf.java:12`
     #[non_exhaustive]
     NullIf { v1: Box<Rex>, v2: Box<Rex> },
-    /// `operand[index]`. `rex/RexPathIndex.java:12`
+    /// `operand[index]`.
     #[non_exhaustive]
     PathIndex { operand: Box<Rex>, index: Box<Rex> },
-    /// `operand['key']`, a case-sensitive lookup. `rex/RexPathKey.java:12`
+    /// `operand['key']`, a case-sensitive lookup.
     #[non_exhaustive]
     PathKey { operand: Box<Rex>, key: Box<Rex> },
-    /// `operand.symbol`, a case-insensitive lookup. `rex/RexPathSymbol.java:12`
+    /// `operand.symbol`, a case-insensitive lookup.
     #[non_exhaustive]
     PathSymbol { operand: Box<Rex>, symbol: String },
-    /// `PIVOT value AT key FROM ..`. `rex/RexPivot.java:14`
+    /// `PIVOT value AT key FROM ..`.
     #[non_exhaustive]
     Pivot {
         input: Box<Rel>,
         key: Box<Rex>,
         value: Box<Rex>,
     },
-    /// `SELECT ..`: evaluates `constructor` for every row of `input`. `rex/RexSelect.java:14`
+    /// `SELECT ..`: evaluates `constructor` for every row of `input`.
     #[non_exhaustive]
     Select {
         input: Box<Rel>,
         constructor: Box<Rex>,
     },
-    /// Struct concatenation (TUPLEUNION). `rex/RexSpread.java:13`
+    /// Struct concatenation (TUPLEUNION).
     #[non_exhaustive]
     Spread { args: Vec<Rex> },
-    /// `rex/RexStruct.java:13`
     #[non_exhaustive]
     Struct { fields: Vec<StructEntry> },
     /// A subquery used as an expression; `scalar` for a scalar (single value) subquery.
-    /// `rex/RexSubquery.java:18`
     #[non_exhaustive]
     Subquery {
         input: Box<Rel>,
         constructor: Box<Rex>,
         scalar: bool,
     },
-    /// `args <comparison> <quantifier> (subquery)`. `rex/RexSubqueryComp.java:20`
+    /// `args <comparison> <quantifier> (subquery)`.
     #[non_exhaustive]
     SubqueryComp {
         input: Box<Rel>,
@@ -126,27 +118,25 @@ pub enum RexOp {
         comparison: Comparison,
         quantifier: Quantifier,
     },
-    /// `args IN (subquery)`. `rex/RexSubqueryIn.java:14`
+    /// `args IN (subquery)`.
     #[non_exhaustive]
     SubqueryIn { input: Box<Rel>, args: Vec<Rex> },
-    /// `EXISTS (subquery)` / `UNIQUE (subquery)`. `rex/RexSubqueryTest.java:21`
+    /// `EXISTS (subquery)` / `UNIQUE (subquery)`.
     #[non_exhaustive]
     SubqueryTest { input: Box<Rel>, test: SubqueryTest },
-    /// A catalog table, by name; its shape is the [`Rex`]'s. `rex/RexTable.java:16`
+    /// A catalog table, by name; its shape is the [`Rex`]'s.
     #[non_exhaustive]
     Table { table: QualifiedName },
     /// A table by catalog and table id, indexes into a symbol table that the planner returns
-    /// beside the plan (partiql-lang-kotlin's `SymbolTable.java:18`, not part of this crate).
-    /// `rex/RexTableRef.java:13`
+    /// beside the plan (not part of this crate).
     #[non_exhaustive]
     TableRef { catalog_id: u32, table_id: u32 },
     /// A variable: field `offset` of the scope `scope` levels out (0 = innermost).
-    /// `rex/RexVar.java:13`
     #[non_exhaustive]
     Var { scope: u32, offset: u32 },
 }
 
-/// A `WHEN condition THEN result` branch of [`RexOp::Case`] (`rex/RexCase.java:84`).
+/// A `WHEN condition THEN result` branch of [`RexOp::Case`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseBranch {
     condition: Rex,
@@ -168,7 +158,7 @@ impl CaseBranch {
     }
 }
 
-/// A `key: value` field of [`RexOp::Struct`] (`rex/RexStruct.java:63`).
+/// A `key: value` field of [`RexOp::Struct`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructEntry {
     key: Rex,
@@ -190,7 +180,7 @@ impl StructEntry {
     }
 }
 
-/// A `key: value` entry of [`RexOp::Map`] and [`RexOp::MapDynamic`] (`rex/RexMap.java:81`).
+/// A `key: value` entry of [`RexOp::Map`] and [`RexOp::MapDynamic`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapEntry {
     key: Rex,
@@ -212,7 +202,7 @@ impl MapEntry {
     }
 }
 
-/// The comparison of [`RexOp::SubqueryComp`] (`rex/RexSubqueryComp.java:89`).
+/// The comparison of [`RexOp::SubqueryComp`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Comparison {
@@ -224,7 +214,7 @@ pub enum Comparison {
     Ge,
 }
 
-/// The quantifier of [`RexOp::SubqueryComp`] (`rex/RexSubqueryComp.java:158`).
+/// The quantifier of [`RexOp::SubqueryComp`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Quantifier {
@@ -233,7 +223,7 @@ pub enum Quantifier {
     Some,
 }
 
-/// The test of [`RexOp::SubqueryTest`] (`rex/RexSubqueryTest.java:69`).
+/// The test of [`RexOp::SubqueryTest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SubqueryTest {

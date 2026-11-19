@@ -1,9 +1,7 @@
 //! References from a plan to catalog objects (tables and routines).
 //!
 //! The plan refers to catalog objects by name and, for routines, by the resolved signature, so
-//! that this crate does not depend on a catalog API. partiql-lang-kotlin embeds the catalog's
-//! objects (`Table`, `Fn`, `Agg`) in its plan and adds a `RoutineRef` for their identity
-//! (`partiql-plan/src/main/java/org/partiql/plan/RoutineRef.java:30`).
+//! that this crate does not depend on a catalog API.
 
 use partiql_types::PartiqlShape;
 use std::fmt::{Display, Formatter};
@@ -67,8 +65,8 @@ fn quote(part: &str) -> String {
 /// A resolved routine (scalar function or aggregation) together with the signature it was
 /// resolved to.
 ///
-/// partiql-lang-kotlin's `RoutineRef` is `(catalog, name)`; the parameter and return types come
-/// from the embedded `Fn`/`Agg`'s signature. Here both are carried as data.
+/// The routine's identity (its catalog and name) and the chosen overload's parameter and return
+/// types are both carried as data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RoutineRef {
     name: QualifiedName,

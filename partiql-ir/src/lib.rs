@@ -5,9 +5,9 @@
 //!
 //! A plan is a tree of scalar expressions ([`Rex`]) and relational operators ([`Rel`]). Every
 //! `Rex` carries the [`partiql_types::PartiqlShape`] of the value it produces, and every `Rel`
-//! the ordered schema ([`RelType`]) of the rows it produces. The node set follows the public
-//! plan of partiql-lang-kotlin v1.6.1 (`org.partiql.plan`), one [`RexOp`] / [`RelOp`] variant
-//! per `Rex*` / `Rel*` class.
+//! the ordered schema ([`RelType`]) of the rows it produces. There are 26 kinds of expression
+//! ([`RexOp`]) and 18 kinds of relational operator ([`RelOp`]), including window, EXCLUDE and
+//! WITH.
 //!
 //! This plan sits beside the untyped `partiql-logical` plan, which evaluation keeps using.
 //!
@@ -21,7 +21,7 @@
 //!   [`value_text`], [`render_shape`]) are a debugging and comparison aid and may change; the
 //!   dump is order-preserving, not canonical (see the `print` module docs).
 //! - [`validate`] checks the invariants of a typed planner's output: no-id, non-union,
-//!   nullable shapes with a partiql-lang-kotlin counterpart; `Undefined` (the bottom type) only
+//!   nullable shapes from the typed planner's type set; `Undefined` (the bottom type) only
 //!   where absent values flow; failed expressions typed `Dynamic`.
 //!
 //! Plans are not `Send`/`Sync`: a literal holds a `partiql_value::Value`, which is not (the

@@ -1,7 +1,7 @@
 //! A tree view of a plan, and a text printer over it.
 //!
-//! [`tree`] turns a plan into a uniform [`TreeNode`] tree: a node kind (partiql-lang-kotlin's
-//! class name, e.g. `RexSelect`), its type, its attributes, and its children by role. The text
+//! [`tree`] turns a plan into a uniform [`TreeNode`] tree: a node kind name (e.g.
+//! `RexSelect`), its type, its attributes, and its children by role. The text
 //! printer ([`Plan::dump`]) and [`crate::validate`] are written over this tree, and a plan
 //! comparator can be too. Shapes are kept as shapes; how they are spelled is the caller's choice
 //! ([`Plan::dump_with`]); [`render_shape`] is the default.
@@ -40,7 +40,7 @@ use std::fmt::Write;
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct TreeNode<'a> {
-    /// The node kind: partiql-lang-kotlin's class name (`RexVar`, `RelScan`, `RexCase.Branch`, ..).
+    /// The node kind name (`RexVar`, `RelScan`, `RexCase.Branch`, ..).
     pub kind: &'static str,
     /// The node's type, for a `Rex` or `Rel`.
     pub ty: Option<NodeType<'a>>,
@@ -471,7 +471,7 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
             match st.ty() {
                 // Only rows and `new_any()` (`{...}`) are written compactly; any other struct
                 // shows its constraints, so that unequal structs print differently.
-                Static::Struct(s) if !is_plk_struct(s) => {
+                Static::Struct(s) if !is_canonical_struct(s) => {
                     let _ = write!(out, "{s:?}");
                 }
                 Static::Struct(s) => {
@@ -559,12 +559,12 @@ fn write_shape(out: &mut String, shape: &PartiqlShape) {
     }
 }
 
-/// Whether `s` is one of partiql-lang-kotlin's two struct kinds: a row exactly as built by
+/// Whether `s` is one of the typed planner's two struct kinds: a row exactly as built by
 /// `StructType::new_row`, or `StructType::new_any()` (`STRUCT`).
 // Rebuilding and comparing clones the fields, so this costs O(size of the subtree) per struct
 // level, superlinear in row nesting depth (bounded by `MAX_DEPTH`). partiql-types exposes no
 // getter for a struct's constraints that would make it O(1).
-pub(crate) fn is_plk_struct(s: &StructType) -> bool {
+pub(crate) fn is_canonical_struct(s: &StructType) -> bool {
     *s == StructType::new_row(s.fields().cloned()) || *s == StructType::new_any()
 }
 

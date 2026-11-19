@@ -67,7 +67,7 @@ pub fn t_row() -> PartiqlShape {
     row(&[("a", bool_()), ("b", int()), ("ts", ts)])
 }
 
-/// `SELECT t.a, t.b FROM default.T AS t`, typed as partiql-lang-kotlin v1.6.1 plans it:
+/// `SELECT t.a, t.b FROM default.T AS t`, typed as the plan below:
 /// `RexSelect(RelProject(RelScan(RexTable)), RexVar)`, the projection a `RexStruct` of
 /// `RexPathKey`s over `RexVar(0, 0)`.
 pub fn select_from_t() -> Plan {
