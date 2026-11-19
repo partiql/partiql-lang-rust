@@ -12,36 +12,38 @@
 //!   and has no optional fields. So a typer normalizes catalog schemas (e.g. an open struct
 //!   with known fields) to these forms before it puts them in a plan.
 //!
-//! `Undefined` is the bottom type, "no present value" (partiql-lang-kotlin's `UNKNOWN`). `NULL`
-//! and `MISSING` are absent values, not types: the typer types a `NULL` or `MISSING` literal
-//! `Undefined`, and a literal typed `Undefined` must hold an absent value. An absent-value
-//! literal may also carry a concrete type: partiql-lang-kotlin replaces the `NULL` / `MISSING`
-//! branches of `CASE` and `COALESCE` with absent literals typed as the supertype
-//! (`DynamicTyper.kt:107-108`). `Undefined` may appear wherever an absent value's type flows: on
-//! an expression that can only produce absent values (a variable or path reading one, a
-//! supertype of only absent values, `PlanTyper.kt:134-136`), nested in rows, collections and
-//! maps (`SELECT NULL AS a`, `[NULL]`), in schemas, in resolved routine signatures
-//! (partiql-lang-kotlin resolves `upper(NULL)` with an `UNKNOWN` parameter, `FnUpper.kt:49`),
-//! and nested in a cast target (a set operation or map constructor coerces `NULL` to the
-//! supertype, e.g. `ARRAY<UNKNOWN>`). It may not be a cast target itself, nor the type of a
-//! constructor, a table reference, a non-scalar subquery or `EXISTS`/`UNIQUE`, which always
-//! produce a present value. An absent value is `Datum::is_absent`, so a null variant counts.
-//! A `RexError` (a failed expression) is typed `Dynamic`, never `Undefined`. partiql-lang-kotlin
-//! types some errors `UNKNOWN` (`PlanTyper.kt:1014,1099,1111`) and that `UNKNOWN` propagates
-//! into parents (e.g. a row field of an unresolved path), so a typer that matches it keeps
-//! PLK's type for those parents: a parent's `Undefined` may come from a `Dynamic` error child.
-//! A conformance comparison maps the error nodes themselves. Not checked: a literal whose type
-//! only nests `Undefined` against the value's elements.
+//! `Undefined` is the bottom type, "no present value" (partiql-lang-kotlin's `UNKNOWN`). `NULL` and
+//! `MISSING` are absent values, not types: the typer types a `NULL` or `MISSING` literal
+//! `Undefined`, and a literal typed `Undefined` must hold an absent value. An absent-value literal
+//! may also carry a concrete type: partiql-lang-kotlin replaces the `NULL` / `MISSING` branches of
+//! `CASE` and `COALESCE` with absent literals typed as the supertype (`DynamicTyper.kt:107-108`).
+//! `Undefined` may appear wherever an absent value's type flows: on an expression that can only
+//! produce absent values (a variable or path reading one, a supertype of only absent values,
+//! `PlanTyper.kt:134-136`), nested in rows, collections and map values (`SELECT NULL AS a`,
+//! `[NULL]`; not map keys, see below), in schemas, in resolved routine signatures
+//! (partiql-lang-kotlin resolves `upper(NULL)` with an `UNKNOWN` parameter, `FnUpper.kt:49`), and
+//! nested in a cast target (a set operation or map constructor coerces `NULL` to the supertype,
+//! e.g. `ARRAY<UNKNOWN>`). It may not be a cast target itself, nor the type of a constructor, a
+//! table reference, a non-scalar subquery or `EXISTS`/`UNIQUE`, which always produce a present
+//! value. An absent value is `Datum::is_absent`, so a null variant counts. A `RexError` (a failed
+//! expression) is typed `Dynamic`, never `Undefined`. partiql-lang-kotlin types some errors
+//! `UNKNOWN` (`PlanTyper.kt:1014,1099,1111`) and that `UNKNOWN` propagates into parents (e.g. a row
+//! field of an unresolved path), so a typer that matches it keeps PLK's type for those parents: a
+//! parent's `Undefined` may come from a `Dynamic` error child. A conformance comparison maps the
+//! error nodes themselves. Not checked: a literal whose type only nests `Undefined` against the
+//! value's elements.
 //!
 //! Two nodes whose type partiql-lang-kotlin derives in the node itself agree with it, including
 //! unspecified-parameter flags: a `RexCast`'s type is its target (`rex/RexCast.java:42`), a
 //! `RexMap`'s type is the map of its key and value types (`rex/RexMap.java:63`), whose key is
-//! not `DYNAMIC`. Other types (e.g. a `RexCall`'s, a `RexLit`'s) are set by the typer
-//! (partiql-lang-kotlin's `PlanTransform` overrides them with `setType`) and are not compared.
-//! Structurally: an `Exclusion` has a `RexVar` variable and at least one item
-//! (`Exclusion.kt:15,30`). A `RelWindow`'s `bindings` are not checked: partiql-lang-kotlin takes
-//! them as the last names of the window's input schema, possibly fewer than its functions
-//! (`PlanTransform.kt:280`).
+//! neither `DYNAMIC` nor `Undefined`, nor a union with such a member, as `MapType::new` requires
+//! (the MAP type RFC disallows NULL and MISSING keys). This departs from partiql-lang-kotlin, which
+//! types `MAP{NULL: 1}` as `MAP<UNKNOWN, INT>`; a typer reports such a map as an error instead.
+//! Other types (e.g. a `RexCall`'s, a `RexLit`'s) are set by the typer (partiql-lang-kotlin's
+//! `PlanTransform` overrides them with `setType`) and are not compared. Structurally: an
+//! `Exclusion` has a `RexVar` variable and at least one item (`Exclusion.kt:15,30`). A
+//! `RelWindow`'s `bindings` are not checked: partiql-lang-kotlin takes them as the last names of
+//! the window's input schema, possibly fewer than its functions (`PlanTransform.kt:280`).
 //!
 //! Not checked (left to the typer, whose scoping rules define them): that a `RexVar`'s scope and
 //! offset are in range, and that a `Rel`'s schema matches its operator.
@@ -51,7 +53,7 @@ use crate::print::{is_plk_struct, name_text};
 use crate::print::{tree, Attr, NodeType, Source, TreeNode};
 use crate::rel::RelOp;
 use crate::rex::RexOp;
-use partiql_types::{PartiqlNoIdShapeBuilder, PartiqlShape, Static};
+use partiql_types::{PartiqlNoIdShapeBuilder, PartiqlShape, ShapeResultError, Static};
 use partiql_value::datum::Datum;
 use std::fmt::{Display, Formatter};
 
@@ -104,8 +106,11 @@ pub enum ViolationKind {
     CastTypeNotTarget,
     /// A `RexMap` whose type is not the map of its key and value types.
     MapTypeNotDeclared,
-    /// A `RexMap` whose key type is `DYNAMIC`.
+    /// A `RexMap` whose key type is `DYNAMIC` (or a union with that member).
     DynamicMapKey,
+    /// A `RexMap` whose key type is `Undefined` (or a union with that member); the MAP type RFC
+    /// disallows NULL and MISSING keys.
+    UndefinedMapKey,
     /// An `Exclusion` whose variable is not a `RexVar`.
     ExclusionVarNotVar,
     /// An `Exclusion` without items.
@@ -129,6 +134,9 @@ impl Display for ViolationKind {
                 write!(f, "map type is not MAP<key_type, value_type>")
             }
             ViolationKind::DynamicMapKey => write!(f, "map key type is DYNAMIC"),
+            ViolationKind::UndefinedMapKey => {
+                write!(f, "map key type is Undefined")
+            }
             ViolationKind::ExclusionVarNotVar => write!(f, "exclusion variable is not a RexVar"),
             ViolationKind::ExclusionWithoutItems => write!(f, "exclusion has no items"),
         }
@@ -222,14 +230,20 @@ fn check_node(node: &TreeNode<'_>, path: &str, out: &mut Vec<Violation>) {
                 value_type,
                 ..
             } => {
-                if key_type.is_dynamic() {
-                    push(out, join(path, "key_type"), ViolationKind::DynamicMapKey)
-                } else if !has_id(rex.ty()) && !has_id(key_type) && !has_id(value_type) {
-                    let declared = PartiqlNoIdShapeBuilder::default()
-                        .new_map(key_type.clone(), value_type.clone());
-                    if !matches!(&declared, Ok(d) if same_type(d, rex.ty())) {
-                        push(out, join(path, "type"), ViolationKind::MapTypeNotDeclared)
+                // `new_map` is the authority on valid keys (partiql-types follows the MAP type
+                // RFC): a key that is `DYNAMIC` or `Undefined` (or a union with such a member) has no
+                // map type.
+                let declared = PartiqlNoIdShapeBuilder::default()
+                    .new_map(key_type.clone(), value_type.clone());
+                match declared {
+                    Err(ShapeResultError::DynamicMapKey) => {
+                        push(out, join(path, "key_type"), ViolationKind::DynamicMapKey)
                     }
+                    Err(ShapeResultError::UndefinedMapKey) => {
+                        push(out, join(path, "key_type"), ViolationKind::UndefinedMapKey)
+                    }
+                    Ok(d) if has_id(rex.ty()) || has_id(&d) || same_type(&d, rex.ty()) => {}
+                    _ => push(out, join(path, "type"), ViolationKind::MapTypeNotDeclared),
                 }
             }
             _ => {}

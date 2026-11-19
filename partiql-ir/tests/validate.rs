@@ -592,14 +592,13 @@ fn accepts_plk_legal_undefined_placements() {
     let u = || PartiqlShape::Undefined;
     let null = || Rex::lit(u(), Value::Null);
     let scan = || Rel::scan(rel_type(&[("t", dynamic())]), Rex::var(dynamic(), 0, 0));
-    let map = b().new_map(u(), int()).unwrap();
     let nodes = vec![
-        // MAP{NULL: 1}: the key type is the supertype of UNKNOWNs.
+        // A NULL map value: MAP<STRING, UNKNOWN>.
         Rex::map(
-            map,
+            b().new_map(string(), u()).unwrap(),
+            string(),
             u(),
-            int(),
-            vec![partiql_ir::MapEntry::new(null(), int_lit(1))],
+            vec![partiql_ir::MapEntry::new(str_lit("k"), null())],
         ),
         Rex::case(
             u(),
@@ -619,4 +618,29 @@ fn accepts_plk_legal_undefined_placements() {
     ];
     let plan = Plan::query(Rex::array(dynamic(), nodes));
     assert_eq!(validate(&plan), Ok(()));
+}
+
+/// partiql-types follows the MAP type RFC: a key that is or contains `Undefined` (NULL and
+/// MISSING keys) has no map type, so a `RexMap` declaring one is rejected (PLK would type
+/// `MAP{NULL: 1}` as `MAP<UNKNOWN, INT>`).
+#[test]
+fn rejects_a_map_with_an_undefined_key() {
+    use partiql_value::Value;
+    let u = || PartiqlShape::Undefined;
+    let plan = Plan::query(Rex::map(
+        dynamic(),
+        u(),
+        int(),
+        vec![partiql_ir::MapEntry::new(
+            Rex::lit(u(), Value::Null),
+            int_lit(1),
+        )],
+    ));
+    assert_eq!(
+        kinds(&plan),
+        [(
+            "action.rex.key_type".to_string(),
+            ViolationKind::UndefinedMapKey
+        )]
+    );
 }

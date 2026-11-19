@@ -12,7 +12,7 @@
 //! This plan sits beside the untyped `partiql-logical` plan, which evaluation keeps using.
 //!
 //! - Nodes are immutable: private fields, constructors, getters; build a changed copy with
-//!   `into_parts` / `from_parts` or a [`Rewriter`].
+//!   `into_parts` and `Rex::from_parts` / `Rel::from_parts` (`Plan::new`), or a [`Rewriter`].
 //! - [`Visitor`] walks a plan; [`Rewriter`] rebuilds one. An overriding method calls the
 //!   default traversal as [`visit::walk_rex`] / [`rewrite::walk_rex`] (and `walk_rel`,
 //!   `walk_plan`).
