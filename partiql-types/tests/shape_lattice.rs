@@ -469,8 +469,6 @@ fn kind_per_static_type() {
         (Static::TimeTz(3), Some(K::TimeTz)),
         (Static::Timestamp(6), Some(K::Timestamp)),
         (Static::TimestampTz(6), Some(K::TimestampTz)),
-        (Static::Null, Some(K::Unknown)),
-        (Static::Missing, Some(K::Unknown)),
         (Static::Variant(VariantType::new("ion")), Some(K::Variant)),
         (Static::Struct(row), Some(K::Row)),
         (Static::Struct(closed_set), Some(K::Row)),
@@ -521,7 +519,8 @@ fn kind_of_interval_follows_its_family() {
 fn kind_of_non_static_shapes() {
     let mut b = PartiqlNoIdShapeBuilder::default();
     assert_eq!(b.new_dynamic().kind(), Some(K::Dynamic));
-    assert_eq!(b.new_undefined().kind(), None);
+    // `NULL` and `MISSING` are absent values; their static type is `Undefined`, PLK's `UNKNOWN`.
+    assert_eq!(b.new_undefined().kind(), Some(K::Unknown));
     let union = b.any_of([shape(Static::Int32), shape(Static::String)]);
     assert!(matches!(union, PartiqlShape::AnyOf(_)));
     assert_eq!(union.kind(), None);

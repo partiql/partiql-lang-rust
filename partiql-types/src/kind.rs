@@ -70,8 +70,9 @@ pub enum ShapeKind {
     /// `STRUCT`: an open [`Static::Struct`]; PLK's `STRUCT` has no fields
     /// (`PType.java:1182-1184`).
     Struct,
-    /// `UNKNOWN`, the type of the `NULL` and `MISSING` literals: [`Static::Null`] and
-    /// [`Static::Missing`].
+    /// `UNKNOWN`, the static type of the absent values `NULL` and `MISSING` (which are values,
+    /// not types): [`PartiqlShape::Undefined`]. It is the bottom of the lattice; see
+    /// [`crate::lattice`].
     Unknown,
     /// `VARIANT(encoding)`: [`Static::Variant`].
     Variant,
@@ -165,21 +166,15 @@ impl Static {
     /// The kind of this type, or `None` for the types that have no partiql-lang-kotlin
     /// counterpart: `Int` (unbounded), `Decimal` (no precision), `DateTime` and `Graph`.
     ///
-    /// The legacy logical-planner typer gives integer and decimal literals `Int` and `Decimal`
-    /// (and `NULL` / `MISSING` the `Undefined` shape); a user of the lattice must first narrow
-    /// such shapes as partiql-lang-kotlin's planner types literals (`RexConverter.kt:195-224`):
+    /// The legacy logical-planner typer gives integer and decimal literals `Int` and `Decimal`,
+    /// and uses the `Undefined` shape both for `NULL` / `MISSING` and for failures (an
+    /// unresolved name, a missing field), so its output is not lattice input as it is: a user
+    /// must type failures as `Dynamic` and narrow `Int` and `Decimal` as partiql-lang-kotlin's
+    /// planner types literals (`RexConverter.kt:195-224`):
     /// an integer literal is `Int32` if it fits in 32 bits, else `Int64` if it fits in 64, else
     /// `DecimalP(p, 0)`; an exact-numeric literal is `DecimalP` with its own (Java `BigDecimal`)
     /// precision and scale, rounded to 38 digits, so `0.05` is `DecimalP(1, 2)`, scale above
-    /// precision; `NULL` and `MISSING` are `Null` and `Missing`.
-    ///
-    /// `Missing` is `Unknown`, which is right for the `MISSING` literal and for an unresolved
-    /// variable (`PlanTyper.kt:1014`), but partiql-lang-kotlin does not type every expression
-    /// that evaluates to `MISSING` that way. A path step that can never succeed is `DYNAMIC`
-    /// for an index step (`PlanTyper.kt:1049`, `:1054`), a symbol step (`:1131`, `:1136`,
-    /// `:1143`) and a key step with a non-string key (`:1094`), but `UNKNOWN` for a key step on
-    /// a non-struct root or naming a field the row lacks (`:1099`, `:1111`). A typer must follow
-    /// that per step, using the `Dynamic` shape where partiql-lang-kotlin gives `DYNAMIC`.
+    /// precision.
     pub fn kind(&self) -> Option<ShapeKind> {
         let kind = match self {
             Static::Int | Static::Decimal | Static::DateTime | Static::Graph() => return None,
@@ -206,7 +201,6 @@ impl Static {
                 IntervalFamily::YearMonth => ShapeKind::IntervalYm,
                 IntervalFamily::DayTime => ShapeKind::IntervalDt,
             },
-            Static::Null | Static::Missing => ShapeKind::Unknown,
             Static::Variant(_) => ShapeKind::Variant,
             Static::Struct(s) if s.is_closed() => ShapeKind::Row,
             Static::Struct(_) => ShapeKind::Struct,
@@ -228,18 +222,28 @@ impl StaticType {
 }
 
 impl PartiqlShape {
-    /// The kind of this shape: `Dynamic` for [`PartiqlShape::Dynamic`], the kind of a
-    /// [`PartiqlShape::Static`] (see [`Static::kind`]), and `None` for
-    /// [`PartiqlShape::Undefined`], for the `Static` types listed at [`Static::kind`], and for
-    /// [`PartiqlShape::AnyOf`]. partiql-lang-kotlin has no union type: it collapses a set of
-    /// types to the type itself when there is one distinct type and to `DYNAMIC` when there are
-    /// several (`PlanTyper.anyOf`, `PlanTyper.kt:110-117`, which returns nothing for an empty
-    /// set), so a typer should do the same before taking the kind.
+    /// The kind of this shape: `Dynamic` for [`PartiqlShape::Dynamic`], `Unknown` for
+    /// [`PartiqlShape::Undefined`] (the static type of `NULL` and `MISSING`, partiql-lang-kotlin's
+    /// `UNKNOWN`), the kind of a [`PartiqlShape::Static`] (see [`Static::kind`]), and `None` for
+    /// the `Static` types listed at [`Static::kind`] and for [`PartiqlShape::AnyOf`].
+    ///
+    /// `Undefined` means only "no present value". A typing failure or an error node must be
+    /// typed [`PartiqlShape::Dynamic`], never `Undefined`, so that `Undefined` stays unambiguous
+    /// (the legacy logical-planner typer does not follow this yet; see [`Static::kind`]). This
+    /// departs from partiql-lang-kotlin, which types an unresolved variable and some
+    /// never-succeeding path steps as `UNKNOWN` (`PlanTyper.kt:1014`, `:1099`, `:1111`) and other
+    /// failures as `DYNAMIC` (`:194-196`).
+    ///
+    /// partiql-lang-kotlin has no union type: it collapses a set of types to the type itself
+    /// when there is one distinct type and to `DYNAMIC` when there are several
+    /// (`PlanTyper.anyOf`, `PlanTyper.kt:110-117`, which returns nothing for an empty set), so a
+    /// typer should do the same before taking the kind.
     pub fn kind(&self) -> Option<ShapeKind> {
         match self {
             PartiqlShape::Dynamic => Some(ShapeKind::Dynamic),
             PartiqlShape::Static(s) => s.kind(),
-            PartiqlShape::AnyOf(_) | PartiqlShape::Undefined => None,
+            PartiqlShape::Undefined => Some(ShapeKind::Unknown),
+            PartiqlShape::AnyOf(_) => None,
         }
     }
 }
