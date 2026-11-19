@@ -458,6 +458,9 @@ pub enum Token<'input> {
     Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
+    // `OVERLAPS` is non-reserved: it may still name a variable
+    #[regex("(?i:Overlaps)", |lex| lex.slice())]
+    Overlaps(&'input str),
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -566,11 +569,14 @@ pub enum Token<'input> {
 impl Token<'_> {
     #[inline]
     pub fn is_var_non_reserved(&self) -> bool {
-        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
+        matches!(self, Token::Any(_) | Token::Simple(_) | Token::Overlaps(_))
+            || self.is_graph_non_reserved()
     }
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
+        // `OVERLAPS` is left out: it names no special form, and the preprocessor's look-ahead
+        // after a candidate would hide a lexing error that follows it
         matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 

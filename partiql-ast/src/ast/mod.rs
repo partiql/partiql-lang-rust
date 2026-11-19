@@ -593,6 +593,8 @@ pub enum BinOpKind {
     Lte,
     Ne,
     Is,
+    /// `<period> OVERLAPS <period>`, e.g. `(d1, d2) OVERLAPS (d3, d4)`
+    Overlaps,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
