@@ -1176,7 +1176,7 @@ ExprPrecedence12: Synth<ast::Expr> = {
                rhs: Box::new(r.data),
            }, lo..hi)
        )),
-    // `IS [NOT] <type>`, as in PartiQL Kotlin's `PredicateIs`
+    // `IS [NOT] <type>`
     <lo:@L> <l:ExprPrecedence12> "IS" <ty:IsTypeName> <hi:@R> =>
        Synth::empty(ast::Expr::IsType(
            state.node(ast::IsType { value: Box::new(l.data), ty, not: false }, lo..hi)
@@ -1320,7 +1320,7 @@ ExprPrecedence08: Synth<ast::Expr> = {
                rhs: Box::new(r.data),
            }, lo..hi)
        )),
-    // `&` is one of PartiQL Kotlin's "other" operators, at the same level as `||`
+    // `&` is an operator at the same level as `||`
     <lo:@L> <l:ExprPrecedence08> "&" <r:ExprPrecedence07> <hi:@R> =>
        Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
@@ -1969,7 +1969,7 @@ DatetimeTypeName: ast::Type = {
     },
 }
 
-// `MAP<key, value>`, as in PartiQL Kotlin's `TypeMap`
+// `MAP<key, value>`
 MapTypeName: ast::Type = {
     "MAP" "<" <k:MapTypeArg> "," <v:MapTypeArg> ">" => ast::Type::MapType(Box::new(k), Box::new(v)),
     // a nested map closes with `>>`, which lexes as one token
@@ -1977,8 +1977,9 @@ MapTypeName: ast::Type = {
         ast::Type::MapType(Box::new(k), Box::new(ast::Type::MapType(Box::new(k2), Box::new(v2)))),
 }
 
-// The key or value type of a `MAP<key, value>`: one of PartiQL Kotlin's types other than BAG and a
-// user-defined (unknown or quoted) name, as its `visitTypeMap` allows
+// The key or value type of a `MAP<key, value>`: one of a fixed list of type names (see
+// `map_arg_type`), DATE/TIME/TIMESTAMP, a two-word type or a MAP; not BAG and not a user-defined
+// (unknown or quoted) name
 MapTypeArg: ast::Type = {
     <DatetimeTypeName>,
     <MapTypeName>,

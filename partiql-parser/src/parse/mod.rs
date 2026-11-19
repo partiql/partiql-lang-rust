@@ -292,7 +292,7 @@ mod tests {
             format!("{t:?}")
         }
 
-        // `MAP { <key>: <value>, ... }`, as in PartiQL Kotlin's `mapConstructor`
+        // `MAP { <key>: <value>, ... }`
         #[test]
         fn map_constructor() {
             for (query, len) in [
@@ -310,12 +310,12 @@ mod tests {
             }
             parse!("SELECT size(MAP {'a': 1, 'b': 2, 'c': 3}) FROM T_ALL_TYPES AS T");
             parse!("SELECT k, v FROM UNPIVOT MAP {'a': 1, 'b': 2} AS v AT k");
-            // MAP is now a reserved keyword, as in PartiQL Kotlin.
+            // MAP is now a reserved keyword.
             assert!(parse_partiql("SELECT map FROM t").is_err());
             parse!(r#"SELECT "map", map_keys(m) FROM t"#);
         }
 
-        // `<expr> IS [NOT] <type>`, as in PartiQL Kotlin's `PredicateIs`
+        // `<expr> IS [NOT] <type>`
         #[test]
         fn is_type() {
             for (query, not, ty) in [
@@ -449,9 +449,9 @@ mod tests {
             out
         }
 
-        // The type forms follow PartiQL Kotlin's `type` rule and builder.
+        // The type forms: two-word names, MAP key and value types, time precisions.
         #[test]
-        fn type_forms_as_plk() {
+        fn type_forms() {
             let cast_type = |q: &str| match parse_expr(q) {
                 ast::Expr::Call(c) => match &c.node.args[1].node {
                     ast::CallArg::NamedType(t) => t.ty.clone(),
@@ -472,8 +472,8 @@ mod tests {
                 cast_type("CAST('a' AS char varying)"),
                 ast::Type::CharacterVaryingType
             );
-            // A map's key and value types are PartiQL Kotlin's types, without BAG or a
-            // user-defined (unknown or quoted) name, and with their own parameters only.
+            // A map's key and value types come from a fixed list of type names, without BAG or
+            // a user-defined (unknown or quoted) name, and with their own parameters only.
             for query in [
                 "CAST(x AS MAP<BAG, INT>)",
                 "CAST(x AS MAP<INT, BAG>)",
@@ -494,7 +494,7 @@ mod tests {
             ] {
                 parse!(query);
             }
-            // A time precision is 0 to 9, as in PartiQL Kotlin.
+            // A time precision is 0 to 9.
             for query in ["x IS TIME(10)", "x IS TIMESTAMP(12) WITH TIME ZONE"] {
                 assert!(parse_partiql(query).is_err(), "{query}");
             }
@@ -507,8 +507,8 @@ mod tests {
             assert!(!err.contains("unknown type"), "{err}");
         }
 
-        // `IS NOT <type>` is one node, as PartiQL Kotlin's `exprIsType(value, type, not)`, so it
-        // pretty-prints and parses back inside other predicates.
+        // `IS NOT <type>` is one node, `IsType` with `not` set, so it pretty-prints and
+        // parses back inside other predicates.
         #[test]
         fn is_not_type_round_trip() {
             use partiql_common::pretty::ToPretty;
@@ -536,7 +536,7 @@ mod tests {
             assert!(stmt.contains(r#"value: "PRECISION""#), "{stmt}");
         }
 
-        // MAP is reserved, as in PartiQL Kotlin: `map` needs quotes wherever it names something.
+        // MAP is reserved: `map` needs quotes wherever it names something.
         // These parsed before.
         #[test]
         fn map_as_name_needs_quotes() {
@@ -552,7 +552,7 @@ mod tests {
             }
         }
 
-        // `&` is one of PartiQL Kotlin's "other" operators, at the level of `||`
+        // `&` is an operator at the level of `||`
         #[test]
         fn bitwise_and() {
             let bin = |q: &str| match parse_expr(q) {
