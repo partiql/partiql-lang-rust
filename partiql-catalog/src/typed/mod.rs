@@ -10,7 +10,12 @@
 //! - [`TypedCatalog`] / [`RoutineCatalog`]: tables ([`Table`]) and routine overloads
 //!   ([`FnOverload`], [`AggOverload`], [`RoutineBinding`]).
 //! - [`Session`]: the current catalog and namespace, the [`Catalogs`], and the routine [`Path`].
-//! - [`resolve_table`]: the planner's lookup order for a table identifier.
+//! - [`resolve_table`]: the planner's lookup order for a table identifier (PLK `Env.resolveTable`).
+//!
+//! Routine lookup (PLK `RoutineResolver`: walking [`Session::path`], qualified calls, the legacy
+//! by-text fallback, scalar-versus-aggregate classification) and overload selection are not here
+//! yet; they come with the builtin routines. [`Session::path`] and [`RoutineCatalog`] are the
+//! inputs they will use.
 
 mod catalog;
 mod identifier;
@@ -29,7 +34,7 @@ pub use identifier::{
 pub use legacy::LegacyCatalogAdapter;
 pub use resolve::{resolve_table, ResolveError, ResolvedTable};
 pub use routine::{
-    AggOverload, FixedOverload, FnOverload, Parameter, RoutineBinding, RoutineBindingError,
-    RoutineOverloadSignature, RoutineSignature,
+    AggOverload, FixedAggOverload, FixedFnOverload, FnOverload, Parameter, RoutineBinding,
+    RoutineBindingError, RoutineOverloadSignature, RoutineSignature,
 };
 pub use session::{Session, SessionBuilder, SessionError};

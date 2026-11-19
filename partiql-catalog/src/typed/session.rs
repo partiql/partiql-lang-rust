@@ -5,6 +5,7 @@
 use super::catalog::{Catalogs, SystemCatalog, TypedCatalog};
 use super::identifier::{Namespace, Path};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::Arc;
 
 /// The errors of [`SessionBuilder::build`].
@@ -18,7 +19,9 @@ pub enum SessionError {
 }
 
 /// A planning session (partiql-lang-kotlin `Session`). Build one with [`Session::builder`].
-#[derive(Debug, Clone)]
+///
+/// Its `Debug` output omits the identity and the property values, which may be sensitive.
+#[derive(Clone)]
 pub struct Session {
     identity: String,
     catalog: String,
@@ -89,8 +92,8 @@ impl Session {
 }
 
 /// The builder of a [`Session`]. The current catalog must be set; the system catalog defaults to
-/// [`SystemCatalog`].
-#[derive(Debug, Clone)]
+/// [`SystemCatalog`]. Its `Debug` output omits the identity and the property values.
+#[derive(Clone)]
 pub struct SessionBuilder {
     identity: String,
     catalog: Option<String>,
@@ -106,7 +109,7 @@ impl Default for SessionBuilder {
         SessionBuilder {
             identity: "unknown".to_string(),
             catalog: None,
-            system: Arc::new(SystemCatalog),
+            system: Arc::new(SystemCatalog::default()),
             catalogs: vec![],
             namespace: Namespace::empty(),
             path: None,
@@ -200,5 +203,54 @@ impl SessionBuilder {
             path,
             properties: self.properties,
         })
+    }
+}
+
+/// The catalogs by name, the property keys only, and no identity.
+fn debug_session(
+    f: &mut fmt::Formatter<'_>,
+    ty: &str,
+    catalog: Option<&str>,
+    catalogs: Vec<&str>,
+    namespace: &Namespace,
+    path: &Option<Path>,
+    properties: &BTreeMap<String, String>,
+) -> fmt::Result {
+    f.debug_struct(ty)
+        .field("catalog", &catalog)
+        .field("catalogs", &catalogs)
+        .field("namespace", namespace)
+        .field("path", path)
+        .field("property_keys", &properties.keys().collect::<Vec<_>>())
+        .finish_non_exhaustive()
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        debug_session(
+            f,
+            "Session",
+            Some(&self.catalog),
+            self.catalogs.iter().map(|c| c.name()).collect(),
+            &self.namespace,
+            &self.path,
+            &self.properties,
+        )
+    }
+}
+
+impl fmt::Debug for SessionBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut catalogs: Vec<&str> = self.catalogs.iter().map(|c| c.name()).collect();
+        catalogs.push(self.system.name());
+        debug_session(
+            f,
+            "SessionBuilder",
+            self.catalog.as_deref(),
+            catalogs,
+            &self.namespace,
+            &self.path,
+            &self.properties,
+        )
     }
 }

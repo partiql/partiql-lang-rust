@@ -59,6 +59,10 @@ pub trait TypedCatalog: Debug + Send + Sync {
 
     /// The canonical name of the table that `identifier`, or a prefix of it, names.
     /// The parts of `identifier` after the matched name become a path into the table.
+    ///
+    /// The case rules are the implementation's. [`super::LegacyCatalogAdapter`] applies its
+    /// inner catalog's rules: over [`crate::catalog::PartiqlCatalog`], delimited parts also
+    /// ignore case, by full Unicode case folding.
     fn resolve_table(&self, _session: &Session, _identifier: &Identifier) -> Option<Name> {
         None
     }
@@ -102,8 +106,10 @@ pub trait RoutineCatalog: TypedCatalog {
 }
 
 /// The system catalog, named [`SYSTEM_CATALOG_NAME`]: it has no tables, and is where the
-/// builtin routines are served from. It serves no routines yet.
-#[derive(Debug, Clone, Copy, Default)]
+/// builtin routines are served from. It serves no routines yet. Build it with
+/// [`SystemCatalog::default`].
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct SystemCatalog;
 
 impl TypedCatalog for SystemCatalog {

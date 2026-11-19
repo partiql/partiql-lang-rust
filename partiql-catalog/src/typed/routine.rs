@@ -181,25 +181,25 @@ pub trait AggOverload: Debug + Send + Sync {
     fn instance(&self, args: &[PartiqlShape]) -> Option<RoutineSignature>;
 }
 
-/// An overload with one instance for any arguments, as partiql-lang-kotlin's
-/// `FnOverload.Builder` and `AggOverload.Builder` build.
+/// A scalar function overload with one instance for any arguments, as partiql-lang-kotlin's
+/// `FnOverload.Builder` builds.
 #[derive(Debug, Clone)]
-pub struct FixedOverload {
+pub struct FixedFnOverload {
     signature: RoutineOverloadSignature,
     instance: RoutineSignature,
 }
 
-impl FixedOverload {
+impl FixedFnOverload {
     #[must_use]
     pub fn new(instance: RoutineSignature) -> Self {
-        FixedOverload {
+        FixedFnOverload {
             signature: instance.overload_signature(),
             instance,
         }
     }
 }
 
-impl FnOverload for FixedOverload {
+impl FnOverload for FixedFnOverload {
     fn signature(&self) -> &RoutineOverloadSignature {
         &self.signature
     }
@@ -209,7 +209,25 @@ impl FnOverload for FixedOverload {
     }
 }
 
-impl AggOverload for FixedOverload {
+/// An aggregation overload with one instance for any arguments, as partiql-lang-kotlin's
+/// `AggOverload.Builder` builds.
+#[derive(Debug, Clone)]
+pub struct FixedAggOverload {
+    signature: RoutineOverloadSignature,
+    instance: RoutineSignature,
+}
+
+impl FixedAggOverload {
+    #[must_use]
+    pub fn new(instance: RoutineSignature) -> Self {
+        FixedAggOverload {
+            signature: instance.overload_signature(),
+            instance,
+        }
+    }
+}
+
+impl AggOverload for FixedAggOverload {
     fn signature(&self) -> &RoutineOverloadSignature {
         &self.signature
     }

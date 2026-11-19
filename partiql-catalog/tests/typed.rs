@@ -4,10 +4,10 @@
 
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog, TypeEnvEntry};
 use partiql_catalog::typed::{
-    equals_ignore_case, resolve_table, CatalogNameAmbiguous, Catalogs, FixedOverload, FnOverload,
-    IdentPart, Identifier, LegacyCatalogAdapter, Name, Namespace, Path, ResolveError,
-    RoutineBinding, RoutineBindingError, RoutineSignature, Session, SessionError, SystemCatalog,
-    Table, TypedCatalog, SYSTEM_CATALOG_NAME,
+    equals_ignore_case, resolve_table, AggOverload, CatalogNameAmbiguous, Catalogs,
+    FixedAggOverload, FixedFnOverload, FnOverload, IdentPart, Identifier, LegacyCatalogAdapter,
+    Name, Namespace, Path, ResolveError, RoutineBinding, RoutineBindingError, RoutineSignature,
+    Session, SessionError, SystemCatalog, Table, TypedCatalog, SYSTEM_CATALOG_NAME,
 };
 use partiql_types::{type_bag, type_int, type_string, PartiqlNoIdShapeBuilder, PartiqlShape};
 use std::collections::BTreeMap;
@@ -560,7 +560,7 @@ fn system_catalog_has_no_tables() {
     let s = Session::empty();
     assert_eq!(s.catalog(), SYSTEM_CATALOG_NAME);
     assert_eq!(resolved(&s, &reg(&["orders"])), None);
-    assert!(SystemCatalog.as_routine_catalog().is_some());
+    assert!(SystemCatalog::default().as_routine_catalog().is_some());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -803,7 +803,7 @@ fn custom_system_is_independent_of_builder_order_and_appended_when_missing() {
 fn pow() -> Arc<dyn FnOverload> {
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let int = type_int!(bld);
-    Arc::new(FixedOverload::new(RoutineSignature::with_types(
+    Arc::new(FixedFnOverload::new(RoutineSignature::with_types(
         "pow",
         [int.clone(), int.clone()],
         int,
@@ -1064,4 +1064,67 @@ fn system_catalog_replaces_same_named_catalog() {
         .unwrap();
     assert_eq!(names(s.catalogs()), strs(&[SYSTEM_CATALOG_NAME]));
     assert_eq!(resolved(&s, &reg(&["orders"])), None);
+}
+
+/// With a namespace in an adapter-backed current catalog, an unqualified name does not resolve to
+/// a table named like the namespace (a `SharedCatalog` has no namespaces).
+#[test]
+fn adapter_namespace_does_not_match_table_named_like_it() {
+    let mut catalog = PartiqlCatalog::default();
+    for name in ["orders", "shop"] {
+        catalog
+            .add_type_entry(TypeEnvEntry::new(name, &[], PartiqlShape::Dynamic))
+            .unwrap();
+    }
+    let shared: Arc<dyn SharedCatalog> = Arc::new(catalog.to_shared_catalog());
+    let adapter: Arc<dyn TypedCatalog> = Arc::new(LegacyCatalogAdapter::new(shared));
+    let s = session("default", &["shop"], vec![adapter.clone()]);
+    assert_eq!(resolved(&s, &reg(&["orders"])), None);
+    // Written by the user, `shop.orders` is still the table `shop` with the path `orders`.
+    assert_eq!(
+        resolved(&s, &reg(&["shop", "orders"])),
+        Some(("default".into(), "\"shop\"".into(), strs(&["orders"])))
+    );
+    // Without a namespace, nothing changes.
+    let s = session("default", &[], vec![adapter]);
+    assert_eq!(
+        resolved(&s, &reg(&["orders"])),
+        Some(("default".into(), "\"orders\"".into(), vec![]))
+    );
+}
+
+#[test]
+fn debug_output_omits_identity_and_property_values() {
+    let builder = Session::builder()
+        .catalog("example")
+        .identity("sample-user")
+        .property("sample-key", "sample-value");
+    let shown = format!("{builder:?}");
+    assert!(shown.contains("sample-key"));
+    assert!(!shown.contains("sample-value") && !shown.contains("sample-user"));
+    let shown = format!("{:?}", builder.build().unwrap());
+    assert!(shown.contains("sample-key") && shown.contains("example"));
+    assert!(!shown.contains("sample-value") && !shown.contains("sample-user"));
+    let adapter = LegacyCatalogAdapter::new(legacy());
+    assert_eq!(
+        format!("{adapter:?}"),
+        "LegacyCatalogAdapter { name: \"default\", .. }"
+    );
+}
+
+#[test]
+fn fixed_agg_overload_has_one_instance() {
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let int = type_int!(bld);
+    let agg: Arc<dyn AggOverload> = Arc::new(FixedAggOverload::new(RoutineSignature::with_types(
+        "sum",
+        [int.clone()],
+        int,
+    )));
+    assert_eq!(agg.signature().name(), "sum");
+    assert_eq!(agg.signature().arity(), 1);
+    let instance = agg.instance(&[PartiqlShape::Undefined]).unwrap();
+    assert_eq!(instance.parameters()[0].name(), "arg0");
+    let binding = RoutineBinding::new(Name::of(["sum"]).unwrap(), vec![agg]).unwrap();
+    assert_eq!(binding.overloads().len(), 1);
 }
