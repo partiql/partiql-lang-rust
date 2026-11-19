@@ -1250,3 +1250,29 @@ fn table_named_like_current_catalog_shadows_qualifier() {
         );
     }
 }
+
+/// In a catalog with namespaces, the shadowing happens in step 2: `main.orders` under namespace
+/// `shop` misses `shop.main.orders` (step 1), then finds the table `main` (step 2) before the
+/// catalog `main` is tried (step 3).
+#[test]
+fn table_named_like_current_catalog_shadows_qualifier_in_step2() {
+    let s = session(
+        "main",
+        &["shop"],
+        vec![TestCatalog::shared("main", &[&["main"], &["orders"]])],
+    );
+    assert_eq!(
+        resolved(&s, &reg(&["main", "orders"])),
+        Some(("main".into(), "\"main\"".into(), strs(&["orders"])))
+    );
+    // Without the table `main`, step 3 finds `orders` in the catalog `main`.
+    let s = session(
+        "main",
+        &["shop"],
+        vec![TestCatalog::shared("main", &[&["orders"]])],
+    );
+    assert_eq!(
+        resolved(&s, &reg(&["main", "orders"])),
+        Some(("main".into(), "\"orders\"".into(), vec![]))
+    );
+}
