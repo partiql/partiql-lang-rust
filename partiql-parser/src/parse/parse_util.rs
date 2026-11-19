@@ -241,3 +241,125 @@ pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstN
         _ => illegal_literal(),
     }
 }
+
+/// A SQL type name made of two words, `CHARACTER VARYING`, `CHAR VARYING` or `DOUBLE PRECISION`
+/// (case-insensitive), as a [`ast::Type::CustomType`] of its two words; `args` are the
+/// parenthesized parameters of the second word. `None` for any other pair of words.
+pub(crate) fn two_word_type(
+    first: &str,
+    second: &str,
+    args: Vec<ast::CustomTypeParam>,
+) -> Option<ast::Type> {
+    let (a, b) = (first.to_ascii_uppercase(), second.to_ascii_uppercase());
+    let ok = match (a.as_str(), b.as_str()) {
+        // at most one integer length
+        ("CHARACTER" | "CHAR", "VARYING") => matches!(
+            args.as_slice(),
+            [] | [ast::CustomTypeParam::Lit(Lit::Int64Lit(_))]
+        ),
+        ("DOUBLE", "PRECISION") => args.is_empty(),
+        _ => false,
+    };
+    if !ok {
+        return None;
+    }
+    // without a length, the existing `Type::CharacterVaryingType` and
+    // `Type::DoublePrecisionType`
+    if args.is_empty() {
+        return Some(if b == "VARYING" {
+            ast::Type::CharacterVaryingType
+        } else {
+            ast::Type::DoublePrecisionType
+        });
+    }
+    let word = |value: String| ast::SymbolPrimitive {
+        value,
+        case: ast::CaseSensitivity::CaseInsensitive,
+    };
+    let last = if args.is_empty() {
+        ast::CustomTypePart::Name(word(b))
+    } else {
+        ast::CustomTypePart::Parameterized(word(b), args)
+    };
+    Some(ast::Type::CustomType(ast::CustomType {
+        parts: vec![ast::CustomTypePart::Name(word(a)), last],
+    }))
+}
+
+/// Whether `ty`, a [`ast::Type::CustomType`] of type keywords, is a datetime type: `DATE`,
+/// or `TIME` or `TIMESTAMP` with an optional precision of 0 to 9 and an optional
+/// `WITH TIME ZONE` or `WITHOUT TIME ZONE`.
+pub(crate) fn is_datetime_type(ty: &ast::Type) -> bool {
+    let ast::Type::CustomType(ast::CustomType { parts }) = ty else {
+        return false;
+    };
+    let word = |p: &ast::CustomTypePart| match p {
+        ast::CustomTypePart::Name(n) => Some((n.value.to_ascii_uppercase(), false)),
+        ast::CustomTypePart::Parameterized(n, args) => {
+            // one precision, 0 to 9
+            let precision_ok = matches!(
+                args.as_slice(),
+                [ast::CustomTypeParam::Lit(Lit::Int64Lit(0..=9))]
+            );
+            precision_ok.then(|| (n.value.to_ascii_uppercase(), true))
+        }
+        _ => None,
+    };
+    let Some(words) = parts.iter().map(word).collect::<Option<Vec<_>>>() else {
+        return false;
+    };
+    let names: Vec<&str> = words.iter().map(|(w, _)| w.as_str()).collect();
+    let zone_ok = matches!(
+        names[1..],
+        [] | ["WITH", "TIME", "ZONE"] | ["WITHOUT", "TIME", "ZONE"]
+    );
+    // only the first word takes a parameter
+    let params_ok = words.iter().skip(1).all(|(_, p)| !p);
+    match names.first() {
+        Some(&"DATE") => names.len() == 1 && !words[0].1,
+        Some(&"TIME" | &"TIMESTAMP") => zone_ok && params_ok,
+        _ => false,
+    }
+}
+
+/// A key or value type of a `MAP<key, value>` written as a name with optional parameters: one of
+/// a fixed list of type names, with the parameters each takes; not BAG and not a user-defined
+/// (unknown or quoted) name.
+pub(crate) fn map_arg_type(
+    name: ast::SymbolPrimitive,
+    args: Option<Vec<ast::CustomTypeParam>>,
+) -> Result<ast::Type, String> {
+    const NO_PARAMS: &[&str] = &[
+        "BOOL", "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER2", "INT2", "INTEGER", "INT", "INTEGER4",
+        "INT4", "INTEGER8", "INT8", "BIGINT", "REAL", "STRING", "SYMBOL", "ANY", "STRUCT", "TUPLE",
+        "LIST", "ARRAY", "SEXP",
+    ];
+    const ONE_PARAM: &[&str] = &["CHAR", "CHARACTER", "FLOAT", "VARCHAR", "CLOB", "BLOB"];
+    const TWO_PARAMS: &[&str] = &["DECIMAL", "DEC", "NUMERIC"];
+    let upper = name.value.to_ascii_uppercase();
+    let max_params = if NO_PARAMS.contains(&upper.as_str()) {
+        0
+    } else if ONE_PARAM.contains(&upper.as_str()) {
+        1
+    } else if TWO_PARAMS.contains(&upper.as_str()) {
+        2
+    } else {
+        return Err(format!(
+            "`{}` is not a type a MAP may hold as its key or value",
+            name.value
+        ));
+    };
+    let part = match args {
+        None => ast::CustomTypePart::Name(name),
+        Some(args) => {
+            let all_ints = args
+                .iter()
+                .all(|a| matches!(a, ast::CustomTypeParam::Lit(Lit::Int64Lit(_))));
+            if args.len() > max_params || !all_ints {
+                return Err(format!("invalid parameters for the type `{}`", name.value));
+            }
+            ast::CustomTypePart::Parameterized(name, args)
+        }
+    };
+    Ok(ast::Type::CustomType(ast::CustomType { parts: vec![part] }))
+}

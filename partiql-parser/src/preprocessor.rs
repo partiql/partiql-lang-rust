@@ -358,6 +358,9 @@ where
             .collect();
 
         let mut nesting = 1;
+        // the `<`s of `MAP<k, v>` types still open; they nest like parentheses
+        let mut map_angles = 0;
+        let mut after_map = false;
         let mut span: Option<Range<ByteOffset>> = None;
         while nesting > 0 && !patterns.is_empty() {
             let is_nested = nesting > 1;
@@ -369,6 +372,29 @@ where
                         None => Some(*s..*e),
                         Some(range) => Some(range.start..*e),
                     };
+                    let closing_angles = match tok {
+                        Token::GreaterThan => 1,
+                        Token::CloseDblAngle => 2,
+                        _ => 0,
+                    }
+                    .min(map_angles);
+                    let opens_map_angle = after_map && tok == &Token::LessThan;
+                    // a comment between `MAP` and `<` keeps the `MAP`
+                    if !matches!(tok, Token::CommentBlock(_) | Token::CommentLine(_)) {
+                        after_map = tok == &Token::Map;
+                    }
+                    if opens_map_angle || closing_angles > 0 {
+                        if opens_map_angle {
+                            map_angles += 1;
+                            nesting += 1;
+                        } else {
+                            map_angles -= closing_angles;
+                            nesting -= closing_angles;
+                        }
+                        patterns.iter_mut().for_each(|(_, subs)| subs.push(None));
+                        self.parser.consume();
+                        continue;
+                    }
                     match tok {
                         Token::OpenParen
                         | Token::OpenSquare

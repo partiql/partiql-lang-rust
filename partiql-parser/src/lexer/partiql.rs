@@ -398,6 +398,8 @@ pub enum Token<'input> {
     Left,
     #[regex("(?i:Like)")]
     Like,
+    #[regex("(?i:Map)")]
+    Map,
     #[regex("(?i:Limit)")]
     Limit,
     #[regex("(?i:Match)")]
@@ -668,6 +670,7 @@ impl Token<'_> {
                 | Token::Left
                 | Token::Like
                 | Token::Limit
+                | Token::Map
                 | Token::Match
                 | Token::Missing
                 | Token::Natural

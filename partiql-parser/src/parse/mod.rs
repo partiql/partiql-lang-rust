@@ -202,6 +202,17 @@ mod tests {
         }};
     }
 
+    /// Parses `q`, a bare expression, and returns that expression.
+    fn parse_expr(q: &str) -> ast::Expr {
+        match parse!(q).node {
+            ast::Statement::Query(ast::TopLevelQuery { query, .. }) => match query.node.set.node {
+                ast::QuerySet::Expr(e) => *e,
+                other => panic!("{q}: not a bare expression: {other:?}"),
+            },
+            other => panic!("{q}: not a query: {other:?}"),
+        }
+    }
+
     mod literals {
         use super::*;
 
@@ -271,6 +282,297 @@ mod tests {
                               */
                       'b':1} ` "#
             );
+        }
+    }
+
+    mod map_and_type_tests {
+        use super::*;
+
+        fn name(t: &ast::Type) -> String {
+            format!("{t:?}")
+        }
+
+        // `MAP { <key>: <value>, ... }`
+        #[test]
+        fn map_constructor() {
+            for (query, len) in [
+                ("MAP {'a': 1, 'b': 2, 'c': 3}", 3),
+                ("MAP {1.1: 'x', 2.2: 'y'}", 2),
+                ("MAP {T.col_string: T.col_int32}", 1),
+                ("MAP {T.col_int32 + 1: T.col_string}", 1),
+                ("MAP {}", 0),
+                ("map {'a': 1,}", 1),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::Map(m) => assert_eq!(m.node.entries.len(), len, "{query}"),
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            parse!("SELECT size(MAP {'a': 1, 'b': 2, 'c': 3}) FROM T_ALL_TYPES AS T");
+            parse!("SELECT k, v FROM UNPIVOT MAP {'a': 1, 'b': 2} AS v AT k");
+            // MAP is now a reserved keyword.
+            assert!(parse_partiql("SELECT map FROM t").is_err());
+            parse!(r#"SELECT "map", map_keys(m) FROM t"#);
+        }
+
+        // `<expr> IS [NOT] <type>`
+        #[test]
+        fn is_type() {
+            for (query, not, ty) in [
+                ("t1 IS DATE", false, "DATE"),
+                ("t1 IS NOT DATE", true, "DATE"),
+                ("t1 IS TIME", false, "TIME"),
+                ("t1 IS NOT TIME", true, "TIME"),
+                ("t1 IS TIMESTAMP", false, "TIMESTAMP"),
+                ("t1 IS NOT TIMESTAMP", true, "TIMESTAMP"),
+                ("t1 IS TIME WITH TIME ZONE", false, "ZONE"),
+                ("t1 IS TIMESTAMP(3) WITHOUT TIME ZONE", false, "ZONE"),
+                ("t1 IS MAP<STRING, INT>", false, "MapType"),
+                ("t1 IS NOT MAP<STRING, MAP<STRING, INT>>", true, "MapType"),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::IsType(i) => {
+                        assert!(name(&i.node.ty).contains(ty), "{query}: {:?}", i.node.ty);
+                        assert_eq!(i.node.not, not, "{query}");
+                    }
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            // The other `IS` forms are unchanged.
+            for query in [
+                "t1 IS NULL",
+                "t1 IS NOT MISSING",
+                "t1 IS DATE '2023-01-01'",
+                "t1 IS INT",
+            ] {
+                assert!(
+                    !format!("{:?}", parse_expr(query)).contains("IsType"),
+                    "{query}"
+                );
+            }
+            parse!("SELECT T.col_map_str_key IS MAP<STRING, INT> FROM T_ALL_TYPES AS T");
+            // Only datetime and map types; other keyword sequences are not types.
+            for query in [
+                "x IS ZONE",
+                "x IS WITH TIME ZONE",
+                "x IS DATE DATE",
+                "x IS DATE(3)",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            parse!("SELECT * FROM t WHERE t.a IS DATE AND t.b IS NOT TIMESTAMP OR t.c IS NULL");
+        }
+
+        // `MAP<k, v>`, `CHARACTER VARYING [(n)]` and `DOUBLE PRECISION` as `CAST` targets
+        #[test]
+        fn cast_type_names() {
+            let cast_type = |q: &str| match parse_expr(q) {
+                ast::Expr::Call(c) => match &c.node.args[1].node {
+                    ast::CallArg::NamedType(t) => t.ty.clone(),
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            let words = |t: &ast::Type| match t {
+                ast::Type::CustomType(c) => c
+                    .parts
+                    .iter()
+                    .map(|p| match p {
+                        ast::CustomTypePart::Name(n) => n.value.clone(),
+                        ast::CustomTypePart::Parameterized(n, args) => {
+                            format!("{}({})", n.value, args.len())
+                        }
+                        other => panic!("{other:?}"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                other => panic!("{other:?}"),
+            };
+            for (query, expected) in [
+                (
+                    "CAST('abc' AS character varying(5))",
+                    "CHARACTER VARYING(1)",
+                ),
+                ("CAST('abc' AS CHAR VARYING(5))", "CHAR VARYING(1)"),
+            ] {
+                assert_eq!(words(&cast_type(query)), expected, "{query}");
+            }
+            match cast_type("CAST(x AS MAP<STRING, ANY>)") {
+                ast::Type::MapType(k, v) => {
+                    assert_eq!(words(&k), "STRING");
+                    assert_eq!(words(&v), "ANY");
+                }
+                other => panic!("{other:?}"),
+            }
+            match cast_type("CAST(x AS MAP<VARCHAR(3), MAP<STRING, BIGINT>>)") {
+                ast::Type::MapType(k, v) => {
+                    assert_eq!(words(&k), "VARCHAR(1)");
+                    assert!(matches!(*v, ast::Type::MapType(_, _)));
+                }
+                other => panic!("{other:?}"),
+            }
+            parse!("SELECT CAST(T.col_map_str_key AS MAP<STRING, BIGINT>) FROM T_ALL_TYPES AS T");
+            parse!("SELECT CAST(x AS MAP /* c */ <STRING, INT>) FROM t");
+            // A missing comma between arguments is still reported as such.
+            let err = format!("{:?}", parse_partiql("SELECT foo(a b) FROM t"));
+            assert!(err.contains("UNQUOTED_IDENT"), "{err}");
+            // CAST with a type pretty-prints (it panicked before).
+            {
+                use partiql_common::pretty::ToPretty;
+                for query in [
+                    "CAST(x AS MAP<STRING, INT>)",
+                    "CAST(x AS CHARACTER VARYING(5))",
+                    "CAST(x AS DATE)",
+                ] {
+                    let printed = parse!(query).to_pretty_string(80).unwrap();
+                    assert!(printed.contains("AS"), "{query}: {printed}");
+                }
+            }
+            // Other pairs of words are not types.
+            assert!(parse_partiql("CAST(1 AS DOUBLE VARYING)").is_err());
+            assert!(parse_partiql("CAST(1 AS DOUBLE PRECISION(3))").is_err());
+            assert!(parse_partiql("CAST(x AS CHAR VARYING(5, 6))").is_err());
+            assert!(parse_partiql("CAST(x AS CHARACTER VARYING(DATE))").is_err());
+            assert!(parse_partiql("CAST(1 AS MAP<STRING>)").is_err());
+        }
+
+        /// The Debug text of the statement parsed from `q`, without its node ids.
+        fn shape(q: &str) -> String {
+            let debug = format!("{:?}", parse!(q));
+            let mut out = String::with_capacity(debug.len());
+            let mut rest = debug.as_str();
+            while let Some(i) = rest.find("NodeId(") {
+                out.push_str(&rest[..i + "NodeId(".len()]);
+                rest = rest[i + "NodeId(".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+            }
+            out.push_str(rest);
+            out
+        }
+
+        // The type forms: two-word names, MAP key and value types, time precisions.
+        #[test]
+        fn type_forms() {
+            let cast_type = |q: &str| match parse_expr(q) {
+                ast::Expr::Call(c) => match &c.node.args[1].node {
+                    ast::CallArg::NamedType(t) => t.ty.clone(),
+                    other => panic!("{q}: {other:?}"),
+                },
+                other => panic!("{q}: {other:?}"),
+            };
+            // The two-word names without a length are the existing `Type` variants.
+            assert_eq!(
+                cast_type("CAST(1 AS DOUBLE PRECISION)"),
+                ast::Type::DoublePrecisionType
+            );
+            assert_eq!(
+                cast_type("CAST('a' AS CHARACTER VARYING)"),
+                ast::Type::CharacterVaryingType
+            );
+            assert_eq!(
+                cast_type("CAST('a' AS char varying)"),
+                ast::Type::CharacterVaryingType
+            );
+            // A map's key and value types come from a fixed list of type names, without BAG or
+            // a user-defined (unknown or quoted) name, and with their own parameters only.
+            for query in [
+                "CAST(x AS MAP<BAG, INT>)",
+                "CAST(x AS MAP<INT, BAG>)",
+                "CAST(x AS MAP<foo, bar>)",
+                r#"CAST(x AS MAP<"s", INT>)"#,
+                "CAST(x AS MAP<INT(3), INT>)",
+                "CAST(x AS MAP<STRING, ZONE>)",
+                "x IS MAP<STRING, TIME(10)>",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            for query in [
+                "CAST(x AS MAP<VARCHAR(3), DECIMAL(5, 2)>)",
+                "CAST(x AS MAP<string, any>)",
+                "CAST(x AS MAP<INT, CHARACTER VARYING(3)>)",
+                "CAST(x AS MAP<DATE, TIME(3) WITH TIME ZONE>)",
+                "CAST(x AS MAP<BIGINT, MAP<SYMBOL, DOUBLE PRECISION>>)",
+            ] {
+                parse!(query);
+            }
+            // A time precision is 0 to 9.
+            for query in ["x IS TIME(10)", "x IS TIMESTAMP(12) WITH TIME ZONE"] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            parse!("x IS TIME(0)");
+            parse!("x IS TIMESTAMP(9) WITHOUT TIME ZONE");
+            // Two words that are not a type in a named argument are an unexpected token, as
+            // before, not a type error.
+            let err = format!("{:?}", parse_partiql("foo(x: a b)"));
+            assert!(err.contains("UnexpectedToken"), "{err}");
+            assert!(!err.contains("unknown type"), "{err}");
+        }
+
+        // `IS NOT <type>` is one node, `IsType` with `not` set, so it pretty-prints and
+        // parses back inside other predicates.
+        #[test]
+        fn is_not_type_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for query in [
+                "x IS NOT DATE IS NULL",
+                "NOT x IS NOT MAP<STRING, INT>",
+                "x IS DATE IS NOT NULL",
+            ] {
+                let printed = parse!(query).to_pretty_string(80).unwrap();
+                assert_eq!(shape(&printed), shape(query), "{query} -> {printed}");
+            }
+        }
+
+        // Known limits: `IS <type>` makes `IsType` only for DATE, TIME, TIMESTAMP and MAP; other
+        // types keep the `IS <expr>` tree, and two words after `IS` are a type and an alias.
+        #[test]
+        fn is_type_partial() {
+            for query in ["x IS INT", "x IS STRING", "x IS DECIMAL(5, 2)"] {
+                match parse_expr(query) {
+                    ast::Expr::BinOp(b) => assert_eq!(b.node.kind, ast::BinOpKind::Is, "{query}"),
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
+            let stmt = format!("{:?}", parse!("SELECT x IS DOUBLE PRECISION FROM t"));
+            assert!(stmt.contains(r#"value: "PRECISION""#), "{stmt}");
+        }
+
+        // MAP is reserved: `map` needs quotes wherever it names something.
+        // These parsed before.
+        #[test]
+        fn map_as_name_needs_quotes() {
+            for (bare, quoted) in [
+                ("SELECT map FROM t", r#"SELECT "map" FROM t"#),
+                ("SELECT t.map FROM t", r#"SELECT t."map" FROM t"#),
+                ("SELECT map(1) FROM t", r#"SELECT "map"(1) FROM t"#),
+                ("SELECT * FROM map", r#"SELECT * FROM "map""#),
+                ("SELECT x AS map FROM t", r#"SELECT x AS "map" FROM t"#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // `&` is an operator at the level of `||`
+        #[test]
+        fn bitwise_and() {
+            let bin = |q: &str| match parse_expr(q) {
+                ast::Expr::BinOp(b) => b.node,
+                other => panic!("{q}: {other:?}"),
+            };
+            let b = bin("t1 & t1");
+            assert_eq!(b.kind, ast::BinOpKind::BitwiseAnd);
+            // left-associative with `||`, binds looser than `+` and tighter than `=`
+            let b = bin("a || b & c");
+            assert_eq!(b.kind, ast::BinOpKind::BitwiseAnd);
+            assert!(
+                matches!(*b.lhs, ast::Expr::BinOp(ref l) if l.node.kind == ast::BinOpKind::Concat)
+            );
+            let b = bin("a + 1 & 3");
+            assert_eq!(b.kind, ast::BinOpKind::BitwiseAnd);
+            let b = bin("a & 3 = 1");
+            assert_eq!(b.kind, ast::BinOpKind::Eq);
+            parse!("SELECT b & b FROM T");
+            parse!("SELECT b & 3 FROM T");
         }
     }
 

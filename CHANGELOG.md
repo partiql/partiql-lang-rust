@@ -15,8 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases and lateral joins resolve per the spec. With `VarRefResolution::Static`, an unqualified name with several candidate FROM bindings is a new `AstTransformError::AmbiguousReference`; `Dynamic` still picks the first non-`MISSING` candidate at evaluation time.
 - partiql-logical-planner: aggregate arguments resolve against the names visible before `GROUP BY` (`SUM(c) ... GROUP BY c` sums the input's `c`).
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
+- *BREAKING* partiql-parser: `MAP` is now a reserved keyword, so that `MAP<...>` after `IS` or in `CAST(... AS ...)` cannot also read as `map < ...`; `map` must be quoted wherever it names something: a variable (`SELECT "map" FROM t`), a path step (`t."map"`), a function (`"map"(1)`), a table (`FROM "map"`) or an alias (`AS "map"`). Identifiers that merely start with `map`, such as `map_keys`, are unaffected.
 
 ### Added
+- partiql-parser: Parsing support for the following (lowering does not support them yet):
+  - the `MAP { <key>: <value>, ... }` constructor (new `Expr::Map` / `ast::Map`);
+  - the `MAP<key, value>` type (new `Type::MapType`) in `CAST` and `IS`. Its key and value types are a fixed list of type names (BOOL to SEXP; CHAR, VARCHAR, FLOAT, CLOB and BLOB with one parameter; DECIMAL, DEC and NUMERIC with up to two), `DATE`, `TIME`, `TIMESTAMP`, a two-word type or another `MAP`; not `BAG` and not a user-defined (unknown or quoted) name;
+  - `<expr> IS [NOT] <type>` (new `Expr::IsType` / `ast::IsType`, whose `not` flag marks `IS NOT`) for `DATE`, `TIME` and `TIMESTAMP` (with a precision of 0 to 9, with or without time zone) and `MAP<k, v>`. This is partial: other types keep the existing `IS <expr>` tree (`x IS INT` is `BinOp(Is, x, VarRef(INT))`), `IS INTERVAL ...` is not supported, and `x IS DOUBLE PRECISION` still reads `PRECISION` as an alias, as before;
+  - the two-word type names `CHARACTER VARYING [(n)]` and `DOUBLE PRECISION` in `CAST`. Without a length they are the existing `Type::CharacterVaryingType` and `Type::DoublePrecisionType`; `CHARACTER VARYING(n)` is a two-word `Type::CustomType`, as no `Type` variant holds a length. `CHAR VARYING [(n)]`, SQL's other spelling, is accepted too;
+  - the `&` operator (new `BinOpKind::BitwiseAnd`), at the precedence of `||`, left-associative. PartiQL does not define what `&` means; reading it as a bitwise AND is this crate's choice. A prefix form (`& a`) and longer operators such as `&&` are not supported.
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
 - partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
 - partiql-parser: `Parser::parse_statements` parses a `;`-separated script into multiple statements (optional trailing `;`). Single-statement `Parser::parse` is unchanged and still rejects `;`.
@@ -41,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-extension-ddl: a shape with no DDL form (e.g. `Graph`) returns `ShapeEncodingError::UnsupportedEncoding` instead of panicking.
 - partiql-extension-ddl: a field name containing `"` or `\` is an `UnsupportedEncoding` error; a name such as `a" INT,"b` used to produce an extra column. Other characters, including control characters, are written as before.
 - partiql-types: the hash of an `IndexSet` (struct constraints, struct fields, `AnyOf` members) no longer depends on insertion order, matching `IndexSet` equality. Equal sets built in different orders now hash equally, and sets nested in other sets (e.g. a reordered `Fields` constraint) now also compare equal.
+
+### Fixed
+- partiql-ast: a type argument of a function call (`CallArg::PositionalType`, `CallArg::NamedType`, e.g. the target of `CAST(x AS DATE)`) now pretty-prints instead of panicking with `todo!`.
 
 ### Removed
 

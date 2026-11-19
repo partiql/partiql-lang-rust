@@ -352,6 +352,12 @@ pub trait Visitor<'ast> {
     fn exit_in(&mut self, _in: &'ast ast::In) -> Traverse {
         Traverse::Continue
     }
+    fn enter_is_type(&mut self, _is_type: &'ast ast::IsType) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_is_type(&mut self, _is_type: &'ast ast::IsType) -> Traverse {
+        Traverse::Continue
+    }
     fn enter_case(&mut self, _case: &'ast ast::Case) -> Traverse {
         Traverse::Continue
     }
@@ -380,6 +386,12 @@ pub trait Visitor<'ast> {
         Traverse::Continue
     }
     fn exit_struct(&mut self, _struct: &'ast ast::Struct) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_map(&mut self, _map: &'ast ast::Map) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_map(&mut self, _map: &'ast ast::Map) -> Traverse {
         Traverse::Continue
     }
     fn enter_bag(&mut self, _bag: &'ast ast::Bag) -> Traverse {

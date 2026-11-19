@@ -447,10 +447,12 @@ impl PrettyDoc for Expr {
             Expr::Like(inner) => inner.pretty_doc(arena),
             Expr::Between(inner) => inner.pretty_doc(arena),
             Expr::In(inner) => inner.pretty_doc(arena),
+            Expr::IsType(inner) => inner.pretty_doc(arena),
             Expr::Case(inner) => inner.pretty_doc(arena),
             Expr::Struct(inner) => inner.pretty_doc(arena),
             Expr::Bag(inner) => inner.pretty_doc(arena),
             Expr::List(inner) => inner.pretty_doc(arena),
+            Expr::Map(inner) => inner.pretty_doc(arena),
             Expr::Path(inner) => inner.pretty_doc(arena),
             Expr::Call(inner) => inner.pretty_doc(arena),
             Expr::CallAgg(inner) => inner.pretty_doc(arena),
@@ -581,6 +583,12 @@ impl PrettyDoc for Type {
             Type::ListType => arena.text("LIST"),
             Type::BagType => arena.text("BAG"),
             Type::AnyType => arena.text("ANY"),
+            Type::MapType(k, v) => arena
+                .text("MAP<")
+                .append(k.pretty_doc(arena))
+                .append(arena.text(", "))
+                .append(v.pretty_doc(arena))
+                .append(arena.text(">")),
         }
     }
 }
@@ -647,6 +655,7 @@ impl PrettyDoc for BinOp {
             BinOpKind::And => (PRETTY_INDENT_MINOR_NEST, "AND"),
             BinOpKind::Or => (PRETTY_INDENT_MINOR_NEST, "OR"),
             BinOpKind::Concat => (0, "||"),
+            BinOpKind::BitwiseAnd => (0, "&"),
             BinOpKind::Eq => (0, "="),
             BinOpKind::Gt => (0, ">"),
             BinOpKind::Gte => (0, ">="),
@@ -843,6 +852,55 @@ impl PrettyDoc for Struct {
     }
 }
 
+impl PrettyDoc for Map {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let entries = self.entries.iter().map(|expr_pair| {
+            let k = expr_pair.first.pretty_doc(arena);
+            let v = expr_pair.second.pretty_doc(arena);
+            let sep = arena.text(": ");
+
+            k.append(sep).group().append(v).group()
+        });
+        let entries = pretty_seq_doc(
+            entries,
+            "{",
+            None,
+            "}",
+            ",",
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
+        );
+        arena.text("MAP ").append(entries)
+    }
+}
+
+impl PrettyDoc for IsType {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let IsType { value, ty, not } = self;
+        let expr = arena
+            .intersperse(
+                [
+                    value.pretty_doc(arena),
+                    arena.text(if *not { "IS NOT" } else { "IS" }),
+                    ty.pretty_doc(arena),
+                ],
+                arena.space(),
+            )
+            .group();
+        pretty_parenthesized_doc(expr, arena).group()
+    }
+}
+
 impl PrettyDoc for StructLit {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
@@ -959,13 +1017,14 @@ impl PrettyDoc for CallArg {
         match self {
             CallArg::Star() => arena.text("*"),
             CallArg::Positional(arg) => arg.pretty_doc(arena),
-            CallArg::PositionalType(_) => {
-                todo!("CallArg::PositionalType")
-            }
+            CallArg::PositionalType(ty) => ty.pretty_doc(arena),
             CallArg::Named(arg) => arg.pretty_doc(arena),
-            CallArg::NamedType(_) => {
-                todo!("CallArg::NamedType")
-            }
+            CallArg::NamedType(CallArgNamedType { name, ty }) => pretty_seperated_doc(
+                ":",
+                [name.pretty_doc(arena), ty.pretty_doc(arena)],
+                0,
+                arena,
+            ),
         }
     }
 }

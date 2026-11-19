@@ -413,11 +413,15 @@ pub enum Expr {
     Like(AstNode<Like>),
     Between(AstNode<Between>),
     In(AstNode<In>),
+    /// `<expr> IS <type>`, e.g. `x IS DATE`
+    IsType(AstNode<IsType>),
     Case(AstNode<Case>),
     /// Constructors
     Struct(AstNode<Struct>),
     Bag(AstNode<Bag>),
     List(AstNode<List>),
+    /// `MAP { <key>: <value>, ... }`
+    Map(AstNode<Map>),
     /// Other expression types
     Path(AstNode<Path>),
     Call(AstNode<Call>),
@@ -443,10 +447,12 @@ impl IdAnnotated<NodeId> for Expr {
             Expr::Like(l) => l.id(),
             Expr::Between(l) => l.id(),
             Expr::In(l) => l.id(),
+            Expr::IsType(l) => l.id(),
             Expr::Case(c) => c.id(),
             Expr::Struct(s) => s.id(),
             Expr::Bag(b) => b.id(),
             Expr::List(l) => l.id(),
+            Expr::Map(m) => m.id(),
             Expr::Path(p) => p.id(),
             Expr::Call(c) => c.id(),
             Expr::CallAgg(c) => c.id(),
@@ -585,6 +591,10 @@ pub enum BinOpKind {
     Or,
     // String
     Concat,
+    // Bitwise
+    /// `&`, at the level of `||`; PartiQL does not define its meaning, and
+    /// reading it as a bitwise AND is this crate's choice
+    BitwiseAnd,
     // Comparison
     Eq,
     Gt,
@@ -669,10 +679,29 @@ pub struct ExprPair {
     pub second: Box<Expr>,
 }
 
+/// `<value> IS [NOT] <ty>`, a type test; `not` marks `IS NOT`
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct IsType {
+    pub value: Box<Expr>,
+    #[visit(skip)]
+    pub ty: Type,
+    /// `IS NOT <ty>`
+    #[visit(skip)]
+    pub not: bool,
+}
+
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Struct {
     pub fields: Vec<ExprPair>,
+}
+
+/// A map constructor, `MAP { <key>: <value>, ... }`; unlike a struct, its keys need not be strings
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Map {
+    pub entries: Vec<ExprPair>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -996,6 +1025,8 @@ pub enum Type {
     ListType,
     BagType,
     AnyType,
+    /// `MAP<key, value>`
+    MapType(Box<Type>, Box<Type>),
 
     CustomType(CustomType),
 }
