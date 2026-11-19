@@ -1066,30 +1066,84 @@ fn system_catalog_replaces_same_named_catalog() {
     assert_eq!(resolved(&s, &reg(&["orders"])), None);
 }
 
-/// With a namespace in an adapter-backed current catalog, an unqualified name does not resolve to
-/// a table named like the namespace (a `SharedCatalog` has no namespaces).
-#[test]
-fn adapter_namespace_does_not_match_table_named_like_it() {
+fn adapter_over(names: &[&str]) -> Arc<dyn TypedCatalog> {
     let mut catalog = PartiqlCatalog::default();
-    for name in ["orders", "shop"] {
+    for name in names {
         catalog
             .add_type_entry(TypeEnvEntry::new(name, &[], PartiqlShape::Dynamic))
             .unwrap();
     }
     let shared: Arc<dyn SharedCatalog> = Arc::new(catalog.to_shared_catalog());
-    let adapter: Arc<dyn TypedCatalog> = Arc::new(LegacyCatalogAdapter::new(shared));
-    let s = session("default", &["shop"], vec![adapter.clone()]);
-    assert_eq!(resolved(&s, &reg(&["orders"])), None);
-    // Written by the user, `shop.orders` is still the table `shop` with the path `orders`.
-    assert_eq!(
-        resolved(&s, &reg(&["shop", "orders"])),
-        Some(("default".into(), "\"shop\"".into(), strs(&["orders"])))
+    Arc::new(LegacyCatalogAdapter::new(shared))
+}
+
+/// A catalog without namespaces is not searched with the session namespace prepended, so a
+/// namespace never matches a table named like it, and what the user wrote resolves the same
+/// with or without a namespace, quoted or not, qualified by the catalog or not.
+#[test]
+fn adapter_namespace_does_not_match_table_named_like_it() {
+    let shop = |path: &[&str]| Some(("default".into(), "\"shop\"".into(), strs(path)));
+    let delimited_shop_orders =
+        || Identifier::of([IdentPart::delimited("shop"), IdentPart::regular("orders")]).unwrap();
+    for namespace in [&[][..], &["shop"][..], &["Shop"][..], &["shop", "b"][..]] {
+        let s = session(
+            "default",
+            namespace,
+            vec![adapter_over(&["orders", "shop"])],
+        );
+        assert_eq!(resolved(&s, &reg(&["shop", "orders"])), shop(&["orders"]));
+        assert_eq!(resolved(&s, &delimited_shop_orders()), shop(&["orders"]));
+        assert_eq!(
+            resolved(&s, &reg(&["default", "shop", "orders"])),
+            shop(&["orders"])
+        );
+        let qualified = Identifier::of([
+            IdentPart::regular("default"),
+            IdentPart::delimited("shop"),
+            IdentPart::regular("orders"),
+        ]);
+        assert_eq!(resolved(&s, &qualified.unwrap()), shop(&["orders"]));
+        assert_eq!(
+            resolved(&s, &reg(&["orders", "x"])),
+            Some(("default".into(), "\"orders\"".into(), strs(&["x"])))
+        );
+        // A bare name has no step 2, so with a namespace it does not resolve.
+        let bare = resolved(&s, &reg(&["orders"]));
+        if namespace.is_empty() {
+            assert_eq!(bare, Some(("default".into(), "\"orders\"".into(), vec![])));
+        } else {
+            assert_eq!(bare, None);
+        }
+    }
+    // As a non-current catalog, the adapter is reached catalog-qualified, without the namespace.
+    let s = session(
+        "main",
+        &["shop"],
+        vec![
+            TestCatalog::shared("main", &[]),
+            adapter_over(&["orders", "shop"]),
+        ],
     );
-    // Without a namespace, nothing changes.
-    let s = session("default", &[], vec![adapter]);
+    assert_eq!(
+        resolved(&s, &reg(&["default", "orders"])),
+        Some(("default".into(), "\"orders\"".into(), vec![]))
+    );
+}
+
+#[test]
+fn namespaced_catalog_keeps_step1_with_namespace() {
+    // The default `has_namespaces` is true: the PLK order is unchanged for other catalogs.
+    let s = session(
+        "main",
+        &["shop"],
+        vec![TestCatalog::shared(
+            "main",
+            &[&["shop"], &["shop", "orders"]],
+        )],
+    );
     assert_eq!(
         resolved(&s, &reg(&["orders"])),
-        Some(("default".into(), "\"orders\"".into(), vec![]))
+        Some(("main".into(), "\"shop\".\"orders\"".into(), vec![]))
     );
 }
 
@@ -1110,6 +1164,12 @@ fn debug_output_omits_identity_and_property_values() {
         format!("{adapter:?}"),
         "LegacyCatalogAdapter { name: \"default\", .. }"
     );
+    let s = Session::builder()
+        .catalog("example")
+        .catalogs(example())
+        .build()
+        .unwrap();
+    assert_eq!(format!("{:?}", s.catalogs()), "[\"example\", \"$system\"]");
 }
 
 #[test]

@@ -19,10 +19,8 @@ use std::sync::Arc;
 ///   [`BindingsName::CaseInsensitive`] and a delimited one as [`BindingsName::CaseSensitive`],
 ///   so it matches by the inner catalog's case rules, not by [`super::equals_ignore_case`]
 ///   ([`crate::catalog::PartiqlCatalog`] ignores case with full Unicode case folding, for both).
-///   When this catalog is the session's current catalog and the session has a namespace,
-///   an identifier that [`super::resolve_table`] prefixed with that namespace resolves to
-///   nothing (the catalog has no namespaces), rather than to a table named like the
-///   namespace's first level, as partiql-lang-kotlin's standard catalog would.
+///   [`TypedCatalog::has_namespaces`] is `false`, so [`super::resolve_table`] does not prepend
+///   a session namespace to identifiers looked up in it (see there).
 /// - A [`SharedCatalog`] does not report the name an entry was registered under, so the resolved
 ///   [`Name`] is the part's text as written, and [`TypedCatalog::get_table`] looks a name up as
 ///   written ([`BindingsName::CaseSensitive`]) and, failing that, ignoring case
@@ -43,23 +41,6 @@ impl<C: ?Sized> LegacyCatalogAdapter<C> {
     #[must_use]
     pub fn inner(&self) -> &Arc<C> {
         &self.inner
-    }
-}
-
-impl<C: SharedCatalog + ?Sized> LegacyCatalogAdapter<C> {
-    /// Whether `identifier` starts with the session namespace, as [`super::resolve_table`]
-    /// prepends it (delimited parts) when this catalog is the current one. A [`SharedCatalog`]
-    /// has no namespaces, so such an identifier names none of its tables; matching its first
-    /// part would instead find a table named like the namespace.
-    fn is_namespace_prefixed(&self, session: &Session, identifier: &Identifier) -> bool {
-        let levels = session.namespace().levels();
-        session.catalog() == self.inner.name()
-            && !levels.is_empty()
-            && identifier.len() > levels.len()
-            && identifier
-                .parts()
-                .zip(levels)
-                .all(|(part, level)| !part.is_regular() && part.text() == level)
     }
 }
 
@@ -99,10 +80,11 @@ impl<C: SharedCatalog + ?Sized> TypedCatalog for LegacyCatalogAdapter<C> {
             .map(|entry| Table::new(name.clone(), entry.ty().clone()))
     }
 
-    fn resolve_table(&self, session: &Session, identifier: &Identifier) -> Option<Name> {
-        if self.is_namespace_prefixed(session, identifier) {
-            return None;
-        }
+    fn has_namespaces(&self) -> bool {
+        false
+    }
+
+    fn resolve_table(&self, _session: &Session, identifier: &Identifier) -> Option<Name> {
         let first = identifier.parts().next()?;
         let text = first.text();
         let exact = self

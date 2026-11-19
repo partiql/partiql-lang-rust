@@ -49,7 +49,9 @@ impl ResolvedTable {
 /// The table that `identifier` names in `session`, or `None`. The lookups are, in order:
 ///
 /// 1. in the current catalog, with the session namespace prepended to `identifier` (as
-///    delimited parts);
+///    delimited parts); skipped when there is a session namespace and the current catalog
+///    has no namespaces ([`TypedCatalog::has_namespaces`]), where partiql-lang-kotlin would
+///    match the namespace against a table name;
 /// 2. if `identifier` is qualified, in the current catalog as written (schema-qualified);
 /// 3. if `identifier` is qualified, in the catalog its first part names, matched as that part
 ///    is written (regular: ignoring case, an error if that matches several; delimited:
@@ -67,12 +69,13 @@ pub fn resolve_table(
         .get_catalog(session.catalog(), false)?
         .ok_or_else(|| ResolveError::MissingDefaultCatalog(session.catalog().to_string()))?;
 
-    // 1. The current catalog and namespace.
+    // 1. The current catalog and namespace; skipped for a namespace the catalog cannot have.
     let path = match session.namespace().as_identifier() {
-        Some(namespace) => namespace.append(identifier),
-        None => identifier.clone(),
+        Some(namespace) if default.has_namespaces() => Some(namespace.append(identifier)),
+        Some(_) => None,
+        None => Some(identifier.clone()),
     };
-    if let Some(found) = lookup(session, &default, &path) {
+    if let Some(found) = path.and_then(|path| lookup(session, &default, &path)) {
         return Ok(Some(found));
     }
     if !identifier.has_qualifier() {

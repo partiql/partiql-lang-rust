@@ -67,6 +67,13 @@ pub trait TypedCatalog: Debug + Send + Sync {
         None
     }
 
+    /// Whether the catalog's names can have namespaces. A catalog without them (`false`) is
+    /// never searched with the session namespace prepended by [`super::resolve_table`]; the
+    /// default is `true`, as every partiql-lang-kotlin catalog is treated.
+    fn has_namespaces(&self) -> bool {
+        true
+    }
+
     /// The scalar function overloads named `name` (partiql-lang-kotlin's legacy lookup by text).
     fn get_functions(&self, _session: &Session, _name: &str) -> Vec<Arc<dyn FnOverload>> {
         vec![]
@@ -162,8 +169,9 @@ impl CatalogNameAmbiguous {
     }
 }
 
-/// The catalogs of a session, by name (partiql-lang-kotlin `Catalogs`).
-#[derive(Debug, Clone, Default)]
+/// The catalogs of a session, by name (partiql-lang-kotlin `Catalogs`). Its `Debug` output lists
+/// the catalogs' names only.
+#[derive(Clone, Default)]
 pub struct Catalogs {
     catalogs: Vec<Arc<dyn TypedCatalog>>,
 }
@@ -220,5 +228,13 @@ impl Catalogs {
     /// The catalogs, in the order they were first added.
     pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn TypedCatalog>> {
         self.catalogs.iter()
+    }
+}
+
+impl std::fmt::Debug for Catalogs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.catalogs.iter().map(|c| c.name()))
+            .finish()
     }
 }

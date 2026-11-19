@@ -206,51 +206,32 @@ impl SessionBuilder {
     }
 }
 
-/// The catalogs by name, the property keys only, and no identity.
-fn debug_session(
-    f: &mut fmt::Formatter<'_>,
-    ty: &str,
-    catalog: Option<&str>,
-    catalogs: Vec<&str>,
-    namespace: &Namespace,
-    path: &Option<Path>,
-    properties: &BTreeMap<String, String>,
-) -> fmt::Result {
-    f.debug_struct(ty)
-        .field("catalog", &catalog)
-        .field("catalogs", &catalogs)
-        .field("namespace", namespace)
-        .field("path", path)
-        .field("property_keys", &properties.keys().collect::<Vec<_>>())
-        .finish_non_exhaustive()
-}
-
 impl fmt::Debug for Session {
+    /// The catalogs by name, the property keys only, and no identity.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        debug_session(
-            f,
-            "Session",
-            Some(&self.catalog),
-            self.catalogs.iter().map(|c| c.name()).collect(),
-            &self.namespace,
-            &self.path,
-            &self.properties,
-        )
+        f.debug_struct("Session")
+            .field("catalog", &self.catalog)
+            .field("catalogs", &self.catalogs)
+            .field("namespace", &self.namespace)
+            .field("path", &self.path())
+            .field("property_keys", &self.properties.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
     }
 }
 
 impl fmt::Debug for SessionBuilder {
+    /// The catalogs by name, the property keys only, and no identity.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut catalogs: Vec<&str> = self.catalogs.iter().map(|c| c.name()).collect();
-        catalogs.push(self.system.name());
-        debug_session(
-            f,
-            "SessionBuilder",
-            self.catalog.as_deref(),
-            catalogs,
-            &self.namespace,
-            &self.path,
-            &self.properties,
-        )
+        f.debug_struct("SessionBuilder")
+            .field("catalog", &self.catalog)
+            .field(
+                "catalogs",
+                &self.catalogs.iter().map(|c| c.name()).collect::<Vec<_>>(),
+            )
+            .field("system", &self.system.name())
+            .field("namespace", &self.namespace)
+            .field("path", &self.path)
+            .field("property_keys", &self.properties.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
     }
 }
