@@ -67,9 +67,10 @@ impl RoutineOverloadSignature {
     }
 }
 
-/// The concrete signature of a routine instance: its parameters, return type, and whether a
-/// NULL (`is_null_call`) or MISSING (`is_missing_call`) argument makes the call return NULL or
-/// MISSING without invoking it.
+/// The concrete signature of a routine instance: its parameters, its return type, and two flags
+/// (partiql-lang-kotlin's IS NULL CALL and IS MISSING CALL). With `is_null_call`, a NULL argument
+/// makes the call return NULL without invoking it; with `is_missing_call`, a MISSING argument
+/// makes it return MISSING. NULL and MISSING are absent values, not types.
 #[derive(Debug, Clone)]
 pub struct RoutineSignature {
     name: String,
@@ -163,7 +164,9 @@ pub trait FnOverload: Debug + Send + Sync {
     /// The signature the overload is declared with.
     fn signature(&self) -> &RoutineOverloadSignature;
 
-    /// The concrete instance for arguments of types `args`, or `None` if there is none.
+    /// The concrete instance for arguments of types `args`, or `None` if there is none. An
+    /// argument with no present value, such as a NULL or MISSING literal, has the type
+    /// [`PartiqlShape::Undefined`].
     fn instance(&self, args: &[PartiqlShape]) -> Option<RoutineSignature>;
 }
 
@@ -172,7 +175,9 @@ pub trait AggOverload: Debug + Send + Sync {
     /// The signature the overload is declared with.
     fn signature(&self) -> &RoutineOverloadSignature;
 
-    /// The concrete instance for arguments of types `args`, or `None` if there is none.
+    /// The concrete instance for arguments of types `args`, or `None` if there is none. An
+    /// argument with no present value, such as a NULL or MISSING literal, has the type
+    /// [`PartiqlShape::Undefined`].
     fn instance(&self, args: &[PartiqlShape]) -> Option<RoutineSignature>;
 }
 
