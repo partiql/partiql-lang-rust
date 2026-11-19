@@ -302,7 +302,7 @@ mod tests {
             }
         }
 
-        // `<window function> OVER (...)`, as in PartiQL Kotlin's `windowFunction`
+        // `<window function> OVER (...)`
         #[test]
         fn window_function() {
             for (query, name, args, partitions, order_keys) in [
@@ -377,7 +377,7 @@ mod tests {
             }
         }
 
-        // Only PartiQL Kotlin's window functions, with their arguments.
+        // Only the window functions listed on `WindowCall`, with their arguments.
         #[test]
         fn window_function_errors() {
             for query in [
@@ -421,7 +421,7 @@ mod tests {
             }
         }
 
-        // `IGNORE` and `RESPECT` are not reserved, as in PartiQL Kotlin's `nonReserved`: they
+        // `IGNORE` and `RESPECT` are not reserved: they
         // name aliases, tables and path steps, which parsed before; only `IGNORE NULLS` and
         // `RESPECT NULLS` (not followed by FIRST or LAST) are a null treatment.
         #[test]
@@ -455,7 +455,7 @@ mod tests {
             }
         }
 
-        // `OVER` and `PARTITION` are reserved, as in PartiQL Kotlin: they no longer name an
+        // `OVER` and `PARTITION` are non-reserved keywords: they no longer name an
         // alias, a table or an EXCLUDE path step unless quoted; these parsed before.
         #[test]
         fn over_partition_as_names_need_quotes() {
@@ -483,7 +483,7 @@ mod tests {
             assert!(parse_partiql("SELECT t.partition\u{20ac} FROM t").is_err());
         }
 
-        // PARTITION BY takes any expression, a superset of PartiQL Kotlin's column references.
+        // PARTITION BY takes any expression, not only column references.
         #[test]
         fn partition_by_expressions() {
             let w = window("RANK() OVER (PARTITION BY a + 1, f(b) ORDER BY c)");

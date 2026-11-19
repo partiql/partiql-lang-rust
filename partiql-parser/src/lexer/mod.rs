@@ -72,7 +72,7 @@ where
 /// A lexer that wraps another lexer (after comments are skipped) and joins `IGNORE NULLS` and
 /// `RESPECT NULLS`, a window function's null treatment, into one token each.
 ///
-/// `IGNORE` and `RESPECT` are not reserved (as in PartiQL Kotlin), so they lex as identifiers and
+/// `IGNORE` and `RESPECT` are not reserved, so they lex as identifiers and
 /// still name aliases and tables; joining them with `NULLS` here lets the grammar tell a null
 /// treatment from an alias without more look-ahead. `ORDER BY ignore NULLS FIRST` sorts by a
 /// column named `ignore`, so a `NULLS` followed by `FIRST` or `LAST` is not joined.

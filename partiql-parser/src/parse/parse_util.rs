@@ -242,12 +242,12 @@ pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstN
     }
 }
 
-/// Whether `call` is a window function PartiQL Kotlin's `windowFunctionType` allows (any case):
+/// Whether `call` is one of the window functions (any case):
 /// `RANK()`, `DENSE_RANK()`, `PERCENT_RANK()`, `CUME_DIST()` or `ROW_NUMBER()`, or `LEAD` or
 /// `LAG` of an expression with an optional integer-literal offset and an optional default.
 /// Only `LEAD` and `LAG` take a null treatment (`with_null_treatment`).
 pub(crate) fn is_window_function(call: &ast::Call, with_null_treatment: bool) -> bool {
-    // a quoted name such as `"LAG"` is a user function, as in PartiQL Kotlin, where these are keywords
+    // a quoted name such as `"LAG"` is a user function, not a window function
     if call.func_name.case != ast::CaseSensitivity::CaseInsensitive {
         return false;
     }

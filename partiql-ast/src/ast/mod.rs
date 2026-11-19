@@ -707,7 +707,7 @@ pub struct Call {
 }
 
 /// A window function call, `<call> [RESPECT | IGNORE NULLS] OVER <window>`, e.g.
-/// `LAG(a, 1) IGNORE NULLS OVER (PARTITION BY b ORDER BY c)`. As in PartiQL Kotlin, `call` is
+/// `LAG(a, 1) IGNORE NULLS OVER (PARTITION BY b ORDER BY c)`. `call` is
 /// one of `RANK()`, `DENSE_RANK()`, `PERCENT_RANK()`, `CUME_DIST()`, `ROW_NUMBER()`, or
 /// `LEAD`/`LAG(<expr> [, <offset> [, <default>]])`; only `LEAD` and `LAG` take a null treatment.
 ///

@@ -1419,7 +1419,7 @@ ExprPrecedence01: Synth<ast::Expr> = {
         };
         Synth::empty(call)
     },
-    // A window function, as in PartiQL Kotlin's `windowFunction`
+    // A window function
     <lo:@L> <call:FunctionCall> <call_hi:@R> <null_treatment:NullTreatment?> "OVER" <window:WindowNameOrSpec> <hi:@R> =>? {
         let call = match call {
             CallSite::Call(call) => Some(call),
