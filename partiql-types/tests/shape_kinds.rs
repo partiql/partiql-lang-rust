@@ -308,13 +308,12 @@ fn map_key_must_not_be_dynamic() {
     // As partiql-lang-kotlin's `PTypeMap`: "MAP key type must not be DYNAMIC".
     let mut bld = PartiqlNoIdShapeBuilder::default();
     let err = MapType::new(PartiqlShape::Dynamic, type_int32!(bld)).expect_err("dynamic key");
-    assert!(
-        matches!(&err, ShapeResultError::UnexpectedType(m) if m == "MAP key type must not be DYNAMIC"),
-        "{err:?}"
+    assert_eq!(err, ShapeResultError::DynamicMapKey);
+    assert_eq!(err.to_string(), "MAP key type must not be DYNAMIC");
+    assert_eq!(
+        bld.new_map(PartiqlShape::Dynamic, PartiqlShape::Dynamic),
+        Err(ShapeResultError::DynamicMapKey)
     );
-    assert!(bld
-        .new_map(PartiqlShape::Dynamic, PartiqlShape::Dynamic)
-        .is_err());
     // A dynamic value, or a key that is a union, is fine.
     let k = type_string!(bld);
     assert!(bld.new_map(k, PartiqlShape::Dynamic).is_ok());

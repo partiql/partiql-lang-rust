@@ -17,6 +17,9 @@ use thiserror::Error;
 pub enum ShapeResultError {
     #[error("Unexpected type `{0:?}` for static type bool")]
     UnexpectedType(String),
+    /// A map key type was [`PartiqlShape::Dynamic`], which partiql-lang-kotlin also rejects.
+    #[error("MAP key type must not be DYNAMIC")]
+    DynamicMapKey,
 }
 
 /// Result of attempts to encode to Ion.
@@ -1380,9 +1383,7 @@ impl MapType {
     #[inline]
     pub fn new(key: PartiqlShape, value: PartiqlShape) -> ShapeResult<Self> {
         if key.is_dynamic() {
-            return Err(ShapeResultError::UnexpectedType(
-                "MAP key type must not be DYNAMIC".to_string(),
-            ));
+            return Err(ShapeResultError::DynamicMapKey);
         }
         Ok(MapType {
             key: Box::new(key),
