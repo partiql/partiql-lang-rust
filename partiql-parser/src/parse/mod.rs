@@ -223,8 +223,8 @@ mod tests {
     mod literals {
         use super::*;
 
-        // An integer literal that does not fit in `i64` is an exact decimal, as in
-        // PartiQL Kotlin; one beyond the range of a decimal is still an error.
+        // An integer literal that does not fit in `i64` is an exact decimal; one beyond the
+        // range of a decimal is still an error.
         #[test]
         fn integer_beyond_i64() {
             use std::str::FromStr;
@@ -240,8 +240,8 @@ mod tests {
             ] {
                 assert_eq!(parse_lit(digits), dec(digits), "{digits}");
             }
-            // A minus sign directly before 9223372036854775808 makes i64::MIN, a BIGINT, as
-            // PartiQL Kotlin folds the sign into the integer literal.
+            // A minus sign directly before 9223372036854775808 makes i64::MIN, a BIGINT: the
+            // sign is folded into the integer literal.
             assert_eq!(
                 parse_lit("-9223372036854775808"),
                 ast::Lit::Int64Lit(i64::MIN)
@@ -281,8 +281,8 @@ mod tests {
             assert!(parse_partiql("79228162514264337593543950336").is_err());
         }
 
-        // A literal with an exponent is an approximate numeric, as in SQL and PartiQL
-        // Kotlin, including values beyond the range of a decimal.
+        // A literal with an exponent is an approximate numeric, as in SQL, including values
+        // beyond the range of a decimal.
         #[test]
         fn exponent_is_double() {
             for (text, value) in [
@@ -380,7 +380,7 @@ mod tests {
     mod non_literal_values {
         use super::*;
 
-        // Inside a quoted identifier `""` is an escaped `"`, as in SQL and PartiQL Kotlin.
+        // Inside a quoted identifier `""` is an escaped `"`, as in SQL.
         #[test]
         fn quoted_identifier_escaped_quote() {
             let var = |q: &str| match parse_expr(q) {
@@ -395,7 +395,7 @@ mod tests {
                 (r#""p""q`r""#, r#"p"q`r"#),
                 (r#""e""),f""#, r#"e"),f"#),
                 (r#""""#, ""),
-                // a backslash stands for itself, as in PartiQL Kotlin
+                // a backslash stands for itself
                 (r#""a\b""#, r#"a\b"#),
                 (r#""a\""#, r#"a\"#),
                 (r#""\\""#, r#"\\"#),

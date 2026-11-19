@@ -281,8 +281,8 @@ pub enum Token<'input> {
     UnquotedIdent(&'input str),
 
     // quoted identifiers (quoted with double quotes)
-    // As in SQL and PartiQL Kotlin's IDENTIFIER_QUOTED, a `""` inside the quotes is an
-    // escaped `"` and every other character, a backslash included, stands for itself. The
+    // As in SQL, a `""` inside the quotes is an escaped `"` and every other character, a
+    // backslash included, stands for itself. The
     // token keeps the raw text between the outer quotes; the parser unescapes it.
     #[regex(r#""([^"]|"")*""#,
             |lex| strip_outer(lex.slice(), 1))]
