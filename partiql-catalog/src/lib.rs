@@ -9,3 +9,4 @@ pub mod catalog;
 pub mod extension;
 pub mod scalar_fn;
 pub mod table_fn;
+pub mod typed;

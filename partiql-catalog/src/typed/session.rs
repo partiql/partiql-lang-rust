@@ -1,0 +1,203 @@
+//! The planning session: the current catalog and namespace, the catalogs, and the routine path.
+//!
+//! Ported from partiql-lang-kotlin v1.6.1 `org.partiql.spi.catalog.Session`.
+
+use super::catalog::{Catalogs, SystemCatalog, TypedCatalog};
+use super::identifier::{Namespace, Path};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+/// The errors of [`SessionBuilder::build`].
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SessionError {
+    #[error("Session catalog must be set")]
+    MissingCatalog,
+    #[error("Catalog names must be unique: {0}")]
+    DuplicateCatalogName(String),
+}
+
+/// A planning session (partiql-lang-kotlin `Session`). Build one with [`Session::builder`].
+#[derive(Debug, Clone)]
+pub struct Session {
+    identity: String,
+    catalog: String,
+    catalogs: Catalogs,
+    namespace: Namespace,
+    system_namespace: Namespace,
+    path: Option<Path>,
+    properties: BTreeMap<String, String>,
+}
+
+impl Session {
+    #[must_use]
+    pub fn builder() -> SessionBuilder {
+        SessionBuilder::default()
+    }
+
+    /// A session whose current catalog is the system catalog, and which has no other.
+    #[must_use]
+    pub fn empty() -> Session {
+        Session::builder()
+            .catalog(super::SYSTEM_CATALOG_NAME)
+            .build()
+            .expect("the current catalog is set")
+    }
+
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    /// The name of the current catalog.
+    #[must_use]
+    pub fn catalog(&self) -> &str {
+        &self.catalog
+    }
+
+    /// The catalogs, which include the system catalog.
+    #[must_use]
+    pub fn catalogs(&self) -> &Catalogs {
+        &self.catalogs
+    }
+
+    /// The current namespace in the current catalog.
+    #[must_use]
+    pub fn namespace(&self) -> &Namespace {
+        &self.namespace
+    }
+
+    /// The routine path. If none was set, it is the current catalog and namespace followed by
+    /// the system catalog; a path that was set has the system catalog appended unless it already
+    /// contains it.
+    #[must_use]
+    pub fn path(&self) -> Path {
+        match &self.path {
+            Some(path) => path.clone(),
+            None => {
+                let current = Namespace::of([self.catalog.as_str()])
+                    .append(self.namespace.levels().iter().cloned());
+                Path::of([current, self.system_namespace.clone()])
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn properties(&self) -> &BTreeMap<String, String> {
+        &self.properties
+    }
+}
+
+/// The builder of a [`Session`]. The current catalog must be set; the system catalog defaults to
+/// [`SystemCatalog`].
+#[derive(Debug, Clone)]
+pub struct SessionBuilder {
+    identity: String,
+    catalog: Option<String>,
+    system: Arc<dyn TypedCatalog>,
+    catalogs: Vec<Arc<dyn TypedCatalog>>,
+    namespace: Namespace,
+    path: Option<Path>,
+    properties: BTreeMap<String, String>,
+}
+
+impl Default for SessionBuilder {
+    fn default() -> Self {
+        SessionBuilder {
+            identity: "unknown".to_string(),
+            catalog: None,
+            system: Arc::new(SystemCatalog),
+            catalogs: vec![],
+            namespace: Namespace::empty(),
+            path: None,
+            properties: BTreeMap::new(),
+        }
+    }
+}
+
+impl SessionBuilder {
+    #[must_use]
+    pub fn identity(mut self, identity: impl Into<String>) -> Self {
+        self.identity = identity.into();
+        self
+    }
+
+    /// The name of the current catalog.
+    #[must_use]
+    pub fn catalog(mut self, catalog: impl Into<String>) -> Self {
+        self.catalog = Some(catalog.into());
+        self
+    }
+
+    /// The current namespace.
+    #[must_use]
+    pub fn namespace(mut self, namespace: Namespace) -> Self {
+        self.namespace = namespace;
+        self
+    }
+
+    /// The routine path; see [`Session::path`].
+    #[must_use]
+    pub fn path(mut self, path: Path) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    #[must_use]
+    pub fn property(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.properties.insert(name.into(), value.into());
+        self
+    }
+
+    /// The system catalog, in place of [`SystemCatalog`].
+    #[must_use]
+    pub fn system(mut self, catalog: Arc<dyn TypedCatalog>) -> Self {
+        self.system = catalog;
+        self
+    }
+
+    /// Adds catalogs, whose names must be unique.
+    #[must_use]
+    pub fn catalogs(mut self, catalogs: impl IntoIterator<Item = Arc<dyn TypedCatalog>>) -> Self {
+        self.catalogs.extend(catalogs);
+        self
+    }
+
+    pub fn build(self) -> Result<Session, SessionError> {
+        let mut catalogs = Catalogs::default();
+        let mut names: Vec<&str> = vec![];
+        for catalog in &self.catalogs {
+            if names.contains(&catalog.name()) {
+                return Err(SessionError::DuplicateCatalogName(
+                    catalog.name().to_string(),
+                ));
+            }
+            names.push(catalog.name());
+            catalogs.add(catalog.clone());
+        }
+        let catalog = self.catalog.ok_or(SessionError::MissingCatalog)?;
+        let system_namespace = Namespace::of([self.system.name()]);
+        catalogs.add(self.system);
+        let path = self.path.map(|path| {
+            if path.contains(&system_namespace) {
+                path
+            } else {
+                Path::of(
+                    path.namespaces()
+                        .iter()
+                        .cloned()
+                        .chain([system_namespace.clone()]),
+                )
+            }
+        });
+        Ok(Session {
+            identity: self.identity,
+            catalog,
+            catalogs,
+            namespace: self.namespace,
+            system_namespace,
+            path,
+            properties: self.properties,
+        })
+    }
+}
