@@ -475,52 +475,162 @@ mod tests {
             }
         }
 
-        // A sign before the string applies to the literal, as `INTERVAL -'1' DAY` in
-        // PartiQL Kotlin's `intervalLiteral`.
+        // A minus sign before the string applies to the literal: `INTERVAL -'1' DAY` is
+        // `-(INTERVAL '1' DAY)`. This differs from PartiQL Kotlin on purpose, which accepts the
+        // sign and drops it; a plus sign is dropped here too.
         #[test]
         fn interval_signed() {
-            for (query, kind) in [
-                ("INTERVAL -'1' DAY", ast::UniOpKind::Neg),
-                ("INTERVAL + '1-2' YEAR TO MONTH", ast::UniOpKind::Pos),
-            ] {
-                match parse_expr(query) {
-                    ast::Expr::UniOp(u) => {
-                        assert_eq!(u.node.kind, kind, "{query}");
-                        assert!(
-                            matches!(*u.node.expr, ast::Expr::Lit(ref l) if matches!(l.node, ast::Lit::TypedLit(_, ast::Type::IntervalType(_)))),
-                            "{query}"
-                        );
-                    }
-                    other => panic!("{query}: {other:?}"),
+            match parse_expr("INTERVAL -'1' DAY") {
+                ast::Expr::UniOp(u) => {
+                    assert_eq!(u.node.kind, ast::UniOpKind::Neg);
+                    assert!(
+                        matches!(*u.node.expr, ast::Expr::Lit(ref l) if matches!(l.node, ast::Lit::TypedLit(_, ast::Type::IntervalType(_)))),
+                        "{u:?}"
+                    );
                 }
+                other => panic!("{other:?}"),
             }
+            assert_eq!(
+                shape("INTERVAL + '1-2' YEAR TO MONTH"),
+                shape("INTERVAL '1-2' YEAR TO MONTH")
+            );
+            // the minus sign is then the same as one before INTERVAL
+            assert_eq!(shape("INTERVAL -'1' DAY"), shape("-INTERVAL '1' DAY"));
             parse!("SELECT INTERVAL -'1' DAY AS d FROM t");
+        }
+
+        // Precisions in the ranges PartiQL Kotlin's `IntervalQualifier` allows: a single
+        // field's precision at least 1, a range's start precision 1 to 9 and its end
+        // fractional precision 0 to 9, and every precision a 32-bit integer.
+        #[test]
+        fn interval_precision_bounds() {
+            for query in [
+                "INTERVAL '1' DAY(0)",
+                "INTERVAL '1' SECOND(0)",
+                "INTERVAL '1' YEAR(0) TO MONTH",
+                "INTERVAL '1' DAY(10) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND(10)",
+                "INTERVAL '1' DAY(3000000000)",
+                "INTERVAL '1' SECOND(2, 3000000000)",
+                "CAST(x AS INTERVAL DAY(0))",
+            ] {
+                assert!(parse_partiql(query).is_err(), "{query}");
+            }
+            for query in [
+                "INTERVAL '1' DAY(1)",
+                "INTERVAL '1' DAY(12)",
+                "INTERVAL '1' SECOND(1, 0)",
+                "INTERVAL '1' YEAR(1) TO MONTH",
+                "INTERVAL '1' DAY(9) TO HOUR",
+                "INTERVAL '1' DAY TO SECOND(0)",
+                "INTERVAL '1' DAY TO SECOND(9)",
+            ] {
+                parse!(query);
+            }
+        }
+
+        // `TO` and `INTERVAL` are keywords, so they no longer name an alias, a table or an
+        // EXCLUDE path step unless quoted; these parsed before. `INTERVAL` is also no longer a
+        // path step in an expression, nor a type name by itself.
+        #[test]
+        fn interval_keywords_as_names_need_quotes() {
+            for (bare, quoted) in [
+                ("SELECT a AS to FROM t", r#"SELECT a AS "to" FROM t"#),
+                ("SELECT a to FROM t", r#"SELECT a "to" FROM t"#),
+                ("SELECT a FROM t AS to", r#"SELECT a FROM t AS "to""#),
+                (
+                    "SELECT a FROM t AS x AT to",
+                    r#"SELECT a FROM t AS x AT "to""#,
+                ),
+                (
+                    "SELECT * EXCLUDE t.to FROM t",
+                    r#"SELECT * EXCLUDE t."to" FROM t"#,
+                ),
+                (
+                    "SELECT x FROM t GROUP BY x GROUP AS to",
+                    r#"SELECT x FROM t GROUP BY x GROUP AS "to""#,
+                ),
+                ("CREATE TABLE to", r#"CREATE TABLE "to""#),
+                ("SELECT t.interval FROM t", r#"SELECT t."interval" FROM t"#),
+                ("CAST(x AS INTERVAL)", r#"CAST(x AS "INTERVAL")"#),
+            ] {
+                assert!(parse_partiql(bare).is_err(), "{bare}");
+                parse!(quoted);
+            }
+        }
+
+        // A lexing error right after TO is reported, not dropped.
+        #[test]
+        fn to_lex_error_after() {
+            assert!(parse_partiql("SELECT t.to\u{20ac} FROM t").is_err());
+        }
+
+        // Any non-reserved keyword may name a function argument, as an identifier may.
+        #[test]
+        fn non_reserved_keyword_argument_name() {
+            for query in ["f(to: 1)", "f(any: 1)", "f(simple: 1, to: 2)"] {
+                parse!(query);
+            }
+        }
+
+        /// The Debug text of the statement parsed from `q`, without its node ids, so that two
+        /// parses can be compared.
+        fn shape(q: &str) -> String {
+            let debug = format!("{:?}", parse!(q));
+            let mut out = String::with_capacity(debug.len());
+            let mut rest = debug.as_str();
+            while let Some(i) = rest.find("NodeId(") {
+                out.push_str(&rest[..i + "NodeId(".len()]);
+                rest = rest[i + "NodeId(".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+            }
+            out.push_str(rest);
+            out
         }
 
         // The pretty-printed literal and type parse back to the same AST.
         #[test]
         fn interval_pretty_round_trip() {
             use partiql_common::pretty::ToPretty;
-            for text in [
-                "INTERVAL '10' YEAR(2)",
-                "INTERVAL '10.234' SECOND(2, 3)",
-                "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
-                "INTERVAL '10-3' YEAR TO MONTH",
+            for (text, expected) in [
+                ("INTERVAL '10' YEAR(2)", "INTERVAL '10' YEAR(2)"),
+                (
+                    "INTERVAL '10.234' SECOND(2, 3)",
+                    "INTERVAL '10.234' SECOND(2, 3)",
+                ),
+                (
+                    "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
+                    "INTERVAL '2 3:4:5.000006' DAY(2) TO SECOND(6)",
+                ),
+                (
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                    "INTERVAL '10-3' YEAR TO MONTH",
+                ),
+                // no field-order check, as in PartiQL Kotlin
+                ("INTERVAL '1' MONTH TO YEAR", "INTERVAL '1' MONTH TO YEAR"),
+                ("INTERVAL -'1' DAY", "-INTERVAL '1' DAY"),
+                (
+                    "CAST(t.a AS INTERVAL DAY(2) TO SECOND(3))",
+                    r#"CAST(t.a, "AS":INTERVAL DAY(2) TO SECOND(3))"#,
+                ),
             ] {
-                let lit = parse_expr(text);
-                let printed = lit.to_pretty_string(80).unwrap();
-                assert_eq!(printed, text);
+                let printed = parse!(text).to_pretty_string(80).unwrap();
+                assert_eq!(printed, expected, "{text}");
+                assert_eq!(shape(&printed), shape(text), "{text}");
             }
-            // a CAST to an interval type pretty-prints (a type argument panicked before)
-            let printed = parse!("CAST(t.a AS INTERVAL DAY(2) TO SECOND(3))")
-                .to_pretty_string(80)
-                .unwrap();
-            assert!(
-                printed.contains("INTERVAL DAY(2) TO SECOND(3)"),
-                "{printed}"
-            );
-            let reprinted = parse!(&printed).to_pretty_string(80).unwrap();
-            assert_eq!(reprinted, printed);
+        }
+
+        // A type argument of a call pretty-prints (it panicked in `todo!` before) and parses back.
+        #[test]
+        fn type_argument_pretty_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for text in [
+                "CAST(x AS DATE)",
+                "CAST(x AS VARCHAR(5))",
+                "CAST(x AS TIME WITH TIME ZONE)",
+            ] {
+                let printed = parse!(text).to_pretty_string(80).unwrap();
+                assert_eq!(shape(&printed), shape(text), "{text} -> {printed}");
+            }
         }
     }
 

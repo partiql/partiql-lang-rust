@@ -1431,9 +1431,14 @@ ExprTerm: Synth<ast::Expr> = {
     // allows before the string (and drops); here it applies to the literal
     <lo:@L> "INTERVAL" <neg:IntervalSign> <ls:@L> <s:"String"> <q:IntervalQualifier> <hi:@R> => {
         let lit = ast::Lit::TypedLit(s.to_owned(), ast::Type::IntervalType(q));
-        let lit = ast::Expr::Lit(state.node(lit, ls..hi));
-        let kind = if neg { ast::UniOpKind::Neg } else { ast::UniOpKind::Pos };
-        Synth::empty(ast::Expr::UniOp(state.node(ast::UniOp{ kind, expr: Box::new(lit) }, lo..hi)))
+        // the literal spans `INTERVAL` too when the sign is dropped
+        let lit = ast::Expr::Lit(state.node(lit, if neg { ls..hi } else { lo..hi }));
+        if neg {
+            Synth::empty(ast::Expr::UniOp(state.node(ast::UniOp{ kind: ast::UniOpKind::Neg, expr: Box::new(lit) }, lo..hi)))
+        } else {
+            // a plus sign changes nothing
+            Synth::lit(lit)
+        }
     },
     <lo:@L> <c:ExprTermCollection> <hi:@R> => {
         if c.attrs.contains(Attrs::LIT) {
@@ -1963,8 +1968,9 @@ IntervalPrecision: (u32, Option<u32>) = {
 }
 
 IntervalPrecisionValue: u32 = {
-    <lo:@L> <n:"Int"> <hi:@R> =>? n.parse::<u32>()
-        .map_err(|_| lpop::ParseError::User{
+    // a 32-bit integer, as PartiQL Kotlin reads it with `toInt()`
+    <lo:@L> <n:"Int"> <hi:@R> =>? n.parse::<i32>().ok().and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| lpop::ParseError::User{
             error: ParseError::SyntaxError(
                 "invalid interval precision".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
         }),

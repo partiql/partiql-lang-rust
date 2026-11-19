@@ -579,8 +579,9 @@ impl Token<'_> {
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
-        matches!(self, Token::Any(_) | Token::Simple(_) | Token::To(_))
-            || self.is_graph_non_reserved()
+        // `TO` is left out: it names no special form, and the preprocessor's look-ahead after a
+        // candidate would hide a lexing error that follows it
+        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 
     #[inline]
