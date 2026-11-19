@@ -133,9 +133,9 @@ impl PartiqlBasicDdlEncoder {
             Static::Blob(n) => out.push_str(&with_length("BLOB", *n, ty.params())),
             Static::Clob(n) => out.push_str(&with_length("CLOB", *n, ty.params())),
             Static::Date => out.push_str("DATE"),
-            Static::Time(p) => out.push_str(&with_precision("TIME", *p, ty.params())),
+            Static::Time(p) => out.push_str(&with_time_precision(*p, ty.params())),
             Static::TimeTz(p) => {
-                out.push_str(&with_precision("TIME", *p, ty.params()));
+                out.push_str(&with_time_precision(*p, ty.params()));
                 out.push_str(" WITH TIME ZONE");
             }
             Static::Timestamp(p) => out.push_str(&with_precision("TIMESTAMP", *p, ty.params())),
@@ -150,7 +150,8 @@ impl PartiqlBasicDdlEncoder {
             Static::Map(m) => out.push_str(&self.write_type_map(m)?),
             // `Variant` (no DDL syntax agreed yet), `Graph`, and the non-exhaustive catch-all.
             _ => Err(ShapeEncodingError::UnsupportedEncoding(format!(
-                "`{ty}` has no DDL form"
+                "{:?} has no DDL form",
+                ty.ty()
             )))?,
         }
 
@@ -232,6 +233,17 @@ fn quoted_identifier(name: &str) -> ShapeDdlEncodeResult<String> {
         )))
     } else {
         Ok(format!("\"{name}\""))
+    }
+}
+
+/// `TIME(p)`, or a bare `TIME` when the precision was not specified and is the SQL default 0. A
+/// flagged non-default precision (partiql-lang-kotlin's `PType.time()` uses 6) is written, so the
+/// text reads back as the same precision.
+fn with_time_precision(p: usize, params: &TypeParams) -> String {
+    if params.unspecified_precision && p == TypeParams::DEFAULT_TIME_PRECISION {
+        "TIME".to_string()
+    } else {
+        format!("TIME({p})")
     }
 }
 

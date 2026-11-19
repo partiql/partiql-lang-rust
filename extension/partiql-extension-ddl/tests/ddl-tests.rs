@@ -4,7 +4,7 @@ use partiql_types::{
     struct_fields, type_bag, type_int, type_string, type_struct, PartiqlShapeBuilder,
     StructConstraint, StructField,
 };
-use partiql_types::{PartiqlShape, Static, StructType, VariantType, DEFAULT_LOB_LENGTH};
+use partiql_types::{PartiqlShape, Static, StructType, TypeParams, VariantType};
 
 #[test]
 fn basic_ddl_test() {
@@ -150,7 +150,7 @@ fn ddl_of_new_kinds() {
 
 #[test]
 fn ddl_omits_unspecified_parameters() {
-    use partiql_types::{IntervalQualifier, IntervalType, TypeParams};
+    use partiql_types::{IntervalQualifier, IntervalType};
     let mut bld = PartiqlShapeBuilder::default();
     let length = TypeParams::default().with_unspecified_length(true);
     let precision = TypeParams::default()
@@ -163,8 +163,8 @@ fn ddl_omits_unspecified_parameters() {
         (Static::StringVarying(1), length, "VARCHAR"),
         (Static::StringFixed(1), length, "CHAR"),
         // partiql-lang-kotlin's defaults: BLOB/CLOB length i32::MAX, TIME precision 0 or 6.
-        (Static::Blob(DEFAULT_LOB_LENGTH), length, "BLOB"),
-        (Static::Clob(DEFAULT_LOB_LENGTH), length, "CLOB"),
+        (Static::Blob(TypeParams::DEFAULT_LOB_LENGTH), length, "BLOB"),
+        (Static::Clob(TypeParams::DEFAULT_LOB_LENGTH), length, "CLOB"),
         (Static::NumericP(38, 0), precision, "NUMERIC"),
         (Static::NumericP(10, 0), scale, "NUMERIC(10)"),
         (Static::NumericP(38, 2), precision_only, "NUMERIC(38, 2)"),
@@ -177,8 +177,10 @@ fn ddl_omits_unspecified_parameters() {
             "DECIMAL(10, 2)",
         ),
         (Static::Time(0), precision, "TIME"),
-        (Static::Time(6), precision, "TIME"),
+        // Only the SQL default 0 prints as a bare TIME; a flagged 6 is written out.
+        (Static::Time(6), precision, "TIME(6)"),
         (Static::TimeTz(0), precision, "TIME WITH TIME ZONE"),
+        (Static::TimeTz(6), precision, "TIME(6) WITH TIME ZONE"),
         (Static::Timestamp(6), precision, "TIMESTAMP"),
         (
             Static::TimestampTz(6),
@@ -226,7 +228,7 @@ fn ddl_omits_unspecified_parameters() {
 fn ddl_keeps_parameters_whose_flag_does_not_match_the_payload() {
     // A flag on a value that is not the parameter's default (or on a kind without that
     // parameter) is cleared when the shape is built, so the specified value is not lost.
-    use partiql_types::{IntervalQualifier, IntervalType, TypeParams};
+    use partiql_types::{IntervalQualifier, IntervalType};
     let mut bld = PartiqlShapeBuilder::default();
     let all = TypeParams::default()
         .with_unspecified_length(true)
@@ -268,7 +270,6 @@ fn ddl_keeps_parameters_whose_flag_does_not_match_the_payload() {
 fn ddl_of_legacy_string_datetime_and_decimal_matches_their_unspecified_forms() {
     // `String`, `DateTime` and `Decimal` print the same text as an unspecified VARCHAR,
     // TIMESTAMP and DECIMAL.
-    use partiql_types::TypeParams;
     let mut bld = PartiqlShapeBuilder::default();
     let unspecified_varchar = bld.new_static_with_params(
         Static::StringVarying(1),
@@ -316,7 +317,7 @@ fn ddl_of_an_unsupported_kind_is_an_error() {
     let err = PartiqlBasicDdlEncoder::new(DdlFormat::Compact)
         .ddl(&shape)
         .expect_err("graph has no DDL");
-    assert!(err.to_string().contains("`Graph` has no DDL form"), "{err}");
+    assert!(err.to_string().contains("Graph has no DDL form"), "{err}");
 }
 
 #[test]
@@ -325,7 +326,8 @@ fn ddl_of_variant_is_an_error_until_a_syntax_is_agreed() {
     let variant = bld.new_static(Static::Variant(VariantType::new("ion")));
     let err = try_column_ddl("c", variant).expect_err("no VARIANT DDL");
     assert!(
-        err.to_string().contains("`Variant(ion)` has no DDL form"),
+        err.to_string()
+            .contains(r#"Variant(VariantType { encoding: "ion" }) has no DDL form"#),
         "{err}"
     );
 }
@@ -455,5 +457,30 @@ fn ddl_of_undefined_is_an_error_wherever_it_appears() {
             err.to_string().contains("`Undefined` is unsupported"),
             "{shape}: {err}"
         );
+    }
+}
+
+#[test]
+fn ddl_of_flagged_and_explicit_time6_is_the_same_in_any_order() {
+    // A flagged TIME(6) and an explicit TIME(6) compare equal; a union keeps whichever comes
+    // first (no-id shapes), and both orders print TIME(6).
+    let mut bld = partiql_types::PartiqlNoIdShapeBuilder::default();
+    let flag = TypeParams::default().with_unspecified_precision(true);
+    for (kind, ddl) in [
+        (Static::Time(6), "TIME(6)"),
+        (Static::TimeTz(6), "TIME(6) WITH TIME ZONE"),
+    ] {
+        let flagged = bld.new_static_with_params(kind.clone(), flag);
+        let explicit = bld.new_static(kind.clone());
+        assert_eq!(column_ddl(flagged.clone()), format!("\"c\" {ddl}"));
+        assert_eq!(column_ddl(explicit.clone()), format!("\"c\" {ddl}"));
+        let i = type_int!(bld);
+        let first_flagged = bld.any_of([flagged.clone(), explicit.clone(), i.clone()]);
+        let first_explicit = bld.any_of([explicit, flagged, i]);
+        assert_eq!(
+            column_ddl(first_flagged.clone()),
+            column_ddl(first_explicit)
+        );
+        assert_eq!(column_ddl(first_flagged), format!("\"c\" UNION<{ddl},INT>"));
     }
 }
