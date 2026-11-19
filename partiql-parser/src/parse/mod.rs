@@ -295,7 +295,7 @@ mod tests {
             }
         }
 
-        // `<period> OVERLAPS <period>`, as in PartiQL Kotlin's `PredicateOverlaps`
+        // `<period> OVERLAPS <period>`
         #[test]
         fn overlaps() {
             for query in [
@@ -342,17 +342,17 @@ mod tests {
             assert!(parse_partiql("(a, b) OVERLAPS").is_err());
         }
 
-        // Where PartiQL Kotlin puts comparisons and `IS` on the level of OVERLAPS, PLR keeps
-        // its own levels, so these trees differ from PartiQL Kotlin's on purpose.
+        // Comparisons and `IS` keep their own levels, looser than OVERLAPS, so these trees
+        // nest OVERLAPS inside them.
         #[test]
-        fn overlaps_precedence_vs_plk() {
-            // `x = ((a, b) OVERLAPS (c, d))`; PartiQL Kotlin: `(x = (a, b)) OVERLAPS (c, d)`
+        fn overlaps_precedence_vs_comparisons() {
+            // `x = ((a, b) OVERLAPS (c, d))`
             let b = bin("x = (a, b) OVERLAPS (c, d)");
             assert_eq!(b.kind, ast::BinOpKind::Eq);
             assert!(
                 matches!(*b.rhs, ast::Expr::BinOp(ref r) if r.node.kind == ast::BinOpKind::Overlaps)
             );
-            // `x IS (NULL OVERLAPS y)`; PartiQL Kotlin: `(x IS NULL) OVERLAPS y`
+            // `x IS (NULL OVERLAPS y)`
             let b = bin("x IS NULL OVERLAPS y");
             assert_eq!(b.kind, ast::BinOpKind::Is);
             assert!(

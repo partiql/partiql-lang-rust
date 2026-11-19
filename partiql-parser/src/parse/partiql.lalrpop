@@ -1289,7 +1289,7 @@ ExprPrecedence09: Synth<ast::Expr> = {
            }, lo..hi)
        ))
     },
-    // `<period> OVERLAPS <period>`, at the level of PartiQL Kotlin's `PredicateOverlaps`
+    // `<period> OVERLAPS <period>`, at the level of BETWEEN, IN and LIKE
     <lo:@L> <l:ExprPrecedence09> "OVERLAPS" <r:ExprPrecedence08> <hi:@R> =>
        Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
