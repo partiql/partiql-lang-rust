@@ -298,9 +298,10 @@ pub enum Token<'input> {
     #[regex("\\.[0-9]+", |lex| lex.slice())]
     Real(&'input str),
 
-    // strings are single-quoted in SQL/PartiQL
-    #[regex(r#"'([^'\\]|\\t|\\u|\\n|\\'|\\|(?:''))*'"#,
-        |lex| lex.slice().trim_matches('\''))]
+    // strings are single-quoted in SQL/PartiQL; `''` is an escaped `'` and every other
+    // character, a backslash included, stands for itself (as in SQL and PartiQL Kotlin)
+    #[regex(r#"'([^']|'')*'"#,
+        |lex| { let s = lex.slice(); &s[1..s.len() - 1] })]
     String(&'input str),
 
     // An embed open/close tag is a (greedily-captured) odd-number of backticks

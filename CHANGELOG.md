@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases and lateral joins resolve per the spec. With `VarRefResolution::Static`, an unqualified name with several candidate FROM bindings is a new `AstTransformError::AmbiguousReference`; `Dynamic` still picks the first non-`MISSING` candidate at evaluation time.
 - partiql-logical-planner: aggregate arguments resolve against the names visible before `GROUP BY` (`SUM(c) ... GROUP BY c` sums the input's `c`).
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
+- *BREAKING* partiql-parser: a backslash in a single-quoted string now stands for itself, as in SQL and PartiQL Kotlin; only `''` escapes a quote. So `'\'` and `'C:\dir\'` now parse (e.g. `REPLACE(s, '\', '/')`), while `'it\'s'` now ends after `it\`, leaving an unterminated string, and must be written `'it''s'`. The literal still holds the text between the quotes as written (`'it''s'` holds `it''s`); it no longer drops a trailing escaped quote (`'a'''` holds `a''`, where it held `a`).
 
 ### Added
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
@@ -24,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-logical: `ValueExpr::DBRef(DBRef)`, a reference to a catalog-registered database object, emitted by `VarRefResolution::Static`.
 - partiql-logical-planner: `VarRefResolution` (`#[non_exhaustive]`) and `LogicalPlanner::with_var_resolution`. The default is `Dynamic`, which keeps the existing `DynamicLookup` lowering. `Static` resolves variable references at plan time, emitting `VarRef`, `Path`, or `DBRef`; the VM needs this mode.
 - New unpublished (`publish = false`) crates: `partiql-vm`, the experimental bytecode VM, and `partiql-tools`, the `pqlite` CLI.
+
+### Fixed
+- partiql-parser: a lexing error right after an identifier (e.g. the unterminated string in `SELECT a ' FROM t`) is now reported; before, the look-ahead for special forms such as `TRIM(` dropped it and the query parsed as if it ended there.
 
 ### Removed
 
