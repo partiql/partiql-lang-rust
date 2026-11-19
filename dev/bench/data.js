@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794350059074,
+  "lastUpdate": 1795124717185,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -53443,6 +53443,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 14389,
             "range": "± 92",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "392fba31d9ec8495972dedf05c1192fa6a624500",
+          "message": "feat(partiql-types): add SQL datetime, interval, map and row shapes; fix Display panic, DDL name quoting and IndexSet hash (#752)\n\n* feat(partiql-types): add SQL datetime, interval, map, row and absent-value shapes\n\nExtends PartiqlShape so that it can describe every type of the PartiQL\ntype system as partiql-lang-kotlin plans it, as groundwork for typed\nplanning. All changes are additive: no existing variant, field or public\nsignature changes, and existing shapes keep their Debug text, equality\nand hashing.\n\npartiql-types:\n- Static gains NumericP(p, s), Blob(n), Clob(n), Date, Time(p),\n  TimeTz(p), Timestamp(p), TimestampTz(p), Interval(IntervalType), Null,\n  Missing, Variant(encoding) and Map(MapType); StaticCategory gains Map.\n  IntervalType carries an IntervalQualifier (the 13 SQL qualifiers) and\n  its leading and fractional precisions; IntervalFamily tells year-month\n  from day-time intervals.\n- StructType::new_row builds a closed, ordered struct whose fields keep\n  their order and duplicate names (as in SELECT a, a), held in the new\n  StructConstraint::FieldList; is_row() recognizes closed, ordered\n  structs. fields() and fields_set() also read FieldList fields.\n- TypeParams records which type parameters were left unspecified\n  (VARCHAR vs VARCHAR(1)); StaticType::params, new_static_with_params.\n  TypeParams is non_exhaustive and built with with_* methods. The flags\n  are ignored by PartialEq and Hash, and Debug prints them only when\n  set, so every existing shape prints as before. as_non_nullable keeps\n  them.\n- Display of StringFixed and StringVarying no longer panics (todo!()).\n\npartiql-extension-ddl:\n- DDL text for CHAR(n), VARCHAR(n) and the new kinds, omitting\n  parameters flagged as unspecified (DECIMAL too); a shape with no DDL\n  form (Graph, NULL, MISSING) is an UnsupportedEncoding error instead of\n  a todo!() panic.\n- Field names with a double quote, backslash or control character,\n  Variant encodings with a single quote, backslash or control character,\n  and duplicate top-level column names are UnsupportedEncoding errors.\n  SQL doubles quotes while the PartiQL lexer uses backslash escapes, so\n  no escaping is unambiguous; a name such as a\" INT,\"b used to produce\n  an extra column.\n\n* fix(partiql-types): follow partiql-lang-kotlin for shape kinds; order-independent set hash\n\nAddresses review of the shape kinds:\n\npartiql-types:\n- Static::Variant holds a VariantType whose encoding does not take\n  part in equality or hashing, as partiql-lang-kotlin's VARIANT compares\n  only its type code.\n- MapType::new and ShapeBuilder::new_map return an error for a DYNAMIC\n  key, as partiql-lang-kotlin's PTypeMap does.\n- new_static_with_params keeps a flag only where the kind has that\n  parameter and its payload holds partiql-lang-kotlin's planner default\n  (CHAR/VARCHAR 1, BLOB/CLOB i32::MAX, DECIMAL/NUMERIC 38,0, TIME 0,\n  TIMESTAMP 6, INTERVAL 2/6), so a flagged shape never hides a\n  specified value.\n- is_row() also requires a FieldList, so set-based structs are not\n  rows; rows display as Row{..}.\n- Null and Missing are always nullable, and are documented as the\n  counterparts of partiql-lang-kotlin's UNKNOWN.\n- Interval Display is SQL-like, e.g. Interval(Day(2) To Second(6)).\n- The hash of an IndexSet no longer depends on insertion order: the\n  sorted element hashes are fed to the caller's hasher. It disagreed\n  with IndexSet equality, so equal unions and structs hashed differently\n  and sets nested in sets compared unequal (pre-existing on main).\n- An INTERVAL's unspecified fractional precision flag is kept for every\n  qualifier, as in partiql-lang-kotlin.\n\npartiql-extension-ddl:\n- Duplicate column names are written as on main again, rows included.\n- Only a quote or backslash is rejected in names and Variant\n  encodings; control characters are written as on main.\n\n* feat(partiql-types): ShapeResultError::DynamicMapKey for a DYNAMIC map key\n\nMapType::new and ShapeBuilder::new_map returned UnexpectedType for a\nDYNAMIC key, whose message reads \"... for static type bool\". They now\nreturn the new DynamicMapKey variant (\"MAP key type must not be\nDYNAMIC\", as partiql-lang-kotlin's PTypeMap). ShapeResultError is\nnon_exhaustive, so the variant is additive.\n\n* refactor(partiql-types): NULL and MISSING are absent values, not kinds; address review\n\nNULL and MISSING are absent values in every type's domain (PartiQL\nspec), so they are no longer Static kinds: Static::Null and\nStatic::Missing are removed, with their Display and DDL arms and the\nalways-nullable special case. The static type of a NULL or MISSING\nliteral is the existing PartiqlShape::Undefined (no present value), as\npartiql-logical-planner's typer already types them; its rustdoc now\nsays so and that it plays the role of partiql-lang-kotlin's UNKNOWN.\n\nReview follow-ups:\n- VARIANT equality and hashing include the encoding, so a union of\n  ion and json variants keeps both (a documented divergence from\n  partiql-lang-kotlin v1.6.1). Variant has no DDL form until a syntax\n  is agreed; ddl() returns UnsupportedEncoding for it.\n- A MAP key that is, or is a union containing, DYNAMIC is rejected\n  with DynamicMapKey. Collection keys are allowed, as in\n  partiql-lang-kotlin.\n- TIME and TIME WITH TIME ZONE keep the unspecified-precision flag on\n  precision 0 (the planner's TIME) and 6 (PType.time()).\n- The TypeParams defaults are public DEFAULT_* constants; the docs\n  state the TIME and interval exceptions and that the planner, not the\n  constructors, validates precisions and scales.\n- Map/MapType, TypeParams and FieldList/new_row are marked\n  EXPERIMENTAL; MapType links the MAP RFC.\n- indexset_hash combines element hashes commutatively without\n  allocating.\n- DDL errors name the field name or the kind (\"has no DDL form\").\n- Docs for Date, the interval qualifiers and families and the MapType\n  and IntervalType getters; tests for every interval Display, NOT NULL\n  maps and rows, and descriptive test names. The hash-order tests move\n  to shape_kinds.rs.\n\n* fix(partiql-types): TIME DDL round trip, Undefined map keys; address review round 2\n\n- DDL prints a bare TIME (and TIME WITH TIME ZONE) only for the SQL\n  default precision 0; a flagged TIME(6) is written out, so it reads\n  back as TIME(6), and a flagged and an explicit TIME(6) print the same\n  text in any order.\n- MapType::new and new_map reject a key that is, or is a union\n  containing, Undefined (the type of the NULL and MISSING literals; the\n  MAP RFC disallows NULL and MISSING keys) with the new\n  ShapeResultError::UndefinedMapKey. An Undefined value is allowed.\n- VariantType stores its encoding in ASCII lowercase; Variant and\n  VariantType are marked EXPERIMENTAL.\n- The TypeParams defaults are EXPERIMENTAL associated constants\n  (TypeParams::DEFAULT_CHAR_LENGTH, ...); the factory precision is\n  renamed TIME_MICROSECOND_PRECISION.\n- Docs: PartiqlShape::Undefined cites the data model (absent values\n  NULL and MISSING; nullable excludes NULL only, a field's optional flag\n  covers MISSING), and its legacy meanings in the old typer. union_of\n  says that treating Undefined as the identity belongs to the typed\n  planner's lattice; its behaviour is unchanged. TypeParams and\n  new_static_with_params describe the defaults in one framing.\n- DDL errors for kinds without a DDL form print the kind with Debug.\n- CHANGELOG: the NULL/MISSING note joins the Static kinds entry; the\n  constants have an entry of their own. Test cleanups.",
+          "timestamp": "2026-11-19T13:30:24-08:00",
+          "tree_id": "c74e9bec376b7471c23dc9e044bb943056fa44f7",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/392fba31d9ec8495972dedf05c1192fa6a624500"
+        },
+        "date": 1795124715982,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 538977,
+            "range": "± 7118",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 827634,
+            "range": "± 6958",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 798304,
+            "range": "± 9386",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 826063,
+            "range": "± 6679",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 799130,
+            "range": "± 7047",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 825250,
+            "range": "± 7266",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 805035,
+            "range": "± 8468",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 834136,
+            "range": "± 8106",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 797968,
+            "range": "± 7481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 827752,
+            "range": "± 8835",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1047892,
+            "range": "± 8975",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1360453,
+            "range": "± 13965",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1892702,
+            "range": "± 20429",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1202366,
+            "range": "± 12252",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1516326,
+            "range": "± 13065",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2054303,
+            "range": "± 18796",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 3331,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 31431,
+            "range": "± 368",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 62122,
+            "range": "± 723",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1132,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 15672,
+            "range": "± 137",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 31671,
+            "range": "± 294",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 51561,
+            "range": "± 557",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 810510,
+            "range": "± 7648",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1608934,
+            "range": "± 18177",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 13046932,
+            "range": "± 181099",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 81984477,
+            "range": "± 2553937",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 159862097,
+            "range": "± 993082",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 519334613,
+            "range": "± 13727680",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 398412568,
+            "range": "± 3354955",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 7924,
+            "range": "± 86",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2312,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 245,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 23,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 502,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1642,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 4879,
+            "range": "± 64",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 12286,
+            "range": "± 139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 17914,
+            "range": "± 281",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 15231,
+            "range": "± 147",
             "unit": "ns/iter"
           }
         ]
