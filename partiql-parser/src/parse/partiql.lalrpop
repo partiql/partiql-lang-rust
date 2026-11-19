@@ -18,6 +18,7 @@ use crate::parse::parse_util::{
     list_to_lit,
     exp_literal,
     int_literal,
+    is_i64_min_magnitude,
     unescape_quoted_ident,
     CallSite,
     Attrs,
@@ -1382,13 +1383,19 @@ ExprPrecedence04: Synth<ast::Expr> = {
                expr: Box::new(r.data),
            }, lo..hi)
        )),
-    <lo:@L> "-" <r:ExprPrecedence04> <hi:@R> =>
+    <lo:@L> "-" <rlo:@L> <r:ExprPrecedence04> <hi:@R> => {
+       // `-9223372036854775808` is i64::MIN, a BIGINT, as PartiQL Kotlin folds the sign
+       // into the integer literal; only that literal, written as digits, is folded.
+       if is_i64_min_magnitude(&r.data, &input[rlo.to_usize()..hi.to_usize()]) {
+           return Synth::lit(ast::Expr::Lit(state.node(ast::Lit::Int64Lit(i64::MIN), lo..hi)));
+       }
        Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Neg,
                expr: Box::new(r.data),
            }, lo..hi)
-       )),
+       ))
+    },
     <ExprPrecedence03>,
 }
 

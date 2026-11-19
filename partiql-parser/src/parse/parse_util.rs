@@ -267,3 +267,13 @@ pub(crate) fn exp_literal(text: &str) -> Option<Lit> {
         .filter(|f| f.is_finite())
         .map(Lit::DoubleLit)
 }
+
+/// Whether `expr`, written as `text`, is the integer literal 9223372036854775808 (the magnitude
+/// of `i64::MIN`) spelled with digits only, so that a minus sign before it makes `i64::MIN`.
+pub(crate) fn is_i64_min_magnitude(expr: &Expr, text: &str) -> bool {
+    const I64_MIN_MAGNITUDE: rust_decimal::Decimal =
+        rust_decimal::Decimal::from_parts(0, 0x8000_0000, 0, false, 0);
+    matches!(expr, Expr::Lit(l) if l.node == Lit::DecimalLit(I64_MIN_MAGNITUDE))
+        && !text.is_empty()
+        && text.bytes().all(|b| b.is_ascii_digit())
+}

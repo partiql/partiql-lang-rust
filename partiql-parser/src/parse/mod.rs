@@ -240,7 +240,32 @@ mod tests {
             ] {
                 assert_eq!(parse_lit(digits), dec(digits), "{digits}");
             }
-            // The minus sign stays a unary operator over the literal.
+            // A minus sign directly before 9223372036854775808 makes i64::MIN, a BIGINT, as
+            // PartiQL Kotlin folds the sign into the integer literal.
+            assert_eq!(
+                parse_lit("-9223372036854775808"),
+                ast::Lit::Int64Lit(i64::MIN)
+            );
+            assert_eq!(
+                parse_lit("- 9223372036854775808"),
+                ast::Lit::Int64Lit(i64::MIN)
+            );
+            // Otherwise the minus sign stays a unary operator over the literal.
+            for (query, inner) in [
+                ("-9223372036854775808.", dec("9223372036854775808")),
+                ("-9223372036854775808.0", dec("9223372036854775808.0")),
+            ] {
+                match parse_expr(query) {
+                    ast::Expr::UniOp(u) => {
+                        assert_eq!(u.node.kind, ast::UniOpKind::Neg, "{query}");
+                        assert!(
+                            matches!(*u.node.expr, ast::Expr::Lit(ref l) if l.node == inner),
+                            "{query}"
+                        );
+                    }
+                    other => panic!("{query}: {other:?}"),
+                }
+            }
             match parse_expr("-9223372036854775809") {
                 ast::Expr::UniOp(u) => {
                     assert_eq!(u.node.kind, ast::UniOpKind::Neg);
@@ -410,6 +435,28 @@ mod tests {
                 assert!(printed.contains(r#""p""q""#), "{printed}");
                 parse!(&printed);
             }
+            // The names land in their exact positions.
+            for (query, expected) in [
+                (
+                    r#"SELECT t."a""b" AS "p""q`r" FROM T AS t"#,
+                    [
+                        r#"value: "a\"b", case: CaseSensitive"#,
+                        r#"as_alias: Some(SymbolPrimitive { value: "p\"q`r", case: CaseSensitive })"#,
+                    ],
+                ),
+                (
+                    r#"SELECT "t""1`2".x FROM T AS "t""1`2""#,
+                    [
+                        r#"name: SymbolPrimitive { value: "t\"1`2", case: CaseSensitive }"#,
+                        r#"as_alias: Some(SymbolPrimitive { value: "t\"1`2", case: CaseSensitive })"#,
+                    ],
+                ),
+            ] {
+                let stmt = format!("{:?}", parse!(query));
+                for e in expected {
+                    assert!(stmt.contains(e), "{query}: expected {e} in {stmt}");
+                }
+            }
             // Two quoted identifiers separated by a space are still an identifier and its alias.
             let stmt = format!("{:?}", parse!(r#"SELECT "a" "b" FROM t"#));
             assert!(
@@ -442,6 +489,26 @@ mod tests {
                 assert!(stmt.contains(&format!("case: {case} ")), "{query}: {stmt}");
             }
         }
+
+        // A graph-pattern name containing `"` pretty-prints quoted, so it parses back.
+        #[test]
+        fn graph_name_with_quote_round_trip() {
+            use partiql_common::pretty::ToPretty;
+            for (query, name) in [
+                (r#"SELECT * FROM (g MATCH (x:"a""b"))"#, r#""a""b""#),
+                (r#"SELECT * FROM (g MATCH ("x""y":L))"#, r#""x""y""#),
+                (
+                    r#"SELECT * FROM (g MATCH (a) -[e:"a""b"]-> (b))"#,
+                    r#""a""b""#,
+                ),
+            ] {
+                let printed = parse!(query).to_pretty_string(80).unwrap();
+                assert!(printed.contains(name), "{query} -> {printed}");
+                let reprinted = parse!(&printed).to_pretty_string(80).unwrap();
+                assert_eq!(reprinted, printed, "{query}");
+            }
+        }
+
         #[test]
         fn array() {
             parse!(r"[]");
