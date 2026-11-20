@@ -21,6 +21,9 @@ pub enum ResolveError {
 
 /// A resolved table: the catalog it is in, the table, and the identifier's parts after the
 /// table's name, which are a path into the table.
+///
+/// Equality compares the shapes as [`partiql_types::PartiqlShape`] does, including their node
+/// ids: shapes built with an id-generating builder are equal only if they have the same ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTable {
     catalog: String,

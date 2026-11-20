@@ -76,6 +76,9 @@ impl RoutineOverloadSignature {
 /// A typer or evaluator must apply the flags to scalar function calls only. The same type is the
 /// instance of an aggregation, where the flags are set by default but must be ignored:
 /// `COUNT(NULL)` is not folded to NULL.
+///
+/// Equality compares the shapes as [`partiql_types::PartiqlShape`] does, including their node
+/// ids: shapes built with an id-generating builder are equal only if they have the same ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutineSignature {
     name: String,

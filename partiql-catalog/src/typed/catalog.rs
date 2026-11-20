@@ -12,6 +12,9 @@ use std::sync::Arc;
 pub const SYSTEM_CATALOG_NAME: &str = "$system";
 
 /// A table: its canonical name and its schema, normally a bag of rows.
+///
+/// Equality compares the shapes as [`partiql_types::PartiqlShape`] does, including their node
+/// ids: shapes built with an id-generating builder are equal only if they have the same ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     name: Name,
@@ -181,7 +184,8 @@ impl RoutineCatalog for SystemCatalog {
 
 /// The error of [`Catalogs::get_catalog`] when a name that ignores case matches several
 /// catalogs: the name as written, and the matching catalogs' names, sorted by exact name
-/// comparing UTF-16 code units, so the list has a stable, documented order.
+/// comparing UTF-16 code units, so the list has a stable, documented order. The message shows
+/// each catalog name in its quoted (delimited) form, with embedded `"` doubled.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error(
     "Catalog name '{name}' is ambiguous ignoring case; it matches {}; quote the name to select one",
@@ -195,7 +199,7 @@ pub struct CatalogNameAmbiguous {
 fn quoted(names: &[String]) -> String {
     names
         .iter()
-        .map(|n| format!("\"{n}\""))
+        .map(|n| format!("\"{}\"", n.replace('"', "\"\"")))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -232,6 +236,7 @@ pub struct Catalogs {
 
 impl Catalogs {
     /// The catalogs; a later catalog replaces an earlier one with the same name, in its place.
+    /// (A [`Session`] never has two: [`super::SessionBuilder::build`] rejects duplicates.)
     pub fn of(catalogs: impl IntoIterator<Item = Arc<dyn TypedCatalog>>) -> Self {
         let mut out = Catalogs::default();
         for catalog in catalogs {

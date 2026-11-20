@@ -50,7 +50,7 @@ impl Session {
         Session::builder()
             .catalog(super::SYSTEM_CATALOG_NAME)
             .build()
-            .expect("the current catalog is set")
+            .expect("the system catalog is the current catalog")
     }
 
     #[must_use]
@@ -135,7 +135,7 @@ impl SessionBuilder {
         self
     }
 
-    /// The name of the current catalog.
+    /// The name of the current catalog: an added catalog's name, or the system catalog's.
     #[must_use]
     pub fn catalog(mut self, catalog: impl Into<String>) -> Self {
         self.catalog = Some(catalog.into());

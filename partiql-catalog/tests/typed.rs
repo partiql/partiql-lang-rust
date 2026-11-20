@@ -1077,6 +1077,7 @@ fn catalog_named_like_the_system_catalog_is_a_build_error() {
         err,
         SessionError::DuplicateCatalogName(SYSTEM_CATALOG_NAME.into())
     );
+    assert_eq!(err.to_string(), "Catalog names must be unique: $system");
     // Likewise for a custom system catalog.
     let err = Session::builder()
         .catalog("main")
@@ -1398,9 +1399,10 @@ fn path_follows_the_resolved_name_length() {
     );
 }
 
-/// Resolved tables and signatures compare by value.
+/// Resolved tables and signatures compare structurally for id-less shapes; shapes with node ids
+/// compare by id too.
 #[test]
-fn resolved_tables_and_signatures_compare_by_value() {
+fn resolved_tables_and_signatures_equality() {
     let s = session(
         "main",
         &[],
@@ -1416,4 +1418,45 @@ fn resolved_tables_and_signatures_compare_by_value() {
     assert_eq!(sig(), sig());
     assert_ne!(sig(), sig().with_null_call(false));
     assert_eq!(FixedFnOverload::new(sig()), FixedFnOverload::new(sig()));
+    // With an id-generating builder, two structurally equal shapes have different ids.
+    let mut ids = partiql_types::PartiqlShapeBuilder::default();
+    let (a, b) = (type_int!(ids), type_int!(ids));
+    assert_ne!(
+        RoutineSignature::with_types("f", [a.clone()], a),
+        RoutineSignature::with_types("f", [b.clone()], b)
+    );
+}
+
+#[test]
+fn build_compares_catalog_names_exactly() {
+    // A current catalog differing only in case is not found.
+    let err = Session::builder()
+        .catalog("MAIN")
+        .catalogs([TestCatalog::shared("main", &[])])
+        .build()
+        .unwrap_err();
+    assert_eq!(err, SessionError::UnknownCatalog("MAIN".into()));
+    // A catalog differing in case from the system catalog is allowed.
+    let s = Session::builder()
+        .catalog("$SYSTEM")
+        .catalogs([TestCatalog::shared("$SYSTEM", &[])])
+        .build()
+        .unwrap();
+    assert_eq!(names(s.catalogs()), strs(&["$SYSTEM", SYSTEM_CATALOG_NAME]));
+    // A custom system catalog's name is accepted as the current catalog.
+    let s = Session::builder()
+        .catalog("builtins")
+        .system(TestCatalog::shared("builtins", &[]))
+        .build()
+        .unwrap();
+    assert_eq!(s.catalog(), "builtins");
+}
+
+#[test]
+fn ambiguous_catalog_message_quotes_names() {
+    let err = CatalogNameAmbiguous::new("a\"b", strs(&["A\"B", "a\"b"]));
+    assert_eq!(
+        err.to_string(),
+        "Catalog name 'a\"b' is ambiguous ignoring case; it matches \"A\"\"B\", \"a\"\"b\"; quote the name to select one"
+    );
 }
