@@ -1,0 +1,116 @@
+//! References from a plan to catalog objects (tables and routines).
+//!
+//! The plan refers to catalog objects by name and, for routines, by the resolved signature, so
+//! that this crate does not depend on a catalog API.
+
+use partiql_types::PartiqlShape;
+use std::fmt::{Display, Formatter};
+
+/// The name of a catalog object: the catalog it was resolved in, then the namespace path and
+/// the object's own name, all as stored by the catalog (exact, not case-folded).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct QualifiedName {
+    catalog: String,
+    namespace: Vec<String>,
+    name: String,
+}
+
+impl QualifiedName {
+    pub fn new<I, S>(catalog: impl Into<String>, namespace: I, name: impl Into<String>) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        QualifiedName {
+            catalog: catalog.into(),
+            namespace: namespace.into_iter().map(Into::into).collect(),
+            name: name.into(),
+        }
+    }
+
+    /// The catalog the object was resolved in.
+    pub fn catalog(&self) -> &str {
+        &self.catalog
+    }
+
+    /// The namespace path inside the catalog, outermost first.
+    pub fn namespace(&self) -> &[String] {
+        &self.namespace
+    }
+
+    /// The object's own name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Display for QualifiedName {
+    /// `"catalog"."ns1"."ns2"."name"`: every part a SQL delimited identifier (double-quoted, a
+    /// `"` doubled), so distinct names print distinctly (e.g. namespace `["s.x"]` vs
+    /// `["s", "x"]`). A plan dump escapes parts further (control characters too).
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", quote(&self.catalog))?;
+        for part in &self.namespace {
+            write!(f, ".{}", quote(part))?;
+        }
+        write!(f, ".{}", quote(&self.name))
+    }
+}
+
+/// `part` as a SQL delimited identifier: double-quoted, a `"` doubled.
+fn quote(part: &str) -> String {
+    format!("\"{}\"", part.replace('"', "\"\""))
+}
+
+/// A resolved routine (scalar function or aggregation) together with the signature it was
+/// resolved to.
+///
+/// The routine's identity (its catalog and name) and the chosen overload's parameter and return
+/// types are both carried as data.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RoutineRef {
+    name: QualifiedName,
+    specific: String,
+    params: Vec<PartiqlShape>,
+    returns: PartiqlShape,
+}
+
+impl RoutineRef {
+    /// `specific` is the catalog's unique name for the chosen overload.
+    pub fn new(
+        name: QualifiedName,
+        specific: impl Into<String>,
+        params: Vec<PartiqlShape>,
+        returns: PartiqlShape,
+    ) -> Self {
+        RoutineRef {
+            name,
+            specific: specific.into(),
+            params,
+            returns,
+        }
+    }
+
+    pub fn name(&self) -> &QualifiedName {
+        &self.name
+    }
+
+    /// The catalog's unique name for this overload.
+    pub fn specific(&self) -> &str {
+        &self.specific
+    }
+
+    /// The overload's parameter types.
+    pub fn params(&self) -> &[PartiqlShape] {
+        &self.params
+    }
+
+    /// The overload's return type.
+    pub fn returns(&self) -> &PartiqlShape {
+        &self.returns
+    }
+
+    pub fn into_parts(self) -> (QualifiedName, String, Vec<PartiqlShape>, PartiqlShape) {
+        (self.name, self.specific, self.params, self.returns)
+    }
+}
