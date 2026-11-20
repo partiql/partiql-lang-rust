@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub const SYSTEM_CATALOG_NAME: &str = "$system";
 
 /// A table: its canonical name and its schema, normally a bag of rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     name: Name,
     schema: PartiqlShape,
@@ -43,6 +43,8 @@ impl Table {
 }
 
 /// A catalog for typed planning: its tables and, by text, its routines.
+///
+/// EXPERIMENTAL: may change until the typed-plan RFC settles.
 ///
 /// The catalog decides how an [`Identifier`] matches its names, in [`TypedCatalog::resolve_table`];
 /// the convention is that a regular part matches ignoring case and a delimited part exactly (see
@@ -112,6 +114,8 @@ pub trait TypedCatalog: Debug + Send + Sync {
 
 /// A catalog that resolves routines by identifier.
 ///
+/// EXPERIMENTAL: may change until the typed-plan RFC settles.
+///
 /// An implementor must also return `Some(self)` from [`TypedCatalog::as_routine_catalog`];
 /// otherwise its routines are looked up only by text, through [`TypedCatalog::get_functions`]
 /// and [`TypedCatalog::get_aggregations`].
@@ -176,20 +180,42 @@ impl RoutineCatalog for SystemCatalog {
 }
 
 /// The error of [`Catalogs::get_catalog`] when a name that ignores case matches several
-/// catalogs. The names are sorted by exact name, comparing UTF-16 code units, so the error's name
-/// list has a stable, documented order.
+/// catalogs: the name as written, and the matching catalogs' names, sorted by exact name
+/// comparing UTF-16 code units, so the list has a stable, documented order.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-#[error("Catalog name is ambiguous; matched {}.", .catalog_names.join(", "))]
+#[error(
+    "Catalog name '{name}' is ambiguous ignoring case; it matches {}; quote the name to select one",
+    quoted(.catalog_names)
+)]
 pub struct CatalogNameAmbiguous {
+    name: String,
     catalog_names: Vec<String>,
 }
 
+fn quoted(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|n| format!("\"{n}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl CatalogNameAmbiguous {
+    /// The error for the name `name`, as written, matching the catalogs `catalog_names`.
     #[must_use]
-    pub fn new(mut catalog_names: Vec<String>) -> Self {
+    pub fn new(name: impl Into<String>, mut catalog_names: Vec<String>) -> Self {
         // By UTF-16 code unit, not by Unicode scalar value (see the type's docs).
         catalog_names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-        CatalogNameAmbiguous { catalog_names }
+        CatalogNameAmbiguous {
+            name: name.into(),
+            catalog_names,
+        }
+    }
+
+    /// The name as written.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     #[must_use]
@@ -248,7 +274,7 @@ impl Catalogs {
                     .chain(matches)
                     .map(|c| c.name().to_string())
                     .collect();
-                Err(CatalogNameAmbiguous::new(names))
+                Err(CatalogNameAmbiguous::new(name, names))
             }
         }
     }

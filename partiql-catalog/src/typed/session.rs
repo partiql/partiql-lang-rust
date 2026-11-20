@@ -13,12 +13,17 @@ pub enum SessionError {
     /// The current catalog was not set.
     #[error("Session catalog must be set")]
     MissingCatalog,
-    /// Two added catalogs have this name.
+    /// Two catalogs, including the system catalog, have this name.
     #[error("Catalog names must be unique: {0}")]
     DuplicateCatalogName(String),
+    /// The current catalog is not one of the catalogs (nor the system catalog).
+    #[error("Session catalog does not exist: {0}")]
+    UnknownCatalog(String),
 }
 
 /// A planning session. Build one with [`Session::builder`].
+///
+/// EXPERIMENTAL: may change until the typed-plan RFC settles.
 ///
 /// Its `Debug` output omits the identity and the property values, which may be sensitive;
 /// property keys are shown, so they should not hold secrets.
@@ -95,11 +100,9 @@ impl Session {
 /// The builder of a [`Session`]. The current catalog must be set; the system catalog defaults to
 /// [`SystemCatalog`]. Its `Debug` output omits the identity and the property values.
 ///
-/// [`SessionBuilder::build`] checks only that the current catalog is set and that the catalogs
-/// added with [`SessionBuilder::catalogs`] have unique names. It does not check that the current
-/// catalog is one of them; a missing one is reported by [`super::resolve_table`] as
-/// [`super::ResolveError::MissingDefaultCatalog`] on the first lookup. The system catalog
-/// replaces an added catalog with the same name, without an error.
+/// [`SessionBuilder::build`] checks that the current catalog is set and is one of the catalogs
+/// (the system catalog counts), and that all the catalogs' names, the system catalog's included,
+/// are unique (compared exactly, so `archive` and `ARCHIVE` may coexist).
 #[derive(Clone)]
 pub struct SessionBuilder {
     identity: String,
@@ -166,8 +169,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Adds catalogs, whose names must be unique. The system catalog replaces a catalog with the
-    /// same name.
+    /// Adds catalogs, whose names must be unique and differ from the system catalog's.
     #[must_use]
     pub fn catalogs(mut self, catalogs: impl IntoIterator<Item = Arc<dyn TypedCatalog>>) -> Self {
         self.catalogs.extend(catalogs);
@@ -187,6 +189,14 @@ impl SessionBuilder {
             catalogs.add(catalog.clone());
         }
         let catalog = self.catalog.ok_or(SessionError::MissingCatalog)?;
+        if names.contains(&self.system.name()) {
+            return Err(SessionError::DuplicateCatalogName(
+                self.system.name().to_string(),
+            ));
+        }
+        if catalog != self.system.name() && !names.contains(&catalog.as_str()) {
+            return Err(SessionError::UnknownCatalog(catalog));
+        }
         let system_namespace = Namespace::of([self.system.name()]);
         catalogs.add(self.system);
         let path = self.path.map(|path| {

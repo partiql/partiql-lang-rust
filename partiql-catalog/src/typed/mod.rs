@@ -1,5 +1,8 @@
 //! Catalog, session and routine-signature API for typed planning.
 //!
+//! EXPERIMENTAL: this module may change until the typed-plan RFC settles, without a breaking
+//! change entry.
+//!
 //! The catalog interface the typed planner resolves names against, and the signatures of
 //! routines, with [`partiql_types::PartiqlShape`] as the type model. It is additive: the existing
 //! [`crate::catalog`] traits are unchanged, and [`LegacyCatalogAdapter`] presents any

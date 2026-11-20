@@ -9,9 +9,11 @@ use std::sync::Arc;
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ResolveError {
-    /// The session's current catalog is not one of its catalogs.
-    #[error("Default catalog does not exist: {0}")]
-    MissingDefaultCatalog(String),
+    /// The session's current catalog is not one of its catalogs. A session built with
+    /// [`super::SessionBuilder::build`] always has its current catalog, so this does not occur
+    /// for one.
+    #[error("Current catalog does not exist: {0}")]
+    MissingCurrentCatalog(String),
     /// A catalog-qualified identifier's first part matches several catalogs ignoring case.
     #[error(transparent)]
     CatalogNameAmbiguous(#[from] CatalogNameAmbiguous),
@@ -19,7 +21,7 @@ pub enum ResolveError {
 
 /// A resolved table: the catalog it is in, the table, and the identifier's parts after the
 /// table's name, which are a path into the table.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTable {
     catalog: String,
     table: Table,
@@ -46,7 +48,11 @@ impl ResolvedTable {
     }
 }
 
-/// The table that `identifier` names in `session`, or `None`. The lookups are, in order:
+/// The table that `identifier` names in `session`, or `None`.
+///
+/// EXPERIMENTAL: may change until the typed-plan RFC settles.
+///
+/// The lookups are, in order:
 ///
 /// 1. in the current catalog, with the session namespace prepended to `identifier` (as
 ///    delimited parts), or, if the current catalog has no namespaces
@@ -68,7 +74,7 @@ pub fn resolve_table(
     let default = session
         .catalogs()
         .get_catalog(session.catalog(), false)?
-        .ok_or_else(|| ResolveError::MissingDefaultCatalog(session.catalog().to_string()))?;
+        .ok_or_else(|| ResolveError::MissingCurrentCatalog(session.catalog().to_string()))?;
 
     // 1. The current catalog and namespace; a catalog without namespaces gets the identifier
     // as written.
@@ -91,15 +97,16 @@ pub fn resolve_table(
     }
 
     // 3. A catalog-qualified identifier.
-    let head = &identifier.qualifier()[0];
+    let Some((head, rest)) = identifier.qualifier().split_first() else {
+        return Ok(None);
+    };
     let Some(catalog) = session
         .catalogs()
         .get_catalog(head.text(), head.is_regular())?
     else {
         return Ok(None);
     };
-    let tail = Identifier::of(identifier.parts().skip(1).cloned())
-        .expect("a qualified identifier has a part after its first");
+    let tail = Identifier::new(rest.to_vec(), identifier.identifier().clone());
     Ok(lookup(session, &catalog, &tail))
 }
 

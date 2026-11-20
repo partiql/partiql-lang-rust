@@ -504,9 +504,10 @@ fn step3_ambiguous_catalog_name_is_an_error() {
     let err = resolve_table(&s, &reg(&["Archive", "orders"])).unwrap_err();
     assert_eq!(
         err,
-        ResolveError::CatalogNameAmbiguous(CatalogNameAmbiguous::new(strs(&[
-            "ARCHIVE", "archive"
-        ])))
+        ResolveError::CatalogNameAmbiguous(CatalogNameAmbiguous::new(
+            "Archive",
+            strs(&["ARCHIVE", "archive"])
+        ))
     );
     // A delimited head is exact, so not ambiguous.
     let id = Identifier::of([
@@ -545,16 +546,19 @@ fn resolved_name_without_table_falls_through() {
 }
 
 #[test]
-fn missing_default_catalog_is_an_error() {
-    let s = session(
-        "nope",
-        &[],
-        vec![TestCatalog::shared("main", &[&["orders"]])],
-    );
-    assert_eq!(
-        resolve_table(&s, &reg(&["orders"])).unwrap_err(),
-        ResolveError::MissingDefaultCatalog("nope".into())
-    );
+fn unknown_current_catalog_is_a_build_error() {
+    let err = Session::builder()
+        .catalog("nope")
+        .catalogs([TestCatalog::shared("main", &[&["orders"]])])
+        .build()
+        .unwrap_err();
+    assert_eq!(err, SessionError::UnknownCatalog("nope".into()));
+    assert_eq!(err.to_string(), "Session catalog does not exist: nope");
+    // The system catalog counts as one of the catalogs.
+    assert!(Session::builder()
+        .catalog(SYSTEM_CATALOG_NAME)
+        .build()
+        .is_ok());
 }
 
 #[test]
@@ -589,10 +593,11 @@ fn case_insensitive_lookup_reports_all_matches_in_exact_name_order() {
         TestCatalog::shared("DEMO", &[]),
     ]);
     let err = catalogs.get_catalog("dEmO", true).unwrap_err();
+    assert_eq!(err.name(), "dEmO");
     assert_eq!(err.catalog_names(), strs(&["DEMO", "Demo", "demo"]));
     assert_eq!(
         err.to_string(),
-        "Catalog name is ambiguous; matched DEMO, Demo, demo."
+        "Catalog name 'dEmO' is ambiguous ignoring case; it matches \"DEMO\", \"Demo\", \"demo\"; quote the name to select one"
     );
 }
 
@@ -651,6 +656,7 @@ fn session_defaults() {
     assert_eq!(names(s.catalogs()), strs(&["example", SYSTEM_CATALOG_NAME]));
     let s = Session::builder()
         .catalog("example")
+        .catalogs(example())
         .identity("tester")
         .property("k", "v")
         .build()
@@ -1059,16 +1065,29 @@ fn step3_ambiguity_not_raised_when_earlier_step_resolves() {
     );
 }
 
-/// The system catalog replaces a catalog with the same name.
+/// A catalog may not share the system catalog's name.
 #[test]
-fn system_catalog_replaces_same_named_catalog() {
-    let s = Session::builder()
+fn catalog_named_like_the_system_catalog_is_a_build_error() {
+    let err = Session::builder()
         .catalog(SYSTEM_CATALOG_NAME)
         .catalogs([TestCatalog::shared(SYSTEM_CATALOG_NAME, &[&["orders"]])])
         .build()
-        .unwrap();
-    assert_eq!(names(s.catalogs()), strs(&[SYSTEM_CATALOG_NAME]));
-    assert_eq!(resolved(&s, &reg(&["orders"])), None);
+        .unwrap_err();
+    assert_eq!(
+        err,
+        SessionError::DuplicateCatalogName(SYSTEM_CATALOG_NAME.into())
+    );
+    // Likewise for a custom system catalog.
+    let err = Session::builder()
+        .catalog("main")
+        .catalogs([
+            TestCatalog::shared("main", &[]),
+            TestCatalog::shared("builtins", &[]),
+        ])
+        .system(TestCatalog::shared("builtins", &[]))
+        .build()
+        .unwrap_err();
+    assert_eq!(err, SessionError::DuplicateCatalogName("builtins".into()));
 }
 
 fn adapter_over(names: &[&str]) -> Arc<dyn TypedCatalog> {
@@ -1157,6 +1176,7 @@ fn namespaced_catalog_keeps_step1_with_namespace() {
 fn debug_output_omits_identity_and_property_values() {
     let builder = Session::builder()
         .catalog("example")
+        .catalogs(example())
         .identity("sample-user")
         .property("sample-key", "sample-value");
     let shown = format!("{builder:?}");
@@ -1283,7 +1303,7 @@ fn table_named_like_current_catalog_shadows_qualifier_in_step2() {
 /// 0xD801 0xDC00) sorts before U+FF21, although its scalar value is larger.
 #[test]
 fn ambiguous_catalog_names_sort_by_utf16_code_unit() {
-    let err = CatalogNameAmbiguous::new(strs(&["\u{FF21}", "\u{10400}"]));
+    let err = CatalogNameAmbiguous::new("a", strs(&["\u{FF21}", "\u{10400}"]));
     assert_eq!(err.catalog_names(), strs(&["\u{10400}", "\u{FF21}"]));
 }
 
@@ -1376,4 +1396,24 @@ fn path_follows_the_resolved_name_length() {
         resolved(&s, &reg(&["orders"])),
         Some(("main".into(), "\"public\".\"orders\"".into(), vec![]))
     );
+}
+
+/// Resolved tables and signatures compare by value.
+#[test]
+fn resolved_tables_and_signatures_compare_by_value() {
+    let s = session(
+        "main",
+        &[],
+        vec![TestCatalog::shared("main", &[&["orders"]])],
+    );
+    let a = resolve_table(&s, &reg(&["orders", "x"])).unwrap().unwrap();
+    let b = resolve_table(&s, &reg(&["ORDERS", "x"])).unwrap().unwrap();
+    assert_eq!(a, b);
+    assert_ne!(a, resolve_table(&s, &reg(&["orders"])).unwrap().unwrap());
+    let mut bld = PartiqlNoIdShapeBuilder::default();
+    let int = type_int!(bld);
+    let sig = || RoutineSignature::with_types("f", [int.clone()], int.clone());
+    assert_eq!(sig(), sig());
+    assert_ne!(sig(), sig().with_null_call(false));
+    assert_eq!(FixedFnOverload::new(sig()), FixedFnOverload::new(sig()));
 }

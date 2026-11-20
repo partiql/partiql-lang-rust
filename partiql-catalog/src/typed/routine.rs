@@ -2,6 +2,8 @@
 //!
 //! Parameter and return types are [`PartiqlShape`]s. These types carry signatures only; choosing
 //! an overload for a call is the planner's job.
+//!
+//! EXPERIMENTAL: may change until the typed-plan RFC settles.
 
 use super::identifier::Name;
 use partiql_types::PartiqlShape;
@@ -9,7 +11,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 /// A named, typed routine parameter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     name: String,
     ty: PartiqlShape,
@@ -35,7 +37,7 @@ impl Parameter {
 }
 
 /// The signature an overload is declared with: its name and parameter types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutineOverloadSignature {
     name: String,
     parameter_types: Vec<PartiqlShape>,
@@ -74,7 +76,7 @@ impl RoutineOverloadSignature {
 /// A typer or evaluator must apply the flags to scalar function calls only. The same type is the
 /// instance of an aggregation, where the flags are set by default but must be ignored:
 /// `COUNT(NULL)` is not folded to NULL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutineSignature {
     name: String,
     parameters: Vec<Parameter>,
@@ -184,7 +186,7 @@ pub trait AggOverload: Debug + Send + Sync {
 }
 
 /// A scalar function overload with one instance for any arguments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixedFnOverload {
     signature: RoutineOverloadSignature,
     instance: RoutineSignature,
@@ -211,7 +213,7 @@ impl FnOverload for FixedFnOverload {
 }
 
 /// An aggregation overload with one instance for any arguments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixedAggOverload {
     signature: RoutineOverloadSignature,
     instance: RoutineSignature,

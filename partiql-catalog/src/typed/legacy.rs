@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 /// A [`TypedCatalog`] over a [`SharedCatalog`]'s type entries.
 ///
+/// EXPERIMENTAL: may change until the typed-plan RFC settles.
+///
 /// - The catalog's name is the inner catalog's [`crate::catalog::ReadOnlyCatalog::name`].
 /// - A [`SharedCatalog`] has no namespaces, so [`TypedCatalog::resolve_table`] matches only the
 ///   identifier's first part, and the rest is a path into the table. The part is looked up with
